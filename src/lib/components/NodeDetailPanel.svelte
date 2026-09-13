@@ -933,7 +933,12 @@
 
 	.identity-right {
 		align-items: flex-end;
+		gap: var(--space-1);
 		text-align: right;
+		white-space: nowrap;
+		font-size: var(--font-size-small);
+		font-variant-numeric: tabular-nums;
+		color: var(--text-weak);
 	}
 
 	.identity-title {
@@ -950,10 +955,8 @@
 		color: var(--text-strong);
 	}
 
-	/* Same face and size as the identity title. */
+	/* Matches the Turn header's timing: small, tabular, strong time range. */
 	.identity-time {
-		font-size: var(--font-size-large);
-		font-weight: var(--font-weight-medium);
 		color: var(--text-strong);
 	}
 
