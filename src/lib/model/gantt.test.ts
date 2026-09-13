@@ -804,6 +804,6 @@ describe('Gantt #251 — node-column regression', () => {
 	test('nodeShortId survives in the SVG row aria-label', () => {
 		// The header no longer reports the selection; only the SVG aria-label keeps it.
 		expect(gantt).not.toContain('{nodeShortId(selectedNodeId)}');
-		expect(gantt).toContain('aria-label={`${row.node.agent} node ${nodeShortId(row.node.sessionId)}`}');
+		expect(gantt).toContain('aria-label={`${displayAgent(row.node.agent)} node ${nodeShortId(row.node.sessionId)}`}');
 	});
 });

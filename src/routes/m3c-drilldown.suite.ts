@@ -214,7 +214,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 			})
 		);
 		expect(html).toContain('aria-label="Node detail"');
-		expect(html).toContain('build node');
+		expect(html).toContain('main node');
 		expect(html).toContain('root1');
 		expect(html).toContain('orchestrator');
 		expect(html).toContain('completed');
@@ -225,9 +225,10 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 
 	test('marks an open step and shows the empty states for an empty slice', () => {
 		// #230: step number is derived from the loop index (stepNo+1), not step.index.
-		// A single step at array position 0 renders "1 · open" regardless of step.index.
+		// The open state renders as a badge in the Event column, not the `#` cell.
 		const open = renderPanel(makeDetail({ steps: [makeStep({ index: 1, open: true, endedAt: null })] }));
-		expect(open).toContain('1 · open'); // stepNo=0 → row 1
+		expect(open).toContain('>1<'); // stepNo=0 → row 1
+		expect(open).toContain('>open<');
 		expect(open).toContain('running');
 
 		const empty = renderPanel(makeDetail());
@@ -253,7 +254,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 });
 
 describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => {
-	test('renders Retries | Markers | Tracker links | Permissions as a 4-column strip before the Steps table', () => {
+	test('renders Retries on its own row and the other three sections below, before the Steps table', () => {
 		const html = renderPanel(
 			makeDetail({
 				steps: [makeStep({ id: 's1', index: 0 }), makeStep({ id: 's2', index: 1 })],
@@ -265,12 +266,14 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 			}),
 			'https://zt.example'
 		);
-		// One strip carrying exactly four columns.
+		// One merged strip: identity, then Retries, then the three other columns.
 		const classTokens = [...html.matchAll(/class="([^"]*)"/g)].map((match) =>
 			match[1].split(/\s+/)
 		);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-strip')).length).toBe(1);
-		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(4);
+		expect(classTokens.filter((tokens) => tokens.includes('identity')).length).toBe(1);
+		expect(classTokens.filter((tokens) => tokens.includes('summary-row')).length).toBe(3);
+		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(3);
 		// All four headings render, including the empty tracker/permission states.
 		expect(html).toContain('Retries (1)');
 		expect(html).toContain('Markers (1)');
@@ -661,7 +664,7 @@ describe('Gantt SSR — focusable rows and no panel before selection', () => {
 		expect(html).not.toContain('delegation edges');
 		expect(html.split('role="button"').length - 1).toBe(2);
 		expect(html.split('tabindex="0"').length - 1).toBe(2);
-		expect(html).toContain('aria-label="build node root1"');
+		expect(html).toContain('aria-label="main node root1"');
 		expect(html).toContain('aria-label="developer node child1"');
 		// Selection is client state: the panel must not render before a row is chosen.
 		expect(html).not.toContain('aria-label="Node detail"');
@@ -684,8 +687,8 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 		expect(gantt).toContain('function onRowKey(event: KeyboardEvent, nodeId: string)');
 		expect(gantt).toContain("event.key === 'Enter' || event.key === ' '");
 		expect(gantt).toContain('event.preventDefault()');
-		expect(gantt).toContain('toggleNode(nodeId)');
-		expect(gantt).toContain('onclick={() => toggleNode(row.node.sessionId)}');
+		expect(gantt).toContain('selectNode(nodeId)');
+		expect(gantt).toContain('onclick={() => selectNode(row.node.sessionId)}');
 	});
 
 	test('Gantt marks the selected row/node and renders the panel from the selection', () => {
@@ -720,17 +723,20 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 	});
 });
 
-describe('client source wiring — Reason step scroll (task #218, scroll-only in #223)', () => {
+describe('client source wiring — step expand + per-call jump', () => {
 	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
+	const nodeModel = componentSource('../lib/model/node.ts');
 
-	test('the Reason button is wired to focusStep for the step', () => {
-		expect(panel).toContain('class="ui-link-btn reason-link"');
-		expect(panel).toContain('onclick={() => focusStep(step.id)}');
-		expect(panel).toContain('async function focusStep(stepId: string)');
+	test('the step row toggles its children via row-toggle and toggleRow', () => {
+		expect(panel).toContain('class="ui-icon-btn row-toggle"');
+		expect(panel).toContain('aria-expanded={open}');
+		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
-	test('focusStep ticks, then scrolls the first attributed call into view', () => {
-		expect(panel).toContain('const first = stepCalls(stepId)[0];');
+	test('call/action jump helpers tick, then scroll the target into view', () => {
+		expect(panel).toContain('onclick={(event) => focusCall(event, call.id)}');
+		expect(panel).toContain('onclick={(event) => focusAction(event, row.actionId)}');
 		expect(panel).toContain('await tick()');
 		expect(panel).toContain('scrollIntoView({');
 		expect(panel).toContain("block: 'center'");
@@ -760,8 +766,9 @@ describe('client source wiring — Reason step scroll (task #218, scroll-only in
 		expect(panel).not.toContain('class:focused');
 	});
 
-	test('attribution stays the single shared stepCalls predicate', () => {
-		expect(panel).toContain('call.stepId === stepId || step.toolCallIds.includes(call.id)');
+	test('step/tool attribution lives in buildNodeRows, not the panel', () => {
+		expect(nodeModel).toContain('call.stepId === step.id || step.toolCallIds.includes(call.id)');
+		expect(panel).not.toContain('function stepCalls');
 	});
 });
 
@@ -791,7 +798,7 @@ describe('NodeDetailPanel SSR — Steps numbered by list position (task #230)', 
 		const html = renderPanel(
 			makeDetail({ steps: [makeStep({ id: 's1', index: 7 })] })
 		);
-		expect(html).toMatch(/<td class="svelte-[^"]*">1[^<]*<\/td>/);
+		expect(html).toMatch(/<td class="[^"]*col-num[^"]*">1<\/td>/);
 	});
 
 	test('Reason tooltip uses list position, not step.index, for each step', () => {
@@ -858,10 +865,9 @@ describe('NodeDetailPanel SSR — Reason cell: one button per call, no ×N colla
 describe('NodeDetailPanel source — row/call click wiring and copy + clipboard (task #230)', () => {
 	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
 
-	test('the step row onclick scrolls to the first attributed call via focusStep', () => {
-		expect(panel).toContain('onclick={() => focusStep(step.id)}');
-		expect(panel).toContain('async function focusStep(stepId: string)');
-		expect(panel).toContain('const first = stepCalls(stepId)[0]');
+	test('the step row toggles its children via toggleRow', () => {
+		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
 	test('each call button stops propagation and jumps to its own call id', () => {

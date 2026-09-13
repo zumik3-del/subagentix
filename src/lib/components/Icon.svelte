@@ -5,7 +5,7 @@
 	 * stays the tree-only chevron/folder provider.
 	 */
 	interface Props {
-		name: 'gear' | 'menu' | 'close' | 'copy' | 'check';
+		name: 'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' | 'arrow-up';
 		size?: number;
 	}
 
@@ -76,7 +76,7 @@
 		<rect x="5.5" y="5.5" width="8" height="8" rx="1.2" />
 		<path d="M3.6 10.6A1.2 1.2 0 0 1 2.4 9.4V3.6A1.2 1.2 0 0 1 3.6 2.4h5.8a1.2 1.2 0 0 1 1.2 1.2" />
 	</svg>
-{:else}
+{:else if name === 'check'}
 	<svg
 		class="icon"
 		width={size}
@@ -87,6 +87,56 @@
 		focusable="false"
 	>
 		<path d="M6.4 11.6 2.8 8l1.1-1.1 2.5 2.5 5.7-5.7L13.2 4.8z" />
+	</svg>
+{:else if name === 'expand'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.4"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M9 7 13.5 2.5M13.5 2.5h-2.8M13.5 2.5v2.8" />
+		<path d="M7 9 2.5 13.5M2.5 13.5h2.8M2.5 13.5v-2.8" />
+	</svg>
+{:else if name === 'arrow-up'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" />
+	</svg>
+{:else}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.4"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M13.5 2.5 9 7M9 7h2.8M9 7v-2.8" />
+		<path d="M2.5 13.5 7 9M7 9h-2.8M7 9v2.8" />
 	</svg>
 {/if}
 

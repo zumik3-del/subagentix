@@ -751,7 +751,7 @@ describe('SSR #241 — .selected divider removed', () => {
 				const chartWidth = parseChartWidth(page.body);
 				expect(chartWidth).toBe(720);
 
-				const bar = parseNodeBar(page.body, 'build node shortroot');
+				const bar = parseNodeBar(page.body, 'main node shortroot');
 				// INSET=16: first bar anchors to the inset band, not the frame edge.
 				expect(bar.x).toBe(16);
 				// the derived scale maps the full span into the inset band
@@ -777,7 +777,7 @@ describe('SSR #241 — .selected divider removed', () => {
 				const chartWidth = parseChartWidth(page.body);
 				expect(chartWidth).toBe(720);
 
-				const bar = parseNodeBar(page.body, 'build node longroot');
+				const bar = parseNodeBar(page.body, 'main node longroot');
 				// INSET=16: bar starts inside the plot band.
 				expect(bar.x).toBe(16);
 				expect(bar.x + bar.width).toBeCloseTo(chartWidth - 16, 6);

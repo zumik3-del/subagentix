@@ -13,6 +13,7 @@
 	 */
 	import type { Edge, GanttModel, Marker, Node } from '$lib/model/types';
 	import { formatClock, formatCost, formatDuration, formatNumber, tokenBreakdown } from '$lib/model/format';
+	import { displayAgent } from '$lib/model/agent';
 	import { selectNodeDetail } from '$lib/model/node';
 	import NodeDetailPanel from './NodeDetailPanel.svelte';
 	import ScrollView from './ScrollView.svelte';
@@ -88,17 +89,19 @@
 	const availableWidth = $derived(scrollWidth > 0 && labelWidth > 0 ? scrollWidth - labelWidth : 0);
 
 	// --- Selection / hover (local; no navigation) ------------------------------
+	// Selection is sticky: re-selecting the active row keeps the inspector open;
+	// only picking a different row changes it.
 	let selectedNodeId = $state<string | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	const activeNodeId = $derived(hoveredNodeId ?? selectedNodeId);
 
-	function toggleNode(nodeId: string) {
-		selectedNodeId = selectedNodeId === nodeId ? null : nodeId;
+	function selectNode(nodeId: string) {
+		selectedNodeId = nodeId;
 	}
 	function onRowKey(event: KeyboardEvent, nodeId: string) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
-			toggleNode(nodeId);
+			selectNode(nodeId);
 		}
 	}
 
@@ -145,15 +148,15 @@
 		const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
 		const index = rowIndexAtY(event.clientY - rect.top);
 		if (index === null) return;
-		toggleNode(rows[index].sessionId);
+		selectNode(rows[index].sessionId);
 	}
 
 	// --- Derived model / scale -------------------------------------------------
 	const rows = $derived(orderNodes(model.nodes));
 	// Auto-open the top row whenever a new model loads. `$effect` runs only in
-	// the browser (SSR leaves the inspector collapsed), and tracking the model
-	// object — not the selection — means the user closing the inspector is not
-	// undone until the model actually changes.
+	// the browser (SSR leaves the inspector collapsed); tracking the model
+	// object — not the selection — keeps a manual row choice until the model
+	// actually changes.
 	let lastAutoOpenedModel: GanttModel | null = null;
 	$effect(() => {
 		if (model === lastAutoOpenedModel) return;
@@ -641,14 +644,14 @@
 							type="button"
 							class="label-btn"
 							aria-pressed={row.active}
-							onclick={() => toggleNode(row.node.sessionId)}
+							onclick={() => selectNode(row.node.sessionId)}
 							onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
 							onmouseleave={() => (hoveredNodeId = null)}
-							title={`${row.node.agent} · ${row.node.sessionId} · ${row.node.status}`}
+							title={`${displayAgent(row.node.agent)} · ${row.node.sessionId} · ${row.node.status}`}
 						>
 							<span class="who">
 								<span class="ui-swatch" style={`background:${row.agentColor}`}></span>
-								<span class="agent">{row.node.agent}</span>
+								<span class="agent">{displayAgent(row.node.agent)}</span>
 							</span>
 							{#if row.node.modelId}
 								<span class="model">{row.node.modelId}</span>
@@ -740,7 +743,7 @@
 					{#if row.active}
 						<rect
 							class="row-accent"
-							x="0"
+							x={chartWidth - 2}
 							y={row.top}
 							width="2"
 							height={ROW_H}
@@ -807,8 +810,8 @@
 						opacity={row.dimmed ? 0.35 : 1}
 						role="button"
 						tabindex="0"
-						aria-label={`${row.node.agent} node ${nodeShortId(row.node.sessionId)}`}
-						onclick={() => toggleNode(row.node.sessionId)}
+						aria-label={`${displayAgent(row.node.agent)} node ${nodeShortId(row.node.sessionId)}`}
+						onclick={() => selectNode(row.node.sessionId)}
 						onkeydown={(event) => onRowKey(event, row.node.sessionId)}
 						onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
 						onmouseleave={() => (hoveredNodeId = null)}
@@ -828,7 +831,7 @@
 							class:bar-running={row.running}
 						>
 							<title>
-								{`${row.node.agent} · ${row.node.sessionId} · ${row.node.status} · ${formatDuration(
+								{`${displayAgent(row.node.agent)} · ${row.node.sessionId} · ${row.node.status} · ${formatDuration(
 									row.node.startedAt,
 									row.node.endedAt
 								)} · ${formatCost(row.node.usage.cost)}${
@@ -967,7 +970,6 @@
 					{ziptaskEnabled}
 					{ziptaskBaseUrl}
 					onOpenTask={openTask}
-					onClose={() => (selectedNodeId = null)}
 				/>
 			</aside>
 		{/if}
@@ -980,7 +982,7 @@
 
 <style>
 	.gantt {
-		margin-top: var(--space-4);
+		margin-top: 0;
 		/*
 		 * Running hatch on the dark chart: a dark amber base (not the near-white
 		 * `--surface-warning-weak`) so the amber stripes stay legible against the

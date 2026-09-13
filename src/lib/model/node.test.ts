@@ -208,9 +208,15 @@ describe('selectNodeDetail()', () => {
 });
 
 describe('buildNodeRows()', () => {
-	test('merges steps and non-tool actions in chronological order', () => {
-		const step = makeStep({ id: 's1', nodeId: 'root', startedAt: 200 });
-		const text = makeAction({ id: 'a1', nodeId: 'root', kind: 'text', at: 100, summary: 'hello' });
+	test('builds a start marker, numbered steps, and nests tool calls + actions', () => {
+		const s1 = makeStep({
+			id: 's1',
+			nodeId: 'root',
+			startedAt: 1_000,
+			endedAt: 1_100,
+			toolCallIds: ['t1']
+		});
+		const text = makeAction({ id: 'a1', nodeId: 'root', kind: 'text', at: 1_050, summary: 'hello' });
 		const patch = makeAction({
 			id: 'a2',
 			nodeId: 'root',
@@ -219,48 +225,90 @@ describe('buildNodeRows()', () => {
 			label: 'patch',
 			summary: '/a.ts, /b.ts'
 		});
+		const call = makeTool({ id: 't1', nodeId: 'root', startedAt: 1_000, stepId: null });
 		const model = makeModel({
-			nodes: [makeNode({ sessionId: 'root' })],
-			steps: [step],
-			toolCalls: [makeTool({ id: 't1', nodeId: 'root' })],
+			nodes: [makeNode({ sessionId: 'root', startedAt: 1_000, endedAt: 2_000 })],
+			steps: [s1],
+			toolCalls: [call],
 			actions: [text, patch]
 		});
 		const detail = selectNodeDetail(model, 'root');
 		expect(detail).not.toBeNull();
 		const rows = buildNodeRows(detail!);
-		expect(rows.map((row) => row.key)).toEqual(['text:a1', 'step:s1', 'patch:a2']);
-		expect(rows[1].step).toBe(step);
-		expect(rows[1].stepIndex).toBe(0);
-		expect(rows[0].summary).toBe('hello');
-		// Tool calls are not separate rows; they stay attributed to their step.
-		expect(rows.map((row) => row.kind)).toEqual(['text', 'step', 'patch']);
+		// `patch` precedes the first step -> top-level; the start marker leads the
+		// step at the same timestamp; the tool + text nest under the step.
+		expect(rows.map((row) => row.key)).toEqual(['patch:a2', 'start', 'step:s1']);
+		expect(rows[1].kind).toBe('start');
+		expect(rows[2].step).toBe(s1);
+		expect(rows[2].stepIndex).toBe(0);
+		// Tool attribution via step.toolCallIds (call.stepId is null).
+		expect(rows[2].children.map((child) => child.key)).toEqual(['tool:t1', 'text:a1']);
+		expect(rows[2].children[0].call).toBe(call);
+		expect(rows[2].children[1].summary).toBe('hello');
+	});
+
+	test('keeps a user text as a top-level prompt and compaction top-level', () => {
+		const prompt = makeAction({
+			id: 'a0',
+			nodeId: 'root',
+			kind: 'text',
+			at: 900,
+			role: 'user',
+			summary: 'do the thing'
+		});
+		const compaction = makeAction({ id: 'c1', nodeId: 'root', kind: 'compaction', at: 1_200 });
+		const model = makeModel({
+			nodes: [makeNode({ sessionId: 'root', startedAt: 1_000, endedAt: 1_500 })],
+			steps: [makeStep({ id: 's1', nodeId: 'root', startedAt: 1_000, endedAt: 1_100 })],
+			actions: [prompt, compaction]
+		});
+		const rows = buildNodeRows(selectNodeDetail(model, 'root')!);
+		expect(rows.map((row) => row.key)).toEqual(['text:a0', 'start', 'step:s1', 'compaction:c1']);
+		expect(rows[0].kind).toBe('prompt');
+		expect(rows[0].summary).toBe('do the thing');
+		expect(rows[3].kind).toBe('compaction');
 	});
 
 	test('keeps each step index even when steps and actions interleave', () => {
-		const first = makeStep({ id: 's0', nodeId: 'root', startedAt: 100 });
-		const second = makeStep({ id: 's1', nodeId: 'root', startedAt: 300 });
+		const first = makeStep({ id: 's0', nodeId: 'root', startedAt: 100, endedAt: 150 });
+		const second = makeStep({ id: 's1', nodeId: 'root', startedAt: 300, endedAt: 350 });
 		const action = makeAction({ id: 'a', nodeId: 'root', kind: 'reasoning', at: 200 });
 		const model = makeModel({
-			nodes: [makeNode({ sessionId: 'root' })],
+			nodes: [makeNode({ sessionId: 'root', startedAt: 0, endedAt: 400 })],
 			steps: [first, second],
 			actions: [action]
 		});
 		const rows = buildNodeRows(selectNodeDetail(model, 'root')!);
-		expect(rows.map((row) => row.key)).toEqual(['step:s0', 'reasoning:a', 'step:s1']);
-		expect(rows[0].stepIndex).toBe(0);
+		expect(rows.map((row) => row.key)).toEqual(['start', 'step:s0', 'step:s1']);
+		expect(rows[1].stepIndex).toBe(0);
 		expect(rows[2].stepIndex).toBe(1);
+		// The 200ms reasoning action is owned by the step started at 100.
+		expect(rows[1].children.map((child) => child.key)).toEqual(['reasoning:a']);
+		expect(rows[2].children).toEqual([]);
 	});
 
 	test('exposes the action id as the detail anchor for action rows', () => {
 		const action = makeAction({ id: 'a7', nodeId: 'root', kind: 'text', at: 10 });
 		const model = makeModel({
-			nodes: [makeNode({ sessionId: 'root' })],
-			steps: [makeStep({ id: 's0', nodeId: 'root' })],
+			nodes: [makeNode({ sessionId: 'root', startedAt: 100, endedAt: 200 })],
+			steps: [makeStep({ id: 's0', nodeId: 'root', startedAt: 100, endedAt: 150 })],
 			actions: [action]
 		});
 		const rows = buildNodeRows(selectNodeDetail(model, 'root')!);
 		expect(rows.find((row) => row.kind === 'text')?.actionId).toBe('a7');
 		expect(rows.find((row) => row.kind === 'step')?.actionId).toBeNull();
+	});
+
+	test('falls back to a top-level tool row for an unattributed call', () => {
+		const call = makeTool({ id: 'orphan', nodeId: 'root', startedAt: 1_200 });
+		const model = makeModel({
+			nodes: [makeNode({ sessionId: 'root', startedAt: 1_000, endedAt: 1_500 })],
+			steps: [makeStep({ id: 's0', nodeId: 'root', startedAt: 1_000, endedAt: 1_100 })],
+			toolCalls: [call]
+		});
+		const rows = buildNodeRows(selectNodeDetail(model, 'root')!);
+		expect(rows.map((row) => row.key)).toEqual(['start', 'step:s0', 'tool:orphan']);
+		expect(rows[2].call).toBe(call);
 	});
 });
 

@@ -159,6 +159,11 @@ export interface Action {
 	label: string;
 	/** Excerpt / file list / mime / source, depending on `kind`. */
 	summary: string;
+	/**
+	 * Role of the owning message (`user`/`assistant`) when known, so the UI can
+	 * mark a user message's `text` as the prompt. Optional for partial DTOs.
+	 */
+	role?: string | null;
 }
 
 /**

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import Gantt from '$lib/components/Gantt.svelte';
+	import { displayAgent } from '$lib/model/agent';
 	import {
 		formatClock,
 		formatCost,
@@ -18,7 +19,7 @@
 		<div class="head-main">
 			<h1>{data.session.title || data.session.id}</h1>
 			<div class="meta">
-				<span class="ui-chip">{data.session.agent}</span>
+				<span class="ui-chip">{displayAgent(data.session.agent)}</span>
 				<span class="dir" title={data.session.directory}>{data.session.directory}</span>
 				<span class="child-count">
 					{data.session.childCount} child session{data.session.childCount === 1 ? '' : 's'}
@@ -66,7 +67,7 @@
 <style>
 	main {
 		width: 100%;
-		padding: var(--space-5) var(--space-6) var(--space-12);
+		padding: var(--space-4) var(--space-4) var(--space-12);
 	}
 
 	header {
@@ -78,7 +79,7 @@
 		border: 1px solid var(--border-weak-base);
 		border-radius: var(--radius-lg);
 		padding: var(--space-4);
-		margin-bottom: var(--space-5);
+		margin-bottom: var(--space-4);
 	}
 
 	.head-main {
@@ -153,9 +154,10 @@
 
 	.selected {
 		/* No divider above the chart (task #241): the header card and the Gantt
-		   stay separated by whitespace only. */
-		margin-top: var(--space-5);
-		padding-top: var(--space-4);
+		   stay separated by whitespace only. The gap is owned by `header`'s
+		   `margin-bottom`. */
+		margin-top: 0;
+		padding-top: 0;
 	}
 
 	.empty {

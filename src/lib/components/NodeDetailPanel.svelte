@@ -11,13 +11,7 @@
 	 */
 	import { onDestroy, tick } from 'svelte';
 	import type { NodeDetail, Step, ToolCall } from '$lib/model/types';
-	import {
-		formatClock,
-		formatCost,
-		formatDuration,
-		formatNumber,
-		tokenBreakdown
-	} from '$lib/model/format';
+	import { formatClock, formatCost, formatDuration, formatNumber, tokenBreakdown } from '$lib/model/format';
 	import {
 		buildDetailEntries,
 		buildNodeRows,
@@ -28,16 +22,17 @@
 		truncateText
 	} from '$lib/model/node';
 	import type { NodeRow, StepToolSummary } from '$lib/model/node';
+	import { displayAgent } from '$lib/model/agent';
 	import { TOKEN_LABELS } from '$lib/model/token';
 	import Icon from './Icon.svelte';
+	import TreeIcon from './TreeIcon.svelte';
 	import ScrollView from './ScrollView.svelte';
 
 	let {
 		detail,
 		ziptaskEnabled = true,
 		ziptaskBaseUrl = null,
-		onOpenTask,
-		onClose
+		onOpenTask
 	}: {
 		detail: NodeDetail;
 		/** Feature toggle: when false the tracker column is hidden. */
@@ -45,7 +40,6 @@
 		ziptaskBaseUrl?: string | null;
 		/** Open the task-detail modal for an inferred ref (owned by `Gantt`). */
 		onOpenTask?: (ref: string) => void;
-		onClose?: () => void;
 	} = $props();
 
 	/** Character budget for a tool input/output snippet. */
@@ -61,7 +55,7 @@
 		TOKEN_LABELS.total
 	];
 
-	/** Merged Steps & actions table: row filters + free-text search (client-side). */
+	/** Steps & actions timeline: row filters + free-text search (client-side). */
 	type RowFilter = 'all' | 'step' | 'tool' | 'text' | 'reasoning' | 'files' | 'misc';
 	const ROW_FILTERS: ReadonlyArray<{ value: RowFilter; label: string }> = [
 		{ value: 'all', label: 'All' },
@@ -77,11 +71,18 @@
 	let actionSearch = $state('');
 
 	let showRaw = $state(false);
-	/** Expanded long text blobs, keyed by `<callId>:<field>`. */
+	/** Expanded rows/blobs, keyed by step row key or `<callId>:<field>`. */
 	let expanded = $state<Record<string, boolean>>({});
 	/** Tool-call id whose copy just succeeded (drives the brief check-icon feedback). */
 	let copiedCallId = $state<string | null>(null);
 	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+	/** Details block just jumped to; drives the temporary grey flash. */
+	let flashId = $state<string | null>(null);
+	let flashTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Steps & actions table element, watched to reveal the floating back button. */
+	let tableEl: HTMLElement | null = $state(null);
+	let showBackToTable = $state(false);
 
 	const retryGroups = $derived(groupToolRetries(detail.toolCalls));
 	// Prefer the service-computed node refs (tool calls + `task` edges it
@@ -93,39 +94,94 @@
 	);
 	const refBase = $derived(ziptaskBaseUrl ? ziptaskBaseUrl.replace(/\/+$/, '') : null);
 
-	// Merged Steps & actions table: each LLM step (with its tool-call Reason
-	// links) plus every non-tool action, ordered chronologically. Filters: row
-	// kind, permission-only, free-text search.
+	// Hierarchical Steps & actions timeline: a start marker, the numbered LLM
+	// steps, and (nested, collapsed by default) each step's tool calls and
+	// non-tool actions. Filters: row kind, permission-only, free-text search.
 	const rows = $derived(buildNodeRows(detail));
+	const stepCount = $derived(rows.filter((row) => row.kind === 'step').length);
+	const itemCount = $derived(
+		rows.reduce(
+			(count, row) => count + row.children.length + (row.kind === 'step' ? 0 : 1),
+			0
+		)
+	);
 	const permissionRows = $derived(
 		detail.toolCalls.filter((call) => call.permission).map((call) => call.permission!)
 	);
-	const visibleRows = $derived.by((): NodeRow[] => {
+	/** Whether the node recorded anything at all (drives the empty state). */
+	const hasContent = $derived(
+		stepCount > 0 ||
+			detail.toolCalls.length > 0 ||
+			(detail.actions !== undefined && detail.actions.length > 0)
+	);
+	/** When a filter/search is active, matching steps expand so hits are visible. */
+	const forceOpen = $derived(actionSearch.trim() !== '' || kindFilter !== 'all');
+	interface VisibleRow {
+		row: NodeRow;
+		children: NodeRow[];
+	}
+	function kindMatches(row: NodeRow): boolean {
+		switch (kindFilter) {
+			case 'all':
+				return true;
+			case 'step':
+				return row.kind === 'step';
+			case 'tool':
+				return row.kind === 'tool';
+			case 'files':
+				return row.kind === 'file' || row.kind === 'patch';
+			case 'misc':
+				return (
+					row.kind === 'agent' ||
+					row.kind === 'compaction' ||
+					row.kind === 'start' ||
+					row.kind === 'prompt'
+				);
+			default:
+				return row.kind === kindFilter;
+		}
+	}
+	function permissionAllows(row: NodeRow): boolean {
+		return !(permissionOnly && row.kind === 'tool' && !row.call?.permission);
+	}
+	function leafMatches(row: NodeRow, query: string): boolean {
+		return kindMatches(row) && permissionAllows(row) && (query === '' || searchText(row).includes(query));
+	}
+	function searchText(row: NodeRow): string {
+		return `${row.label} ${row.summary}`.toLowerCase();
+	}
+	const visibleRows = $derived.by((): VisibleRow[] => {
 		const query = actionSearch.trim().toLowerCase();
-		return rows.filter((row) => {
-			const step = row.step;
-			const calls = step ? stepCalls(step.id) : [];
-			if (permissionOnly && !calls.some((call) => call.permission)) return false;
-			const matchesKind =
-				kindFilter === 'all'
-					? true
-					: kindFilter === 'step'
-						? row.kind === 'step'
-						: kindFilter === 'tool'
-							? row.kind === 'step' && calls.length > 0
-							: kindFilter === 'files'
-								? row.kind === 'file' || row.kind === 'patch'
-								: kindFilter === 'misc'
-									? row.kind === 'agent' || row.kind === 'compaction'
-									: row.kind === kindFilter;
-			if (!matchesKind) return false;
-			if (query === '') return true;
-			const text = step
-				? `${step.reason ?? ''} ${calls.map((call) => call.name).join(' ')}`
-				: `${row.label} ${row.summary}`;
-			return text.toLowerCase().includes(query);
-		});
+		const out: VisibleRow[] = [];
+		for (const row of rows) {
+			if (row.kind === 'step') {
+				const children = row.children.filter((child) => leafMatches(child, query));
+				const showStep =
+					(kindFilter === 'all' || kindFilter === 'step') && query === '' && !permissionOnly;
+				if (children.length > 0 || showStep) out.push({ row, children });
+			} else if (leafMatches(row, query)) {
+				out.push({ row, children: [] });
+			}
+		}
+		return out;
 	});
+	function isOpen(row: NodeRow): boolean {
+		return expanded[row.key] === true || forceOpen;
+	}
+	function toggleRow(key: string) {
+		expanded[key] = !expanded[key];
+	}
+	const stepKeys = $derived(rows.filter((row) => row.kind === 'step').map((row) => row.key));
+	const allExpanded = $derived(
+		stepKeys.length > 0 && stepKeys.every((key) => expanded[key] === true)
+	);
+	function toggleAll() {
+		if (allExpanded) {
+			expanded = {};
+		} else {
+			for (const key of stepKeys) expanded[key] = true;
+		}
+	}
 
 	// Unified details list below the table: tool calls + non-tool actions,
 	// chronologically, each with a stable DOM anchor the table rows scroll to.
@@ -154,22 +210,9 @@
 		return value ?? detail.node.startedAt;
 	}
 	/**
-	 * Calls attributed to a step: explicit `stepId` match or the step's id list,
-	 * sorted by `startedAt` (unknown last) then id. This is the single
-	 * attribution source for both the Reason cell summary and the jump target.
+	 * Stable DOM id for a tool-call row, used as the jump target. Step/tool
+	 * child attribution lives in `node.ts` `buildNodeRows`.
 	 */
-	function stepCalls(stepId: string): ToolCall[] {
-		const step = detail.steps.find((candidate) => candidate.id === stepId);
-		if (!step) return [];
-		return detail.toolCalls
-			.filter((call) => call.stepId === stepId || step.toolCallIds.includes(call.id))
-			.sort(
-				(a, b) =>
-					(a.startedAt ?? Number.POSITIVE_INFINITY) -
-						(b.startedAt ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id)
-			);
-	}
-	/** Stable DOM id for a tool-call row, used as the jump target. */
 	function callDomId(id: string): string {
 		return `tool-call-${id}`;
 	}
@@ -182,9 +225,22 @@
 	}
 	/** Scroll an element with `id` into view, honouring reduced-motion. */
 	function scrollIntoViewId(id: string) {
+		flashId = id;
+		if (flashTimer) clearTimeout(flashTimer);
+		flashTimer = setTimeout(() => {
+			flashId = null;
+			flashTimer = null;
+		}, 2000);
 		document.getElementById(id)?.scrollIntoView({
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
 			block: 'center'
+		});
+	}
+	/** Jump back to the top of the Steps & actions table. */
+	function backToTable() {
+		tableEl?.scrollIntoView({
+			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+			block: 'start'
 		});
 	}
 	/** Scroll a tool-call block into view. */
@@ -198,12 +254,6 @@
 	/** Scroll an action row's detail card into view. */
 	function scrollToAction(id: string | null) {
 		if (id) scrollIntoViewId(actionDomId(id));
-	}
-	/** Scroll to a step's earliest attributed tool call (no selection styling). */
-	async function focusStep(stepId: string) {
-		const first = stepCalls(stepId)[0];
-		await tick();
-		if (first) scrollCallIntoView(first.id);
 	}
 	/** Per-call jump: stop the row click from also firing, then scroll to that call. */
 	async function focusCall(event: MouseEvent, id: string) {
@@ -233,122 +283,226 @@
 	}
 	onDestroy(() => {
 		if (copiedTimer) clearTimeout(copiedTimer);
+		if (flashTimer) clearTimeout(flashTimer);
 	});
+
+	// Reveal the floating "back to table" button once the Steps & actions
+	// table has scrolled off the top (i.e. the user is down in Details),
+	// and hide it again as soon as the table is back in view.
+	$effect(() => {
+		const el = tableEl;
+		if (!el) {
+			showBackToTable = false;
+			return;
+		}
+		const update = () => {
+			showBackToTable = el.getBoundingClientRect().bottom < 0;
+		};
+		update();
+		window.addEventListener('scroll', update, { passive: true });
+		window.addEventListener('resize', update);
+		return () => {
+			window.removeEventListener('scroll', update);
+			window.removeEventListener('resize', update);
+		};
+	});
+
+	/**
+	 * Keep a summary row exactly one line tall: items that no longer fit are
+	 * covered by an absolutely-positioned "+N ещё" counter whose tooltip lists
+	 * them. Re-measured on resize and whenever `signal` (the node detail)
+	 * changes, so the panel height stays stable when switching nodes.
+	 */
+	function clampLine(node: HTMLElement, signal: unknown) {
+		void signal;
+		let frame = 0;
+		const measure = () => {
+			frame = 0;
+			const counter = node.querySelector<HTMLElement>('[data-overflow-counter]');
+			const items = Array.from(node.querySelectorAll<HTMLElement>('[data-overflow-item]'));
+			if (!counter || items.length === 0) return;
+			const right = node.getBoundingClientRect().right;
+			let visible = items.length;
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].getBoundingClientRect().right > right + 0.5) {
+					visible = i;
+					break;
+				}
+			}
+			if (visible >= items.length) {
+				counter.hidden = true;
+				return;
+			}
+			const limit = right - (counter.offsetWidth || 64) - 4;
+			let fit = 0;
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].getBoundingClientRect().right <= limit) fit++;
+				else break;
+			}
+			const hidden = items.length - fit;
+			if (hidden <= 0) {
+				counter.hidden = true;
+				return;
+			}
+			counter.hidden = false;
+			counter.textContent = `+${hidden} ещё`;
+			counter.title = items
+				.slice(fit)
+				.map((el) => el.textContent?.trim() ?? '')
+				.filter(Boolean)
+				.join('\n');
+		};
+		const schedule = () => {
+			if (frame) cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(measure);
+		};
+		schedule();
+		const observer = new ResizeObserver(schedule);
+		observer.observe(node);
+		return {
+			update: schedule,
+			destroy() {
+				if (frame) cancelAnimationFrame(frame);
+				observer.disconnect();
+			}
+		};
+	}
 </script>
 
 <section class="panel" aria-label="Node detail">
-	<header class="panel-head">
-		<div>
-			<h3>{detail.node.agent} node</h3>
-			<p class="muted mono">{detail.node.sessionId}</p>
-		</div>
-		<div class="meta">
-			<span class="ui-chip">{detail.node.kind}</span>
-			<span class="ui-chip">{detail.node.status}</span>
-			<span class="ui-chip">{detail.node.modelId ?? 'unknown model'}</span>
-			<span class="muted">
-				{formatClock(detail.node.startedAt)} →
-				{detail.node.endedAt === null ? 'running' : formatClock(detail.node.endedAt)}
-				· {formatDuration(detail.node.startedAt, detail.node.endedAt)}
-			</span>
-			<span title="Cost (gross)">{formatCost(detail.node.usage.cost)}</span>
-		</div>
-		<button type="button" class="ui-btn" onclick={() => onClose?.()} aria-label="Close node detail">
-			Close
-		</button>
-	</header>
-
-	<section class="block" aria-label="Node summary">
+	<section aria-label="Node summary">
 		<div class="summary-strip">
-			<div class="summary-col">
-				<h4>Retries ({retryGroups.length})</h4>
-				{#if retryGroups.length === 0}
-					<p class="empty">No retries.</p>
-				{:else}
-					<ul class="retries">
-						{#each retryGroups as group (group.name)}
-							<li class:has-error={group.hasError}>
-								<span class="name mono">{group.name}</span>
-								<span class="muted">
-									{group.calls.length} invocations · {group.retryCount} retr{group.retryCount === 1 ? 'y' : 'ies'}{group.hasError
-										? ' · includes error'
-										: ''}
-								</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
+			<div class="summary-row identity">
+				<div class="identity-left">
+					<div class="identity-title">
+						<h3>{displayAgent(detail.node.agent)} node</h3>
+						<span class="ui-chip">{detail.node.kind}</span>
+						<span class="ui-chip">{detail.node.status}</span>
+						<span class="ui-chip">{detail.node.modelId ?? 'unknown model'}</span>
+					</div>
+					<p class="muted mono">{detail.node.sessionId}</p>
+				</div>
+				<div class="identity-right">
+					<span class="identity-time">
+						{formatClock(detail.node.startedAt)} →
+						{detail.node.endedAt === null ? 'running' : formatClock(detail.node.endedAt)}
+					</span>
+					<span class="muted" title="Cost (gross)">
+						{formatDuration(detail.node.startedAt, detail.node.endedAt)} · {formatCost(
+							detail.node.usage.cost
+						)}
+					</span>
+				</div>
 			</div>
-			<div class="summary-col">
-				<h4>Markers ({detail.markers.length})</h4>
-				{#if detail.markers.length === 0}
-					<p class="empty">No compaction or removed-content markers.</p>
-				{:else}
-					<ul class="markers">
-						{#each detail.markers as marker, index (marker.type + index)}
-							<li>
-								<span class={`ui-badge ui-badge--${marker.type}`}>{marker.type}</span>
-								<span class="muted">
-									{marker.type === 'compaction'
-										? marker.at === null
-											? 'context summarization point'
-											: `context summarization at ${formatClock(marker.at)}`
-										: 'removed content (no timestamp)'}
-								</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-			{#if ziptaskEnabled}
-				<div class="summary-col">
-					<h4>Tracker links <span class="muted">(inferred)</span></h4>
-					{#if trackerRefs.length === 0}
-						<p class="empty">No tracker link.</p>
-					{:else if refBase === null}
-						<p class="empty">ZIPTASK_BASE_URL is not configured.</p>
+			<div class="summary-row">
+				<div class="line" use:clampLine={detail}>
+					<h4 class="line-label">Retries ({retryGroups.length})</h4>
+					{#if retryGroups.length === 0}
+						<span class="empty">No retries.</span>
 					{:else}
-						<ul class="chips">
-							{#each trackerRefs as ref (ref)}
-								<li>
-									<button type="button" class="ui-chip ui-chip--link" onclick={() => onOpenTask?.(ref)}>
-										Task #{ref}
-									</button>
+						<ul class="line-list">
+							{#each retryGroups as group (group.name)}
+								<li class="line-item" data-overflow-item class:has-error={group.hasError}>
+									<span class="name mono">{group.name}</span>
+									<span class="muted">
+										{group.calls.length} invocations · {group.retryCount} retr{group.retryCount === 1
+											? 'y'
+											: 'ies'}{group.hasError ? ' · includes error' : ''}
+									</span>
 								</li>
 							{/each}
 						</ul>
+						<span class="line-more" data-overflow-counter hidden></span>
 					{/if}
 				</div>
-			{/if}
-			<div class="summary-col">
-				<h4>Permissions ({permissionRows.length})</h4>
-				{#if permissionRows.length === 0}
-					<p class="empty">No permission prompts recorded.</p>
-				{:else}
-					<ul class="markers">
-						{#each permissionRows as permission (permission.requestId)}
-							<li>
-								<span
-									class={`ui-badge ${permission.reply === 'reject' ? 'ui-badge--removed' : 'ui-badge--perm'}`}
-								>
-									{permission.reply ?? 'pending'}
-								</span>
-								<span class="muted">
-									{permission.permission || 'permission'}{permission.patterns.length
-										? ` · ${permission.patterns.join(', ')}`
-										: ''}
-								</span>
-							</li>
-						{/each}
-					</ul>
+			</div>
+			<div class="summary-row summary-row--rest">
+				<section class="summary-col">
+					<div class="line" use:clampLine={detail}>
+						<h4 class="line-label">Markers ({detail.markers.length})</h4>
+						{#if detail.markers.length === 0}
+							<span class="empty">No compaction or removed-content markers.</span>
+						{:else}
+							<ul class="line-list">
+								{#each detail.markers as marker, index (marker.type + index)}
+									<li class="line-item" data-overflow-item>
+										<span class={`ui-badge ui-badge--${marker.type}`}>{marker.type}</span>
+										<span class="muted">
+											{marker.type === 'compaction'
+												? marker.at === null
+													? 'context summarization point'
+													: `context summarization at ${formatClock(marker.at)}`
+												: 'removed content (no timestamp)'}
+										</span>
+									</li>
+								{/each}
+							</ul>
+							<span class="line-more" data-overflow-counter hidden></span>
+						{/if}
+					</div>
+				</section>
+				{#if ziptaskEnabled}
+					<section class="summary-col">
+						<div class="line" use:clampLine={detail}>
+							<h4 class="line-label">
+								Tracker links <span class="muted">(inferred)</span>
+							</h4>
+							{#if trackerRefs.length === 0}
+								<span class="empty">No tracker link.</span>
+							{:else if refBase === null}
+								<span class="empty">ZIPTASK_BASE_URL is not configured.</span>
+							{:else}
+								<ul class="line-list">
+									{#each trackerRefs as ref (ref)}
+										<li class="line-item" data-overflow-item>
+											<button
+												type="button"
+												class="ui-chip ui-chip--link"
+												onclick={() => onOpenTask?.(ref)}
+											>
+												Task #{ref}
+											</button>
+										</li>
+									{/each}
+								</ul>
+								<span class="line-more" data-overflow-counter hidden></span>
+							{/if}
+						</div>
+					</section>
 				{/if}
+				<section class="summary-col">
+					<div class="line" use:clampLine={detail}>
+						<h4 class="line-label">Permissions ({permissionRows.length})</h4>
+						{#if permissionRows.length === 0}
+							<span class="empty">No permission prompts recorded.</span>
+						{:else}
+							<ul class="line-list">
+								{#each permissionRows as permission (permission.requestId)}
+									<li class="line-item" data-overflow-item>
+										<span
+											class={`ui-badge ${permission.reply === 'reject' ? 'ui-badge--removed' : 'ui-badge--perm'}`}
+										>
+											{permission.reply ?? 'pending'}
+										</span>
+										<span class="muted">
+											{permission.permission || 'permission'}{permission.patterns.length
+												? ` · ${permission.patterns.join(', ')}`
+												: ''}
+										</span>
+									</li>
+								{/each}
+							</ul>
+							<span class="line-more" data-overflow-counter hidden></span>
+						{/if}
+					</div>
+				</section>
 			</div>
 		</div>
 	</section>
 
 	<section class="block">
 		<div class="actions-head">
-			<h4>Steps &amp; actions ({visibleRows.length}/{rows.length})</h4>
+			<h4>Steps &amp; actions ({stepCount} steps · {itemCount} items)</h4>
 			<input
 				class="ui-input search"
 				type="search"
@@ -358,6 +512,16 @@
 			/>
 		</div>
 		<div class="filters" role="group" aria-label="Row type filter">
+			<button
+				type="button"
+				class="ui-btn toggle-all"
+				aria-pressed={allExpanded}
+				aria-label={allExpanded ? 'Collapse all steps' : 'Expand all steps'}
+				title={allExpanded ? 'Collapse all' : 'Expand all'}
+				onclick={toggleAll}
+			>
+				<Icon name={allExpanded ? 'collapse' : 'expand'} size={14} />
+			</button>
 			{#each ROW_FILTERS as filter (filter.value)}
 				<button
 					type="button"
@@ -377,106 +541,194 @@
 				Permission
 			</button>
 		</div>
-		{#if rows.length === 0}
+		{#if !hasContent}
 			<p class="empty">No steps or actions recorded for this node.</p>
 		{:else if visibleRows.length === 0}
 			<p class="empty">No rows match the current filter.</p>
 		{:else}
-			<div class="table-scroll">
+			<div class="table-scroll" bind:this={tableEl}>
 				<ScrollView orientation="horizontal">
 				<table>
 					<thead>
 						<tr>
-							<th scope="col">#</th>
-							<th scope="col">Reason / action</th>
-							<th scope="col">Start</th>
-							<th scope="col">End</th>
-							<th scope="col">Duration</th>
+							<th scope="col" class="col-num">#</th>
+							<th scope="col" class="col-event">Event / action</th>
+							<th scope="col" class="col-time">Start</th>
+							<th scope="col" class="col-time">End</th>
+							<th scope="col" class="col-time">Duration</th>
 							{#each usageColumns as label (label)}
-								<th scope="col" class="num">{label}</th>
+								<th scope="col" class="num col-token">{label}</th>
 							{/each}
-							<th scope="col" class="num">Cost</th>
+							<th scope="col" class="num col-cost">Cost</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each visibleRows as row (row.key)}
-							{@const step = row.step}
-							{#if step && row.stepIndex !== null}
+						{#each visibleRows as { row, children } (row.key)}
+							{#if row.kind === 'step' && row.step && row.stepIndex !== null}
+								{@const step = row.step}
+								{@const summary = summarizeStepTools(
+									children.filter((child) => child.kind === 'tool').map((child) => child.call!)
+								)}
+								{@const open = isOpen(row)}
 								{@const cells = tokenBreakdown(step.usage)}
-								{@const calls = stepCalls(step.id)}
-								{@const summary = summarizeStepTools(calls)}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-								<tr class="step-row" onclick={() => focusStep(step.id)}>
-									<td>{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
-									<td>
-										{#if summary.count === 0}
-											—
-										{:else}
-											<span class="reason-list" title={reasonTitle(row.stepIndex, step, summary)}>
-												{#each calls as call, callNo (call.id)}
-													{#if callNo > 0}<span class="reason-sep">, </span>{/if}
-													<button
-														type="button"
-														class="ui-link-btn reason-link"
-														title={`${call.name} · ${call.status}`}
-														aria-label={`Jump to ${call.name} call`}
-														onclick={(event) => focusCall(event, call.id)}
-													>
-														{call.name}
-													</button>
-													{#if call.permission}
-														<span
-															class="ui-badge ui-badge--perm"
-															title={`Permission ${call.permission.permission}${
-																call.permission.patterns.length
-																	? ` · ${call.permission.patterns.join(', ')}`
-																	: ''
-															}`}
-														>
-															ask{call.permission.reply ? `: ${call.permission.reply}` : ''}
-														</span>
-													{/if}
-												{/each}
+								<tr class="step-row" onclick={() => toggleRow(row.key)}>
+									<td class="col-num">{row.stepIndex + 1}</td>
+									<td class="col-event">
+										<span class="cell-flex">
+											<span class="row-icon">
+												<button
+													type="button"
+													class="ui-icon-btn row-toggle"
+													aria-expanded={open}
+													aria-label={open ? 'Collapse step' : 'Expand step'}
+													onclick={(event) => {
+														event.stopPropagation();
+														toggleRow(row.key);
+													}}
+												>
+													<TreeIcon name="chevron" expanded={open} size={14} />
+												</button>
 											</span>
+											<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
+												{step.reason ?? 'step'}
+											</span>
+											{#if step.open}
+												<span class="ui-badge">open</span>
+											{/if}
+											{#if summary.count > 0}
+												<span class="muted">{summary.count} tool{summary.count === 1 ? '' : 's'}</span>
+											{/if}
 											{#if summary.errorCount > 0}
 												<span class="reason-err">· {summary.errorCount} err</span>
 											{/if}
-										{/if}
+										</span>
 									</td>
-									<td class="mono">{formatClock(step.startedAt)}</td>
-									<td class="mono">
+									<td class="mono col-time">{formatClock(step.startedAt)}</td>
+									<td class="mono col-time">
 										{step.endedAt === null ? 'running' : formatClock(step.endedAt)}
 									</td>
-									<td>{formatDuration(step.startedAt, step.endedAt)}</td>
+									<td class="col-time">{formatDuration(step.startedAt, step.endedAt)}</td>
 									{#each cells as cell (cell.label)}
-										<td class="num">{formatNumber(cell.value)}</td>
+										<td class="num col-token">{formatNumber(cell.value)}</td>
 									{/each}
-									<td class="num">{formatCost(step.usage.cost)}</td>
+									<td class="num col-cost">{formatCost(step.usage.cost)}</td>
 								</tr>
+								{#each children as child (child.key)}
+									<tr class={`child-row child-${child.kind}`} class:row-collapsed={!open}>
+										<td class="child-mark col-num" aria-hidden="true">↳</td>
+										<td class="col-event">
+										<span class="cell-flex">
+											{#if child.kind === 'tool' && child.call}
+												{@const call = child.call}
+												<span class="row-icon">
+													<span class={`dot dot-${statusTone(call.status)}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn reason-link"
+													title={`${call.name} · ${call.status}`}
+													aria-label={`Jump to ${call.name} call`}
+													onclick={(event) => focusCall(event, call.id)}
+												>
+													{call.name}
+												</button>
+												{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+												{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+												{#if call.permission}
+													<span class="ui-badge ui-badge--perm"
+														>ask{call.permission.reply ? `: ${call.permission.reply}` : ''}</span
+													>
+												{/if}
+												<span class="muted">{call.status}</span>
+											{:else}
+												<span class="row-icon">
+													<span class={`dot dot-kind-${child.kind}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn action-link"
+													title={`Jump to ${child.kind} details`}
+													onclick={(event) => focusAction(event, child.actionId)}
+												>
+													{child.label && child.label !== child.kind ? child.label : child.kind}
+												</button>
+											{/if}
+										</span>
+									</td>
+										<td class="mono col-time">{formatClock(child.at)}</td>
+										<td class="mono col-time">
+											{child.endedAt === null ? '—' : formatClock(child.endedAt)}
+										</td>
+										<td class="col-time">
+											{child.endedAt === null ? '—' : formatDuration(child.at, child.endedAt)}
+										</td>
+										{#each usageColumns as label (label)}
+											<td class="num col-token">—</td>
+										{/each}
+										<td class="num col-cost">—</td>
+									</tr>
+								{/each}
 							{:else}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr
-									class={`step-row action-row action-${row.kind}`}
+									class={`marker-row marker-${row.kind}`}
 									onclick={() => scrollToAction(row.actionId)}
 								>
-									<td>—</td>
-									<td>
-										<button
-											type="button"
-											class="ui-link-btn action-link"
-											title={`Jump to ${row.kind} details`}
-											onclick={(event) => focusAction(event, row.actionId)}
-										>
-											{row.kind}
-										</button>
+									<td class="marker-mark col-num" aria-hidden="true">
+										{row.kind === 'start' ? '▶' : row.kind === 'prompt' ? '▸' : '·'}
 									</td>
-									<td class="mono">{formatClock(row.at)}</td>
-									<td class="mono">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
-									<td>{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
+									<td class="col-event">
+										<span class="cell-flex">
+											{#if row.kind === 'start'}
+												<span class="row-icon">
+													<span class="dot dot-kind-start"></span>
+												</span>
+												<span>{displayAgent(row.label)}</span>
+												{#if row.summary}<span class="muted">{row.summary}</span>{/if}
+											{:else if row.kind === 'prompt'}
+												<span class="row-icon">
+													<span class="dot dot-kind-prompt"></span>
+												</span>
+												<span>prompt</span>
+											{:else if row.kind === 'tool' && row.call}
+												{@const call = row.call}
+												<span class="row-icon">
+													<span class={`dot dot-${statusTone(call.status)}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn reason-link"
+													title={`${call.name} · ${call.status}`}
+													aria-label={`Jump to ${call.name} call`}
+													onclick={(event) => focusCall(event, call.id)}
+												>
+													{call.name}
+												</button>
+												{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+												{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+											{:else}
+												<span class="row-icon">
+													<span class={`dot dot-kind-${row.kind}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn action-link"
+													title={`Jump to ${row.kind} details`}
+													onclick={(event) => focusAction(event, row.actionId)}
+												>
+													{row.label && row.label !== row.kind ? row.label : row.kind}
+												</button>
+											{/if}
+										</span>
+									</td>
+									<td class="mono col-time">{formatClock(row.at)}</td>
+									<td class="mono col-time">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
+									<td class="col-time">{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
 									{#each usageColumns as label (label)}
-										<td class="num">—</td>
+										<td class="num col-token">—</td>
 									{/each}
-									<td class="num">—</td>
+									<td class="num col-cost">—</td>
 								</tr>
 							{/if}
 						{/each}
@@ -498,7 +750,7 @@
 						{@const call = entry.call}
 						{@const input = truncateText(call.input, SNIPPET_LIMIT)}
 						{@const output = truncateText(call.output, SNIPPET_LIMIT)}
-						<li class="call" id={callDomId(call.id)}>
+						<li class="call" class:flash={flashId === callDomId(call.id)} id={callDomId(call.id)}>
 						<button
 							type="button"
 							class="ui-icon-btn copy"
@@ -544,10 +796,13 @@
 								{#if input.truncated}
 									<button
 										type="button"
-										class="ui-link-btn expand"
+										class="io-toggle"
+										aria-expanded={expanded[`${call.id}:input`]}
+										aria-label={`${expanded[`${call.id}:input`] ? 'Collapse' : 'Expand'} input (${formatNumber(input.originalLength)} chars)`}
+										title={`${expanded[`${call.id}:input`] ? 'Collapse' : 'Expand'} input (${formatNumber(input.originalLength)} chars)`}
 										onclick={() => toggleExpanded(`${call.id}:input`)}
 									>
-										{expanded[`${call.id}:input`] ? 'Collapse input' : `Expand input (${formatNumber(input.originalLength)} chars)`}
+										<Icon name={expanded[`${call.id}:input`] ? 'collapse' : 'expand'} size={14} />
 									</button>
 								{/if}
 							</div>
@@ -561,10 +816,13 @@
 								{#if output.truncated}
 									<button
 										type="button"
-										class="ui-link-btn expand"
+										class="io-toggle"
+										aria-expanded={expanded[`${call.id}:output`]}
+										aria-label={`${expanded[`${call.id}:output`] ? 'Collapse' : 'Expand'} output (${formatNumber(output.originalLength)} chars)`}
+										title={`${expanded[`${call.id}:output`] ? 'Collapse' : 'Expand'} output (${formatNumber(output.originalLength)} chars)`}
 										onclick={() => toggleExpanded(`${call.id}:output`)}
 									>
-										{expanded[`${call.id}:output`] ? 'Collapse output' : `Expand output (${formatNumber(output.originalLength)} chars)`}
+										<Icon name={expanded[`${call.id}:output`] ? 'collapse' : 'expand'} size={14} />
 									</button>
 								{/if}
 							</div>
@@ -573,7 +831,7 @@
 					{:else}
 						{@const action = entry.action}
 						{@const body = truncateText(action.summary, SNIPPET_LIMIT)}
-						<li class="call action-card" id={actionDomId(action.id)}>
+						<li class="call action-card" class:flash={flashId === actionDomId(action.id)} id={actionDomId(action.id)}>
 							<div class="call-head">
 								<span class={`ui-badge ui-badge--${action.kind}`}>{action.kind}</span>
 								{#if action.label && action.label !== action.kind}
@@ -596,12 +854,16 @@
 									{#if body.truncated}
 										<button
 											type="button"
-											class="ui-link-btn expand"
+											class="io-toggle"
+											aria-expanded={expanded[`${action.id}:action`]}
+											aria-label={`${expanded[`${action.id}:action`] ? 'Collapse' : 'Expand'} (${formatNumber(body.originalLength)} chars)`}
+											title={`${expanded[`${action.id}:action`] ? 'Collapse' : 'Expand'} (${formatNumber(body.originalLength)} chars)`}
 											onclick={() => toggleExpanded(`${action.id}:action`)}
 										>
-											{expanded[`${action.id}:action`]
-												? 'Collapse'
-												: `Expand (${formatNumber(body.originalLength)} chars)`}
+											<Icon
+												name={expanded[`${action.id}:action`] ? 'collapse' : 'expand'}
+												size={14}
+											/>
 										</button>
 									{/if}
 								</div>
@@ -626,6 +888,17 @@
 			</div>
 		{/if}
 	</section>
+
+	<button
+		type="button"
+		class="ui-btn back-to-table"
+		class:visible={showBackToTable}
+		aria-label="Back to the Steps & actions table"
+		title="Back to table"
+		onclick={backToTable}
+	>
+		<Icon name="arrow-up" size={16} />
+	</button>
 </section>
 
 <style>
@@ -639,32 +912,52 @@
 		color: var(--text-base);
 	}
 
-	.panel-head {
+	/* Identity line: name + chips + session on the left, time range and
+	   duration · cost stacked on the right. Sits directly above the
+	   summary rows in the same block (no divider). */
+	.identity {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-start;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border-weak-base);
-		padding-bottom: var(--space-2);
+		justify-content: space-between;
+		gap: var(--space-1) var(--space-3);
 	}
 
-	.panel-head h3 {
+	.identity-left,
+	.identity-right {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+
+	.identity-right {
+		align-items: flex-end;
+		gap: var(--space-1);
+		text-align: right;
+		white-space: nowrap;
+		font-size: var(--font-size-small);
+		font-variant-numeric: tabular-nums;
+		color: var(--text-weak);
+	}
+
+	.identity-title {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.identity-title h3 {
 		margin: 0;
 		font-size: var(--font-size-large);
 		font-weight: var(--font-weight-medium);
 		color: var(--text-strong);
 	}
 
-	.panel-head .meta {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-small);
-	}
-
-	.panel-head .ui-btn {
-		margin-left: auto;
+	/* Matches the Turn header's timing: small, tabular, strong time range. */
+	.identity-time {
+		color: var(--text-strong);
 	}
 
 	.mono {
@@ -708,6 +1001,12 @@
 		margin-bottom: var(--space-2);
 	}
 
+	/* Single square icon button that toggles expand/collapse for all steps. */
+	.toggle-all {
+		padding: 0 var(--space-1);
+		color: var(--text-interactive-base);
+	}
+
 	.filter.active {
 		background: var(--surface-interactive-base);
 		color: var(--text-strong);
@@ -718,9 +1017,24 @@
 		color: var(--text-weak);
 		font-size: var(--font-size-small);
 		margin: 0;
+		display: flex;
+		align-items: center;
+		min-height: var(--space-6);
 	}
 
+	/* One block: identity, then Retries, then the three columns — two
+	   single-line rows, so the height stays stable when switching nodes.
+	   No divider or extra spacing between them. */
 	.summary-strip {
+		display: grid;
+		gap: var(--space-2);
+	}
+
+	.summary-row {
+		min-width: 0;
+	}
+
+	.summary-row--rest {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 		align-items: start;
@@ -731,6 +1045,67 @@
 		min-width: 0;
 	}
 
+	/* A summary row clipped to a single line: the section label sits inline
+	   at the start, then the items; overflow is covered by the absolutely
+	   positioned `.line-more` counter. */
+	.line {
+		position: relative;
+		display: flex;
+		flex-wrap: nowrap;
+		align-items: baseline;
+		gap: var(--space-2);
+		overflow: hidden;
+		min-height: var(--space-6);
+	}
+
+	.line-label {
+		flex: 0 0 auto;
+		margin: 0;
+		font-size: var(--font-size-small);
+		font-weight: var(--font-weight-medium);
+		color: var(--text-strong);
+	}
+
+	.line-list {
+		flex: 0 0 auto;
+		display: flex;
+		flex-wrap: nowrap;
+		gap: var(--space-3);
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		font-size: var(--font-size-small);
+	}
+
+	.line-item {
+		display: inline-flex;
+		align-items: baseline;
+		gap: var(--space-1);
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+
+	.line-item.has-error .name {
+		color: var(--color-danger-strong);
+	}
+
+	.line-more {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		display: inline-flex;
+		align-items: center;
+		padding-left: var(--space-2);
+		background: var(--background-strong);
+		color: var(--text-interactive-base);
+		font-size: var(--font-size-small);
+	}
+
+	.line-more[hidden] {
+		display: none;
+	}
+
 	.table-scroll {
 		overflow: hidden;
 		border: 1px solid var(--border-weak-base);
@@ -738,8 +1113,11 @@
 	}
 
 	table {
-		border-collapse: collapse;
+		border-collapse: separate;
+		border-spacing: 0;
+		table-layout: fixed;
 		width: 100%;
+		min-width: 74rem;
 		font-size: var(--font-size-sm);
 		white-space: nowrap;
 	}
@@ -749,12 +1127,67 @@
 		padding: var(--space-1) var(--space-2);
 		border-bottom: 1px solid var(--border-weaker-base);
 		text-align: left;
+		vertical-align: middle;
 	}
 
 	th {
 		color: var(--text-weak);
 		font-weight: var(--font-weight-medium);
 		background: var(--surface-base);
+	}
+
+	/* Fixed column widths so expanding a step never shifts the layout. */
+	.col-num {
+		width: 2rem;
+		padding-left: var(--space-1);
+		padding-right: var(--space-1);
+		text-align: center;
+		font-variant-numeric: tabular-nums;
+	}
+
+	.col-event {
+		width: 20rem;
+		padding-left: var(--space-1);
+	}
+
+	.col-time {
+		width: 6.5rem;
+	}
+
+	.col-token {
+		width: 6rem;
+	}
+
+	.col-cost {
+		width: 6rem;
+	}
+
+	/* Pin the first two columns while the token columns scroll horizontally. */
+	.col-num,
+	.col-event {
+		position: sticky;
+		z-index: 2;
+		background: var(--background-strong);
+	}
+
+	.col-num {
+		left: 0;
+	}
+
+	.col-event {
+		left: 2rem;
+		overflow: hidden;
+	}
+
+	th.col-num,
+	th.col-event {
+		z-index: 3;
+		background: var(--surface-base);
+	}
+
+	.step-row:hover .col-num,
+	.step-row:hover .col-event {
+		background: var(--surface-raised-base-hover);
 	}
 
 	.num {
@@ -767,10 +1200,7 @@
 		color: var(--color-danger-strong);
 	}
 
-	.calls,
-	.retries,
-	.markers,
-	.chips {
+	.calls {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -787,6 +1217,12 @@
 		border-radius: var(--radius-sm);
 		padding: var(--space-2) var(--space-3);
 		background: var(--surface-base);
+		transition: background-color 220ms ease;
+	}
+
+	/* Temporary grey flash on the block a table row jumped to. */
+	.call.flash {
+		background: var(--surface-raised-base-hover);
 	}
 
 	.call-head {
@@ -806,15 +1242,49 @@
 		background: var(--surface-raised-base-hover);
 	}
 
-	.reason-list {
-		display: inline-flex;
-		flex-wrap: wrap;
-		align-items: baseline;
-		gap: var(--space-1);
+	.child-row.row-collapsed {
+		display: none;
 	}
 
-	.reason-sep {
+	/* Inner flex wrapper: keeps the <td> a real table-cell (so its bottom
+	   border spans the column) while aligning the row's contents. */
+	.cell-flex {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+		min-width: 0;
+	}
+
+	/* Uniform leading-icon slot so the expand chevron and the child dots
+	   share one column and every label starts at the same x. */
+	.row-icon {
+		flex: 0 0 var(--space-6);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* The chevron is a control, not a button-shaped target: no own hover fill. */
+	.row-toggle:hover:not(:disabled) {
+		background: transparent;
+	}
+
+	.child-mark,
+	.marker-mark {
 		color: var(--text-weak);
+	}
+
+	.marker-row {
+		color: var(--text-weak);
+	}
+
+	.marker-row .ui-badge {
+		font-size: var(--font-size-xs);
+	}
+
+	.row-toggle {
+		vertical-align: middle;
 	}
 
 	.copy {
@@ -824,22 +1294,46 @@
 	}
 
 	.dot {
+		display: inline-block;
 		width: 0.55rem;
 		height: 0.55rem;
 		border-radius: var(--radius-full);
 		flex: 0 0 auto;
+		vertical-align: middle;
 	}
 
+	/* Muted fills mirroring the Details badge palette (the -strong tone)
+	   instead of the bright -base accents. */
 	.dot-ok {
-		background: var(--color-success-base);
+		background: var(--color-success-strong);
 	}
 	.dot-err {
-		background: var(--color-danger-base);
+		background: var(--color-danger-strong);
 	}
 	.dot-run {
-		background: var(--color-warning-base);
+		background: var(--color-warning-strong);
 	}
 	.dot-other {
+		background: var(--icon-base);
+	}
+
+	/* Action-kind dots, mirroring the Details badge palette. */
+	.dot-kind-text,
+	.dot-kind-file,
+	.dot-kind-prompt {
+		background: var(--color-accent-strong);
+	}
+	.dot-kind-reasoning,
+	.dot-kind-agent {
+		background: var(--color-info-strong);
+	}
+	.dot-kind-patch {
+		background: var(--color-success-strong);
+	}
+	.dot-kind-compaction {
+		background: var(--text-weak);
+	}
+	.dot-kind-start {
 		background: var(--icon-base);
 	}
 
@@ -865,6 +1359,23 @@
 		font-size: var(--font-size-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	/* Borderless expand/collapse icon control under a truncated block. */
+	.io-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-top: var(--space-1);
+		padding: 0;
+		background: none;
+		border: none;
+		color: var(--text-interactive-base);
+		cursor: pointer;
+	}
+
+	.io-toggle:hover {
+		color: var(--text-strong);
 	}
 
 	.io-text,
@@ -901,34 +1412,35 @@
 		margin: 0;
 	}
 
-	.retries,
-	.markers {
-		display: grid;
-		gap: var(--space-1);
-		font-size: var(--font-size-small);
+	/* Floating "back to table" control: fixed over the content, fades in
+	   once the Steps & actions table has scrolled out of view. */
+	.back-to-table {
+		position: fixed;
+		right: var(--space-4);
+		bottom: var(--space-4);
+		z-index: 20;
+		width: var(--space-10);
+		height: var(--space-10);
+		padding: 0;
+		border-radius: var(--radius-full);
+		background: var(--surface-raised-base);
+		box-shadow: var(--shadow-md);
+		opacity: 0;
+		transform: translateY(var(--space-2));
+		pointer-events: none;
+		transition:
+			opacity 160ms ease,
+			transform 160ms ease,
+			background-color 160ms ease;
 	}
 
-	.retries li {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		align-items: baseline;
+	.back-to-table.visible {
+		opacity: 1;
+		transform: none;
+		pointer-events: auto;
 	}
 
-	.retries li.has-error .name {
-		color: var(--color-danger-strong);
-	}
-
-	.markers li {
-		display: flex;
-		gap: var(--space-2);
-		align-items: baseline;
-	}
-
-	.chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-1);
-		font-size: var(--font-size-small);
+	.back-to-table.visible:hover {
+		background: var(--surface-raised-base-hover);
 	}
 </style>
