@@ -214,7 +214,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 			})
 		);
 		expect(html).toContain('aria-label="Node detail"');
-		expect(html).toContain('build node');
+		expect(html).toContain('main node');
 		expect(html).toContain('root1');
 		expect(html).toContain('orchestrator');
 		expect(html).toContain('completed');
@@ -661,7 +661,7 @@ describe('Gantt SSR — focusable rows and no panel before selection', () => {
 		expect(html).not.toContain('delegation edges');
 		expect(html.split('role="button"').length - 1).toBe(2);
 		expect(html.split('tabindex="0"').length - 1).toBe(2);
-		expect(html).toContain('aria-label="build node root1"');
+		expect(html).toContain('aria-label="main node root1"');
 		expect(html).toContain('aria-label="developer node child1"');
 		// Selection is client state: the panel must not render before a row is chosen.
 		expect(html).not.toContain('aria-label="Node detail"');

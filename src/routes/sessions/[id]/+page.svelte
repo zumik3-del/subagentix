@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import Gantt from '$lib/components/Gantt.svelte';
+	import { displayAgent } from '$lib/model/agent';
 	import {
 		formatClock,
 		formatCost,
@@ -18,7 +19,7 @@
 		<div class="head-main">
 			<h1>{data.session.title || data.session.id}</h1>
 			<div class="meta">
-				<span class="ui-chip">{data.session.agent}</span>
+				<span class="ui-chip">{displayAgent(data.session.agent)}</span>
 				<span class="dir" title={data.session.directory}>{data.session.directory}</span>
 				<span class="child-count">
 					{data.session.childCount} child session{data.session.childCount === 1 ? '' : 's'}

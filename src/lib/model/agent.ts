@@ -31,6 +31,23 @@ export const AGENT_COLOR_VARS: Record<string, string> = {
 export const AGENT_FALLBACK_COLOR = 'var(--icon-base)';
 
 /**
+ * Agents that are the orchestrator in the main process: the built-in `build`
+ * primary agent and its `plan` mode. Both are displayed as `main`; every other
+ * agent keeps its own name.
+ */
+const MAIN_PROCESS_AGENTS = new Set(['build', 'plan']);
+
+/**
+ * User-facing agent name. Maps the main-process orchestrator (`build`/`plan`)
+ * to `main`; all other agents pass through unchanged. Display-only — colors and
+ * lookups must keep using the raw agent name.
+ */
+export function displayAgent(agent: string | null | undefined): string {
+	if (agent == null || agent.trim() === '') return 'unknown';
+	return MAIN_PROCESS_AGENTS.has(agent.trim().toLowerCase()) ? 'main' : agent;
+}
+
+/**
  * Resolve an agent color token to its CSS variable reference, or `null` when
  * the token is missing/unknown. Case- and whitespace-insensitive so a sloppy
  * frontmatter value still resolves.

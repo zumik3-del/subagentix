@@ -13,6 +13,7 @@
 	 */
 	import type { Edge, GanttModel, Marker, Node } from '$lib/model/types';
 	import { formatClock, formatCost, formatDuration, formatNumber, tokenBreakdown } from '$lib/model/format';
+	import { displayAgent } from '$lib/model/agent';
 	import { selectNodeDetail } from '$lib/model/node';
 	import NodeDetailPanel from './NodeDetailPanel.svelte';
 	import ScrollView from './ScrollView.svelte';
@@ -646,11 +647,11 @@
 							onclick={() => selectNode(row.node.sessionId)}
 							onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
 							onmouseleave={() => (hoveredNodeId = null)}
-							title={`${row.node.agent} · ${row.node.sessionId} · ${row.node.status}`}
+							title={`${displayAgent(row.node.agent)} · ${row.node.sessionId} · ${row.node.status}`}
 						>
 							<span class="who">
 								<span class="ui-swatch" style={`background:${row.agentColor}`}></span>
-								<span class="agent">{row.node.agent}</span>
+								<span class="agent">{displayAgent(row.node.agent)}</span>
 							</span>
 							{#if row.node.modelId}
 								<span class="model">{row.node.modelId}</span>
@@ -809,7 +810,7 @@
 						opacity={row.dimmed ? 0.35 : 1}
 						role="button"
 						tabindex="0"
-						aria-label={`${row.node.agent} node ${nodeShortId(row.node.sessionId)}`}
+						aria-label={`${displayAgent(row.node.agent)} node ${nodeShortId(row.node.sessionId)}`}
 						onclick={() => selectNode(row.node.sessionId)}
 						onkeydown={(event) => onRowKey(event, row.node.sessionId)}
 						onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
@@ -830,7 +831,7 @@
 							class:bar-running={row.running}
 						>
 							<title>
-								{`${row.node.agent} · ${row.node.sessionId} · ${row.node.status} · ${formatDuration(
+								{`${displayAgent(row.node.agent)} · ${row.node.sessionId} · ${row.node.status} · ${formatDuration(
 									row.node.startedAt,
 									row.node.endedAt
 								)} · ${formatCost(row.node.usage.cost)}${

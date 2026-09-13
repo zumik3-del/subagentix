@@ -28,6 +28,7 @@
 		truncateText
 	} from '$lib/model/node';
 	import type { NodeRow, StepToolSummary } from '$lib/model/node';
+	import { displayAgent } from '$lib/model/agent';
 	import { TOKEN_LABELS } from '$lib/model/token';
 	import Icon from './Icon.svelte';
 	import ScrollView from './ScrollView.svelte';
@@ -237,7 +238,7 @@
 <section class="panel" aria-label="Node detail">
 	<header class="panel-head">
 		<div>
-			<h3>{detail.node.agent} node</h3>
+			<h3>{displayAgent(detail.node.agent)} node</h3>
 			<p class="muted mono">{detail.node.sessionId}</p>
 		</div>
 		<div class="meta">

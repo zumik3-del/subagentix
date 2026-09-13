@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AGENT_FALLBACK_COLOR, agentColorVar, parseAgentColor } from './agent';
+import { AGENT_FALLBACK_COLOR, agentColorVar, displayAgent, parseAgentColor } from './agent';
 
 /**
  * Unit tests for the opencode agent-color adapter (task #239).
@@ -60,6 +60,30 @@ describe('parseAgentColor()', () => {
 describe('AGENT_FALLBACK_COLOR (task #253)', () => {
 	test('is a gray token so colorless agents read as neutral, not a model color', () => {
 		expect(AGENT_FALLBACK_COLOR).toBe('var(--icon-base)');
+	});
+});
+
+describe('displayAgent() — main-process orchestrator renamed to "main"', () => {
+	test('maps build/plan to "main"', () => {
+		expect(displayAgent('build')).toBe('main');
+		expect(displayAgent('plan')).toBe('main');
+	});
+
+	test('is case- and whitespace-insensitive', () => {
+		expect(displayAgent('BUILD')).toBe('main');
+		expect(displayAgent('  Plan  ')).toBe('main');
+	});
+
+	test('passes every other agent through unchanged', () => {
+		expect(displayAgent('developer')).toBe('developer');
+		expect(displayAgent('reviewer')).toBe('reviewer');
+		expect(displayAgent('tester')).toBe('tester');
+	});
+
+	test('falls back to "unknown" for missing names', () => {
+		expect(displayAgent(null)).toBe('unknown');
+		expect(displayAgent(undefined)).toBe('unknown');
+		expect(displayAgent('   ')).toBe('unknown');
 	});
 });
 

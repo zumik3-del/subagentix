@@ -14,6 +14,7 @@
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { formatDateTime } from '$lib/model/format';
+	import { displayAgent } from '$lib/model/agent';
 	import type { DirectorySummary, TurnSummary } from '$lib/model/types';
 	import TreeIcon from './TreeIcon.svelte';
 	import Icon from './Icon.svelte';
@@ -262,7 +263,7 @@
 			onclick={() => void toggleSession(session.id)}
 		>
 			<span class="chevron"><TreeIcon name="chevron" expanded={isOpen} /></span>
-			<span class="session-title" title={`${session.agent} · ${session.title || session.id}`}>
+			<span class="session-title" title={`${displayAgent(session.agent)} · ${session.title || session.id}`}>
 				{session.title || session.id}
 			</span>
 		</button>
