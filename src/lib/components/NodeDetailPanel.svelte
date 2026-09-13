@@ -11,13 +11,7 @@
 	 */
 	import { onDestroy, tick } from 'svelte';
 	import type { NodeDetail, Step, ToolCall } from '$lib/model/types';
-	import {
-		formatClock,
-		formatCost,
-		formatDuration,
-		formatNumber,
-		tokenBreakdown
-	} from '$lib/model/format';
+	import { formatClock, formatCost, formatDuration, formatNumber } from '$lib/model/format';
 	import {
 		buildDetailEntries,
 		buildNodeRows,
@@ -29,8 +23,8 @@
 	} from '$lib/model/node';
 	import type { NodeRow, StepToolSummary } from '$lib/model/node';
 	import { displayAgent } from '$lib/model/agent';
-	import { TOKEN_LABELS } from '$lib/model/token';
 	import Icon from './Icon.svelte';
+	import TreeIcon from './TreeIcon.svelte';
 	import ScrollView from './ScrollView.svelte';
 
 	let {
@@ -50,17 +44,7 @@
 	/** Character budget for a tool input/output snippet. */
 	const SNIPPET_LIMIT = 600;
 
-	// Token categories in rendering order (matches `tokenBreakdown`).
-	const usageColumns = [
-		TOKEN_LABELS.input,
-		TOKEN_LABELS.output,
-		TOKEN_LABELS.reasoning,
-		TOKEN_LABELS.cacheRead,
-		TOKEN_LABELS.cacheWrite,
-		TOKEN_LABELS.total
-	];
-
-	/** Merged Steps & actions table: row filters + free-text search (client-side). */
+	/** Steps & actions timeline: row filters + free-text search (client-side). */
 	type RowFilter = 'all' | 'step' | 'tool' | 'text' | 'reasoning' | 'files' | 'misc';
 	const ROW_FILTERS: ReadonlyArray<{ value: RowFilter; label: string }> = [
 		{ value: 'all', label: 'All' },
@@ -76,7 +60,7 @@
 	let actionSearch = $state('');
 
 	let showRaw = $state(false);
-	/** Expanded long text blobs, keyed by `<callId>:<field>`. */
+	/** Expanded rows/blobs, keyed by step row key or `<callId>:<field>`. */
 	let expanded = $state<Record<string, boolean>>({});
 	/** Tool-call id whose copy just succeeded (drives the brief check-icon feedback). */
 	let copiedCallId = $state<string | null>(null);
@@ -92,39 +76,89 @@
 	);
 	const refBase = $derived(ziptaskBaseUrl ? ziptaskBaseUrl.replace(/\/+$/, '') : null);
 
-	// Merged Steps & actions table: each LLM step (with its tool-call Reason
-	// links) plus every non-tool action, ordered chronologically. Filters: row
-	// kind, permission-only, free-text search.
+	// Hierarchical Steps & actions timeline: a start marker, the numbered LLM
+	// steps, and (nested, collapsed by default) each step's tool calls and
+	// non-tool actions. Filters: row kind, permission-only, free-text search.
 	const rows = $derived(buildNodeRows(detail));
+	const stepCount = $derived(rows.filter((row) => row.kind === 'step').length);
+	const itemCount = $derived(
+		rows.reduce(
+			(count, row) => count + row.children.length + (row.kind === 'step' ? 0 : 1),
+			0
+		)
+	);
 	const permissionRows = $derived(
 		detail.toolCalls.filter((call) => call.permission).map((call) => call.permission!)
 	);
-	const visibleRows = $derived.by((): NodeRow[] => {
+	/** Whether the node recorded anything at all (drives the empty state). */
+	const hasContent = $derived(
+		stepCount > 0 ||
+			detail.toolCalls.length > 0 ||
+			(detail.actions !== undefined && detail.actions.length > 0)
+	);
+	/** When a filter/search is active, matching steps expand so hits are visible. */
+	const forceOpen = $derived(actionSearch.trim() !== '' || kindFilter !== 'all');
+	interface VisibleRow {
+		row: NodeRow;
+		children: NodeRow[];
+	}
+	function kindMatches(row: NodeRow): boolean {
+		switch (kindFilter) {
+			case 'all':
+				return true;
+			case 'step':
+				return row.kind === 'step';
+			case 'tool':
+				return row.kind === 'tool';
+			case 'files':
+				return row.kind === 'file' || row.kind === 'patch';
+			case 'misc':
+				return (
+					row.kind === 'agent' ||
+					row.kind === 'compaction' ||
+					row.kind === 'start' ||
+					row.kind === 'prompt'
+				);
+			default:
+				return row.kind === kindFilter;
+		}
+	}
+	function permissionAllows(row: NodeRow): boolean {
+		return !(permissionOnly && row.kind === 'tool' && !row.call?.permission);
+	}
+	function leafMatches(row: NodeRow, query: string): boolean {
+		return kindMatches(row) && permissionAllows(row) && (query === '' || searchText(row).includes(query));
+	}
+	function searchText(row: NodeRow): string {
+		return `${row.label} ${row.summary}`.toLowerCase();
+	}
+	const visibleRows = $derived.by((): VisibleRow[] => {
 		const query = actionSearch.trim().toLowerCase();
-		return rows.filter((row) => {
-			const step = row.step;
-			const calls = step ? stepCalls(step.id) : [];
-			if (permissionOnly && !calls.some((call) => call.permission)) return false;
-			const matchesKind =
-				kindFilter === 'all'
-					? true
-					: kindFilter === 'step'
-						? row.kind === 'step'
-						: kindFilter === 'tool'
-							? row.kind === 'step' && calls.length > 0
-							: kindFilter === 'files'
-								? row.kind === 'file' || row.kind === 'patch'
-								: kindFilter === 'misc'
-									? row.kind === 'agent' || row.kind === 'compaction'
-									: row.kind === kindFilter;
-			if (!matchesKind) return false;
-			if (query === '') return true;
-			const text = step
-				? `${step.reason ?? ''} ${calls.map((call) => call.name).join(' ')}`
-				: `${row.label} ${row.summary}`;
-			return text.toLowerCase().includes(query);
-		});
+		const out: VisibleRow[] = [];
+		for (const row of rows) {
+			if (row.kind === 'step') {
+				const children = row.children.filter((child) => leafMatches(child, query));
+				const showStep =
+					(kindFilter === 'all' || kindFilter === 'step') && query === '' && !permissionOnly;
+				if (children.length > 0 || showStep) out.push({ row, children });
+			} else if (leafMatches(row, query)) {
+				out.push({ row, children: [] });
+			}
+		}
+		return out;
 	});
+	function isOpen(row: NodeRow): boolean {
+		return expanded[row.key] === true || forceOpen;
+	}
+	function toggleRow(key: string) {
+		expanded[key] = !expanded[key];
+	}
+	function expandAll() {
+		for (const row of rows) if (row.kind === 'step') expanded[row.key] = true;
+	}
+	function collapseAll() {
+		expanded = {};
+	}
 
 	// Unified details list below the table: tool calls + non-tool actions,
 	// chronologically, each with a stable DOM anchor the table rows scroll to.
@@ -153,22 +187,9 @@
 		return value ?? detail.node.startedAt;
 	}
 	/**
-	 * Calls attributed to a step: explicit `stepId` match or the step's id list,
-	 * sorted by `startedAt` (unknown last) then id. This is the single
-	 * attribution source for both the Reason cell summary and the jump target.
+	 * Stable DOM id for a tool-call row, used as the jump target. Step/tool
+	 * child attribution lives in `node.ts` `buildNodeRows`.
 	 */
-	function stepCalls(stepId: string): ToolCall[] {
-		const step = detail.steps.find((candidate) => candidate.id === stepId);
-		if (!step) return [];
-		return detail.toolCalls
-			.filter((call) => call.stepId === stepId || step.toolCallIds.includes(call.id))
-			.sort(
-				(a, b) =>
-					(a.startedAt ?? Number.POSITIVE_INFINITY) -
-						(b.startedAt ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id)
-			);
-	}
-	/** Stable DOM id for a tool-call row, used as the jump target. */
 	function callDomId(id: string): string {
 		return `tool-call-${id}`;
 	}
@@ -197,12 +218,6 @@
 	/** Scroll an action row's detail card into view. */
 	function scrollToAction(id: string | null) {
 		if (id) scrollIntoViewId(actionDomId(id));
-	}
-	/** Scroll to a step's earliest attributed tool call (no selection styling). */
-	async function focusStep(stepId: string) {
-		const first = stepCalls(stepId)[0];
-		await tick();
-		if (first) scrollCallIntoView(first.id);
 	}
 	/** Per-call jump: stop the row click from also firing, then scroll to that call. */
 	async function focusCall(event: MouseEvent, id: string) {
@@ -344,7 +359,11 @@
 
 	<section class="block">
 		<div class="actions-head">
-			<h4>Steps &amp; actions ({visibleRows.length}/{rows.length})</h4>
+			<h4>Steps &amp; actions ({stepCount} steps · {itemCount} items)</h4>
+			<div class="actions-buttons">
+				<button type="button" class="ui-link-btn" onclick={expandAll}>Expand all</button>
+				<button type="button" class="ui-link-btn" onclick={collapseAll}>Collapse all</button>
+			</div>
 			<input
 				class="ui-input search"
 				type="search"
@@ -373,7 +392,7 @@
 				Permission
 			</button>
 		</div>
-		{#if rows.length === 0}
+		{#if !hasContent}
 			<p class="empty">No steps or actions recorded for this node.</p>
 		{:else if visibleRows.length === 0}
 			<p class="empty">No rows match the current filter.</p>
@@ -383,60 +402,48 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col">#</th>
-							<th scope="col">Reason / action</th>
+							<th scope="col" class="num">#</th>
+							<th scope="col">Event / action</th>
 							<th scope="col">Start</th>
 							<th scope="col">End</th>
 							<th scope="col">Duration</th>
-							{#each usageColumns as label (label)}
-								<th scope="col" class="num">{label}</th>
-							{/each}
+							<th scope="col" class="num">Tokens</th>
 							<th scope="col" class="num">Cost</th>
 						</tr>
 					</thead>
 					<tbody>
-						{#each visibleRows as row (row.key)}
-							{@const step = row.step}
-							{#if step && row.stepIndex !== null}
-								{@const cells = tokenBreakdown(step.usage)}
-								{@const calls = stepCalls(step.id)}
-								{@const summary = summarizeStepTools(calls)}
+						{#each visibleRows as { row, children } (row.key)}
+							{#if row.kind === 'step' && row.step && row.stepIndex !== null}
+								{@const step = row.step}
+								{@const summary = summarizeStepTools(
+									children.filter((child) => child.kind === 'tool').map((child) => child.call!)
+								)}
+								{@const open = isOpen(row)}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
-								<tr class="step-row" onclick={() => focusStep(step.id)}>
-									<td>{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
+								<tr class="step-row" onclick={() => toggleRow(row.key)}>
+									<td class="num">{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
 									<td>
-										{#if summary.count === 0}
-											—
-										{:else}
-											<span class="reason-list" title={reasonTitle(row.stepIndex, step, summary)}>
-												{#each calls as call, callNo (call.id)}
-													{#if callNo > 0}<span class="reason-sep">, </span>{/if}
-													<button
-														type="button"
-														class="ui-link-btn reason-link"
-														title={`${call.name} · ${call.status}`}
-														aria-label={`Jump to ${call.name} call`}
-														onclick={(event) => focusCall(event, call.id)}
-													>
-														{call.name}
-													</button>
-													{#if call.permission}
-														<span
-															class="ui-badge ui-badge--perm"
-															title={`Permission ${call.permission.permission}${
-																call.permission.patterns.length
-																	? ` · ${call.permission.patterns.join(', ')}`
-																	: ''
-															}`}
-														>
-															ask{call.permission.reply ? `: ${call.permission.reply}` : ''}
-														</span>
-													{/if}
-												{/each}
-											</span>
-											{#if summary.errorCount > 0}
-												<span class="reason-err">· {summary.errorCount} err</span>
-											{/if}
+										<button
+											type="button"
+											class="ui-icon-btn row-toggle"
+											aria-expanded={open}
+											aria-label={open ? 'Collapse step' : 'Expand step'}
+											onclick={(event) => {
+												event.stopPropagation();
+												toggleRow(row.key);
+											}}
+										>
+											<TreeIcon name="chevron" expanded={open} size={14} />
+										</button>
+										<span class="ui-badge ui-badge--step">step</span>
+										<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
+											{step.reason ?? 'step'}
+										</span>
+										{#if summary.count > 0}
+											<span class="muted">{summary.count} tool{summary.count === 1 ? '' : 's'}</span>
+										{/if}
+										{#if summary.errorCount > 0}
+											<span class="reason-err">· {summary.errorCount} err</span>
 										{/if}
 									</td>
 									<td class="mono">{formatClock(step.startedAt)}</td>
@@ -444,34 +451,115 @@
 										{step.endedAt === null ? 'running' : formatClock(step.endedAt)}
 									</td>
 									<td>{formatDuration(step.startedAt, step.endedAt)}</td>
-									{#each cells as cell (cell.label)}
-										<td class="num">{formatNumber(cell.value)}</td>
-									{/each}
+									<td class="num">{formatNumber(step.usage.total)}</td>
 									<td class="num">{formatCost(step.usage.cost)}</td>
 								</tr>
+								{#each children as child (child.key)}
+									<tr class={`child-row child-${child.kind}`} class:row-collapsed={!open}>
+										<td class="num child-mark" aria-hidden="true">↳</td>
+										<td class="child-cell">
+											{#if child.kind === 'tool' && child.call}
+												{@const call = child.call}
+												<span class={`dot dot-${statusTone(call.status)}`}></span>
+												<button
+													type="button"
+													class="ui-link-btn reason-link"
+													title={`${call.name} · ${call.status}`}
+													aria-label={`Jump to ${call.name} call`}
+													onclick={(event) => focusCall(event, call.id)}
+												>
+													{call.name}
+												</button>
+												{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+												{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+												{#if call.permission}
+													<span class="ui-badge ui-badge--perm"
+														>ask{call.permission.reply ? `: ${call.permission.reply}` : ''}</span
+													>
+												{/if}
+												<span class="muted">{call.status}</span>
+											{:else}
+												<span class={`ui-badge ui-badge--${child.kind}`}>{child.kind}</span>
+												<button
+													type="button"
+													class="ui-link-btn action-link"
+													title={`Jump to ${child.kind} details`}
+													onclick={(event) => focusAction(event, child.actionId)}
+												>
+													{child.label && child.label !== child.kind ? child.label : child.kind}
+												</button>
+												{#if child.summary}
+													<span class="muted child-summary"
+														>{truncateText(child.summary, 160).text}</span
+													>
+												{/if}
+											{/if}
+										</td>
+										<td class="mono">{formatClock(child.at)}</td>
+										<td class="mono">
+											{child.endedAt === null ? '—' : formatClock(child.endedAt)}
+										</td>
+										<td>
+											{child.endedAt === null ? '—' : formatDuration(child.at, child.endedAt)}
+										</td>
+										<td class="num">—</td>
+										<td class="num">—</td>
+									</tr>
+								{/each}
 							{:else}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr
-									class={`step-row action-row action-${row.kind}`}
+									class={`marker-row marker-${row.kind}`}
 									onclick={() => scrollToAction(row.actionId)}
 								>
-									<td>—</td>
-									<td>
-										<button
-											type="button"
-											class="ui-link-btn action-link"
-											title={`Jump to ${row.kind} details`}
-											onclick={(event) => focusAction(event, row.actionId)}
-										>
-											{row.kind}
-										</button>
+									<td class="num marker-mark" aria-hidden="true">
+										{row.kind === 'start' ? '▶' : row.kind === 'prompt' ? '▸' : '·'}
+									</td>
+									<td class="child-cell">
+										{#if row.kind === 'start'}
+											<span class="ui-badge ui-badge--start">start</span>
+											<span>{displayAgent(row.label)}</span>
+											{#if row.summary}<span class="muted">{row.summary}</span>{/if}
+										{:else if row.kind === 'prompt'}
+											<span class="ui-badge ui-badge--prompt">prompt</span>
+											<span class="muted child-summary"
+												>{truncateText(row.summary, 160).text}</span
+											>
+										{:else if row.kind === 'tool' && row.call}
+											{@const call = row.call}
+											<span class={`dot dot-${statusTone(call.status)}`}></span>
+											<button
+												type="button"
+												class="ui-link-btn reason-link"
+												title={`${call.name} · ${call.status}`}
+												aria-label={`Jump to ${call.name} call`}
+												onclick={(event) => focusCall(event, call.id)}
+											>
+												{call.name}
+											</button>
+											{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+											{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+										{:else}
+											<span class={`ui-badge ui-badge--${row.kind}`}>{row.kind}</span>
+											<button
+												type="button"
+												class="ui-link-btn action-link"
+												title={`Jump to ${row.kind} details`}
+												onclick={(event) => focusAction(event, row.actionId)}
+											>
+												{row.label && row.label !== row.kind ? row.label : row.kind}
+											</button>
+											{#if row.summary}
+												<span class="muted child-summary"
+													>{truncateText(row.summary, 160).text}</span
+												>
+											{/if}
+										{/if}
 									</td>
 									<td class="mono">{formatClock(row.at)}</td>
 									<td class="mono">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
 									<td>{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
-									{#each usageColumns as label (label)}
-										<td class="num">—</td>
-									{/each}
+									<td class="num">—</td>
 									<td class="num">—</td>
 								</tr>
 							{/if}
@@ -798,15 +886,48 @@
 		background: var(--surface-raised-base-hover);
 	}
 
-	.reason-list {
-		display: inline-flex;
-		flex-wrap: wrap;
-		align-items: baseline;
-		gap: var(--space-1);
+	.child-row.row-collapsed {
+		display: none;
 	}
 
-	.reason-sep {
+	.child-cell {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
+	.child-mark,
+	.marker-mark {
 		color: var(--text-weak);
+	}
+
+	.child-mark {
+		padding-left: var(--space-4);
+	}
+
+	.marker-row {
+		color: var(--text-weak);
+	}
+
+	.marker-row .ui-badge {
+		font-size: var(--font-size-xs);
+	}
+
+	.child-summary {
+		max-width: 32rem;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.row-toggle {
+		vertical-align: middle;
+		margin-right: var(--space-1);
+	}
+
+	.actions-buttons {
+		display: flex;
+		gap: var(--space-2);
 	}
 
 	.copy {

@@ -720,17 +720,20 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 	});
 });
 
-describe('client source wiring — Reason step scroll (task #218, scroll-only in #223)', () => {
+describe('client source wiring — step expand + per-call jump', () => {
 	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
+	const nodeModel = componentSource('../lib/model/node.ts');
 
-	test('the Reason button is wired to focusStep for the step', () => {
-		expect(panel).toContain('class="ui-link-btn reason-link"');
-		expect(panel).toContain('onclick={() => focusStep(step.id)}');
-		expect(panel).toContain('async function focusStep(stepId: string)');
+	test('the step row toggles its children via row-toggle and toggleRow', () => {
+		expect(panel).toContain('class="ui-icon-btn row-toggle"');
+		expect(panel).toContain('aria-expanded={open}');
+		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
-	test('focusStep ticks, then scrolls the first attributed call into view', () => {
-		expect(panel).toContain('const first = stepCalls(stepId)[0];');
+	test('call/action jump helpers tick, then scroll the target into view', () => {
+		expect(panel).toContain('onclick={(event) => focusCall(event, call.id)}');
+		expect(panel).toContain('onclick={(event) => focusAction(event, row.actionId)}');
 		expect(panel).toContain('await tick()');
 		expect(panel).toContain('scrollIntoView({');
 		expect(panel).toContain("block: 'center'");
@@ -760,8 +763,9 @@ describe('client source wiring — Reason step scroll (task #218, scroll-only in
 		expect(panel).not.toContain('class:focused');
 	});
 
-	test('attribution stays the single shared stepCalls predicate', () => {
-		expect(panel).toContain('call.stepId === stepId || step.toolCallIds.includes(call.id)');
+	test('step/tool attribution lives in buildNodeRows, not the panel', () => {
+		expect(nodeModel).toContain('call.stepId === step.id || step.toolCallIds.includes(call.id)');
+		expect(panel).not.toContain('function stepCalls');
 	});
 });
 
@@ -858,10 +862,9 @@ describe('NodeDetailPanel SSR — Reason cell: one button per call, no ×N colla
 describe('NodeDetailPanel source — row/call click wiring and copy + clipboard (task #230)', () => {
 	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
 
-	test('the step row onclick scrolls to the first attributed call via focusStep', () => {
-		expect(panel).toContain('onclick={() => focusStep(step.id)}');
-		expect(panel).toContain('async function focusStep(stepId: string)');
-		expect(panel).toContain('const first = stepCalls(stepId)[0]');
+	test('the step row toggles its children via toggleRow', () => {
+		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
 	test('each call button stops propagation and jumps to its own call id', () => {

@@ -316,7 +316,12 @@ function patchFilesSummary(files: string | null): string {
 }
 
 /** Map one non-tool part to a timeline {@link Action}. */
-function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
+function mapAction(
+	part: PartRecord,
+	kind: ActionKind,
+	nodeId: string,
+	role: string | null
+): Action {
 	const at = part.partStart ?? part.createdAt;
 	switch (kind) {
 		case 'text':
@@ -328,7 +333,8 @@ function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
 				at,
 				endedAt: part.partEnd,
 				label: kind,
-				summary: part.text ?? ''
+				summary: part.text ?? '',
+				role
 			};
 		case 'patch':
 			return {
@@ -338,7 +344,8 @@ function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
 				at,
 				endedAt: null,
 				label: 'patch',
-				summary: patchFilesSummary(part.files)
+				summary: patchFilesSummary(part.files),
+				role
 			};
 		case 'file':
 			return {
@@ -348,7 +355,8 @@ function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
 				at,
 				endedAt: null,
 				label: part.filename ?? 'file',
-				summary: part.mime ?? ''
+				summary: part.mime ?? '',
+				role
 			};
 		case 'agent':
 			return {
@@ -358,7 +366,8 @@ function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
 				at,
 				endedAt: null,
 				label: part.agentName ?? 'agent',
-				summary: ''
+				summary: '',
+				role
 			};
 		case 'compaction':
 			return {
@@ -368,24 +377,26 @@ function mapAction(part: PartRecord, kind: ActionKind, nodeId: string): Action {
 				at,
 				endedAt: null,
 				label: 'compaction',
-				summary: ''
+				summary: '',
+				role: null
 			};
 	}
 }
 
 function buildActions(sd: SessionData, restrict: Set<string> | null): Action[] {
 	const actions: Action[] = [];
+	const roleByMessage = new Map(sd.messages.map((message) => [message.id, message.role]));
 	for (const part of sd.actionParts) {
 		if (restrict && !restrict.has(part.messageId)) continue;
 		const kind = part.type as ActionKind;
 		if (kind === 'text' || kind === 'reasoning' || kind === 'patch' || kind === 'file' || kind === 'agent') {
-			actions.push(mapAction(part, kind, sd.session.id));
+			actions.push(mapAction(part, kind, sd.session.id, roleByMessage.get(part.messageId) ?? null));
 		}
 	}
 	// Compaction mirrors the marker list: already time-filtered for the root,
 	// never message-restricted.
 	for (const part of sd.compaction) {
-		actions.push(mapAction(part, 'compaction', sd.session.id));
+		actions.push(mapAction(part, 'compaction', sd.session.id, null));
 	}
 	return actions;
 }

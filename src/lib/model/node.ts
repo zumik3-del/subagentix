@@ -26,62 +26,170 @@ export function selectNodeDetail(model: GanttModel, nodeId: string): NodeDetail 
 	};
 }
 
-/** Row kinds of the merged drill-down table: LLM steps plus non-tool actions. */
-export type NodeRowKind = 'step' | ActionKind;
+/**
+ * Row kinds of the drill-down timeline: a synthetic node-start marker, the
+ * LLM steps, their tool/action children, and the `prompt` marker for a user
+ * message's `text`.
+ */
+export type NodeRowKind = 'start' | 'step' | 'tool' | 'prompt' | ActionKind;
 
-/** One row of the merged Steps & actions table (task: single node table). */
+/**
+ * One row of the hierarchical Steps & actions timeline. Top-level rows are
+ * chronological node events (start marker, prompt, compaction, orphan tool
+ * calls, and the numbered steps); a step's `children` hold the tool calls and
+ * non-tool actions it produced. Pure data — the panel owns presentation.
+ */
 export interface NodeRow {
 	key: string;
 	kind: NodeRowKind;
 	at: number;
 	endedAt: number | null;
-	/** 0-based index among the node's steps; `null` for action rows. */
+	/** 0-based index among the node's steps; `null` for non-step rows. */
 	stepIndex: number | null;
 	/** The step for step rows, else `null`. */
 	step: Step | null;
-	/** Action id for action rows (the detail anchor); `null` for step rows. */
+	/** The tool call for tool rows, else `null`. */
+	call: ToolCall | null;
+	/** Action id for action rows (the detail anchor); `null` otherwise. */
 	actionId: string | null;
-	/** Display label/summary for action rows (empty for step rows). */
+	/** Display label (kind, tool name, filename, …). */
 	label: string;
 	summary: string;
+	/** Child rows (tool calls + actions) of a step; empty otherwise. */
+	children: NodeRow[];
+}
+
+function rowSort(a: NodeRow, b: NodeRow): number {
+	return a.at - b.at || a.key.localeCompare(b.key);
+}
+
+/** Tool calls attributed to a step, ordered by start (unknown last) then id. */
+function stepCallsOf(step: Step, calls: ToolCall[]): ToolCall[] {
+	return calls
+		.filter((call) => call.stepId === step.id || step.toolCallIds.includes(call.id))
+		.sort(
+			(a, b) =>
+				(a.startedAt ?? Number.POSITIVE_INFINITY) -
+					(b.startedAt ?? Number.POSITIVE_INFINITY) || a.id.localeCompare(b.id)
+		);
+}
+
+/** The latest step that started at or before `at` (steps are pre-sorted). */
+function stepOwning(steps: Step[], at: number): Step | null {
+	let owner: Step | null = null;
+	for (const step of steps) {
+		if (step.startedAt > at) break;
+		owner = step;
+	}
+	return owner;
+}
+
+function toolRow(call: ToolCall, fallbackAt: number): NodeRow {
+	return {
+		key: `tool:${call.id}`,
+		kind: 'tool',
+		at: call.startedAt ?? call.endedAt ?? fallbackAt,
+		endedAt: call.endedAt,
+		stepIndex: null,
+		step: null,
+		call,
+		actionId: null,
+		label: call.name,
+		summary: call.status,
+		children: []
+	};
+}
+
+function actionRow(action: Action): NodeRow {
+	return {
+		key: `${action.kind}:${action.id}`,
+		kind: action.kind,
+		at: action.at,
+		endedAt: action.endedAt,
+		stepIndex: null,
+		step: null,
+		call: null,
+		actionId: action.id,
+		label: action.label,
+		summary: action.summary,
+		children: []
+	};
 }
 
 /**
- * Merge a node's LLM steps and non-tool actions into one chronologically
- * ordered table. Tool calls stay attributed to their step (the panel renders
- * them as Reason links), so they are deliberately not separate rows. Pure and
- * deterministic: ordered by `at`, ties by key.
+ * Build the hierarchical drill-down timeline from one node's slice. Pure and
+ * deterministic:
+ *
+ * - a synthetic `start` marker (node agent/model) always leads;
+ * - every LLM step is a numbered top-level row carrying its usage;
+ * - its tool calls (`stepId`/`toolCallIds`) and non-tool actions (attributed by
+ *   time to the nearest preceding step) become its `children`;
+ * - a user message's `text` becomes a `prompt` marker, compactions stay
+ *   top-level markers, and any tool call not attributed to a step falls back
+ *   to a top-level `tool` row.
+ *
+ * Top-level rows are ordered by `at`, ties by key; children likewise.
  */
 export function buildNodeRows(detail: NodeDetail): NodeRow[] {
-	const rows: NodeRow[] = [];
-	detail.steps.forEach((step, index) => {
-		rows.push({
-			key: `step:${step.id}`,
-			kind: 'step',
-			at: step.startedAt,
-			endedAt: step.endedAt,
-			stepIndex: index,
-			step,
-			actionId: null,
-			label: '',
-			summary: ''
-		});
-	});
-	for (const action of detail.actions ?? []) {
-		rows.push({
-			key: `${action.kind}:${action.id}`,
-			kind: action.kind,
-			at: action.at,
-			endedAt: action.endedAt,
-			stepIndex: null,
-			step: null,
-			actionId: action.id,
-			label: action.label,
-			summary: action.summary
-		});
+	const steps = [...detail.steps].sort(
+		(a, b) => a.startedAt - b.startedAt || a.id.localeCompare(b.id)
+	);
+	const childrenByStep = new Map<string, NodeRow[]>();
+	for (const step of steps) childrenByStep.set(step.id, []);
+
+	const attributed = new Set<string>();
+	for (const step of steps) {
+		for (const call of stepCallsOf(step, detail.toolCalls)) {
+			attributed.add(call.id);
+			childrenByStep.get(step.id)!.push(toolRow(call, step.startedAt));
+		}
 	}
-	rows.sort((a, b) => a.at - b.at || a.key.localeCompare(b.key));
-	return rows;
+
+	const top: NodeRow[] = [];
+	for (const action of detail.actions ?? []) {
+		const row = actionRow(action);
+		if (action.kind === 'compaction' || action.role === 'user') {
+			top.push(action.kind === 'text' && action.role === 'user' ? { ...row, kind: 'prompt' } : row);
+			continue;
+		}
+		const owner = stepOwning(steps, action.at);
+		if (owner) childrenByStep.get(owner.id)!.push(row);
+		else top.push(row);
+	}
+
+	for (const call of detail.toolCalls) {
+		if (!attributed.has(call.id)) top.push(toolRow(call, detail.node.startedAt));
+	}
+
+	const stepRows: NodeRow[] = steps.map((step, index) => ({
+		key: `step:${step.id}`,
+		kind: 'step',
+		at: step.startedAt,
+		endedAt: step.endedAt,
+		stepIndex: index,
+		step,
+		call: null,
+		actionId: null,
+		label: step.reason ?? (step.open ? 'open' : 'step'),
+		summary: '',
+		children: (childrenByStep.get(step.id) ?? []).sort(rowSort)
+	}));
+
+	top.push({
+		key: 'start',
+		kind: 'start',
+		at: detail.node.startedAt,
+		endedAt: detail.node.endedAt,
+		stepIndex: null,
+		step: null,
+		call: null,
+		actionId: null,
+		label: detail.node.agent,
+		summary: detail.node.modelId ?? '',
+		children: []
+	});
+
+	return [...top, ...stepRows].sort(rowSort);
 }
 
 /** One entry of the unified details list: a tool call or a non-tool action. */
