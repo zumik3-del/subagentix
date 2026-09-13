@@ -711,10 +711,13 @@
 								{#if input.truncated}
 									<button
 										type="button"
-										class="ui-link-btn expand"
+										class="io-toggle"
+										aria-expanded={expanded[`${call.id}:input`]}
+										aria-label={`${expanded[`${call.id}:input`] ? 'Collapse' : 'Expand'} input (${formatNumber(input.originalLength)} chars)`}
+										title={`${expanded[`${call.id}:input`] ? 'Collapse' : 'Expand'} input (${formatNumber(input.originalLength)} chars)`}
 										onclick={() => toggleExpanded(`${call.id}:input`)}
 									>
-										{expanded[`${call.id}:input`] ? 'Collapse input' : `Expand input (${formatNumber(input.originalLength)} chars)`}
+										<Icon name={expanded[`${call.id}:input`] ? 'collapse' : 'expand'} size={14} />
 									</button>
 								{/if}
 							</div>
@@ -728,10 +731,13 @@
 								{#if output.truncated}
 									<button
 										type="button"
-										class="ui-link-btn expand"
+										class="io-toggle"
+										aria-expanded={expanded[`${call.id}:output`]}
+										aria-label={`${expanded[`${call.id}:output`] ? 'Collapse' : 'Expand'} output (${formatNumber(output.originalLength)} chars)`}
+										title={`${expanded[`${call.id}:output`] ? 'Collapse' : 'Expand'} output (${formatNumber(output.originalLength)} chars)`}
 										onclick={() => toggleExpanded(`${call.id}:output`)}
 									>
-										{expanded[`${call.id}:output`] ? 'Collapse output' : `Expand output (${formatNumber(output.originalLength)} chars)`}
+										<Icon name={expanded[`${call.id}:output`] ? 'collapse' : 'expand'} size={14} />
 									</button>
 								{/if}
 							</div>
@@ -763,12 +769,16 @@
 									{#if body.truncated}
 										<button
 											type="button"
-											class="ui-link-btn expand"
+											class="io-toggle"
+											aria-expanded={expanded[`${action.id}:action`]}
+											aria-label={`${expanded[`${action.id}:action`] ? 'Collapse' : 'Expand'} (${formatNumber(body.originalLength)} chars)`}
+											title={`${expanded[`${action.id}:action`] ? 'Collapse' : 'Expand'} (${formatNumber(body.originalLength)} chars)`}
 											onclick={() => toggleExpanded(`${action.id}:action`)}
 										>
-											{expanded[`${action.id}:action`]
-												? 'Collapse'
-												: `Expand (${formatNumber(body.originalLength)} chars)`}
+											<Icon
+												name={expanded[`${action.id}:action`] ? 'collapse' : 'expand'}
+												size={14}
+											/>
 										</button>
 									{/if}
 								</div>
@@ -1167,6 +1177,23 @@
 		font-size: var(--font-size-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
+	}
+
+	/* Borderless expand/collapse icon control under a truncated block. */
+	.io-toggle {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		margin-top: var(--space-1);
+		padding: 0;
+		background: none;
+		border: none;
+		color: var(--text-interactive-base);
+		cursor: pointer;
+	}
+
+	.io-toggle:hover {
+		color: var(--text-strong);
 	}
 
 	.io-text,
