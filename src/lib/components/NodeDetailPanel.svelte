@@ -383,7 +383,7 @@
 					<p class="muted mono">{detail.node.sessionId}</p>
 				</div>
 				<div class="identity-right">
-					<span class="mono">
+					<span class="identity-time">
 						{formatClock(detail.node.startedAt)} →
 						{detail.node.endedAt === null ? 'running' : formatClock(detail.node.endedAt)}
 					</span>
@@ -395,11 +395,11 @@
 				</div>
 			</div>
 			<div class="summary-row">
-				<h4>Retries ({retryGroups.length})</h4>
-				{#if retryGroups.length === 0}
-					<p class="empty">No retries.</p>
-				{:else}
-					<div class="line" use:clampLine={detail}>
+				<div class="line" use:clampLine={detail}>
+					<h4 class="line-label">Retries ({retryGroups.length})</h4>
+					{#if retryGroups.length === 0}
+						<span class="empty">No retries.</span>
+					{:else}
 						<ul class="line-list">
 							{#each retryGroups as group (group.name)}
 								<li class="line-item" data-overflow-item class:has-error={group.hasError}>
@@ -413,16 +413,16 @@
 							{/each}
 						</ul>
 						<span class="line-more" data-overflow-counter hidden></span>
-					</div>
-				{/if}
+					{/if}
+				</div>
 			</div>
 			<div class="summary-row summary-row--rest">
 				<section class="summary-col">
-					<h4>Markers ({detail.markers.length})</h4>
-					{#if detail.markers.length === 0}
-						<p class="empty">No compaction or removed-content markers.</p>
-					{:else}
-						<div class="line" use:clampLine={detail}>
+					<div class="line" use:clampLine={detail}>
+						<h4 class="line-label">Markers ({detail.markers.length})</h4>
+						{#if detail.markers.length === 0}
+							<span class="empty">No compaction or removed-content markers.</span>
+						{:else}
 							<ul class="line-list">
 								{#each detail.markers as marker, index (marker.type + index)}
 									<li class="line-item" data-overflow-item>
@@ -438,18 +438,20 @@
 								{/each}
 							</ul>
 							<span class="line-more" data-overflow-counter hidden></span>
-						</div>
-					{/if}
+						{/if}
+					</div>
 				</section>
 				{#if ziptaskEnabled}
 					<section class="summary-col">
-						<h4>Tracker links <span class="muted">(inferred)</span></h4>
-						{#if trackerRefs.length === 0}
-							<p class="empty">No tracker link.</p>
-						{:else if refBase === null}
-							<p class="empty">ZIPTASK_BASE_URL is not configured.</p>
-						{:else}
-							<div class="line" use:clampLine={detail}>
+						<div class="line" use:clampLine={detail}>
+							<h4 class="line-label">
+								Tracker links <span class="muted">(inferred)</span>
+							</h4>
+							{#if trackerRefs.length === 0}
+								<span class="empty">No tracker link.</span>
+							{:else if refBase === null}
+								<span class="empty">ZIPTASK_BASE_URL is not configured.</span>
+							{:else}
 								<ul class="line-list">
 									{#each trackerRefs as ref (ref)}
 										<li class="line-item" data-overflow-item>
@@ -464,16 +466,16 @@
 									{/each}
 								</ul>
 								<span class="line-more" data-overflow-counter hidden></span>
-							</div>
-						{/if}
+							{/if}
+						</div>
 					</section>
 				{/if}
 				<section class="summary-col">
-					<h4>Permissions ({permissionRows.length})</h4>
-					{#if permissionRows.length === 0}
-						<p class="empty">No permission prompts recorded.</p>
-					{:else}
-						<div class="line" use:clampLine={detail}>
+					<div class="line" use:clampLine={detail}>
+						<h4 class="line-label">Permissions ({permissionRows.length})</h4>
+						{#if permissionRows.length === 0}
+							<span class="empty">No permission prompts recorded.</span>
+						{:else}
 							<ul class="line-list">
 								{#each permissionRows as permission (permission.requestId)}
 									<li class="line-item" data-overflow-item>
@@ -491,8 +493,8 @@
 								{/each}
 							</ul>
 							<span class="line-more" data-overflow-counter hidden></span>
-						</div>
-					{/if}
+						{/if}
+					</div>
 				</section>
 			</div>
 		</div>
@@ -948,6 +950,13 @@
 		color: var(--text-strong);
 	}
 
+	/* Same face and size as the identity title. */
+	.identity-time {
+		font-size: var(--font-size-large);
+		font-weight: var(--font-weight-medium);
+		color: var(--text-strong);
+	}
+
 	.mono {
 		font-family: var(--font-family-mono);
 		font-size: var(--font-size-sm);
@@ -1033,15 +1042,29 @@
 		min-width: 0;
 	}
 
-	/* A summary row clipped to a single line; overflow items are covered by
-	   the absolutely positioned `.line-more` counter. */
+	/* A summary row clipped to a single line: the section label sits inline
+	   at the start, then the items; overflow is covered by the absolutely
+	   positioned `.line-more` counter. */
 	.line {
 		position: relative;
+		display: flex;
+		flex-wrap: nowrap;
+		align-items: baseline;
+		gap: var(--space-2);
 		overflow: hidden;
 		min-height: var(--space-6);
 	}
 
+	.line-label {
+		flex: 0 0 auto;
+		margin: 0;
+		font-size: var(--font-size-small);
+		font-weight: var(--font-weight-medium);
+		color: var(--text-strong);
+	}
+
 	.line-list {
+		flex: 0 0 auto;
 		display: flex;
 		flex-wrap: nowrap;
 		gap: var(--space-3);
