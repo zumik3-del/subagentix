@@ -384,8 +384,9 @@ describe('Gantt #234 — uniform canvas, inset band, axis header (issues #8 / #9
 		expect(rowHoveredRule).toContain('fill: var(--surface-interactive-weak)');
 		const rowActiveRule = gantt.match(/\.row-bg\.active\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(rowActiveRule).toContain('fill: var(--surface-interactive-base)');
-		// Selected row gets a 2px left accent.
+		// Selected row gets a 2px accent at the chart's right edge.
 		expect(gantt).toContain('class="row-accent"');
+		expect(gantt).toContain('x={chartWidth - 2}');
 		expect(gantt).toContain('width="2"');
 		const accentRule = gantt.match(/\.row-accent\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(accentRule).toContain('fill: var(--border-selected)');

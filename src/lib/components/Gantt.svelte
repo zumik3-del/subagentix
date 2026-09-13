@@ -742,7 +742,7 @@
 					{#if row.active}
 						<rect
 							class="row-accent"
-							x="0"
+							x={chartWidth - 2}
 							y={row.top}
 							width="2"
 							height={ROW_H}
