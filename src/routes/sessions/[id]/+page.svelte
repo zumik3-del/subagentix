@@ -66,7 +66,7 @@
 <style>
 	main {
 		width: 100%;
-		padding: var(--space-4) var(--space-6) var(--space-12);
+		padding: var(--space-4) var(--space-4) var(--space-12);
 	}
 
 	header {
