@@ -225,9 +225,10 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 
 	test('marks an open step and shows the empty states for an empty slice', () => {
 		// #230: step number is derived from the loop index (stepNo+1), not step.index.
-		// A single step at array position 0 renders "1 · open" regardless of step.index.
+		// The open state renders as a badge in the Event column, not the `#` cell.
 		const open = renderPanel(makeDetail({ steps: [makeStep({ index: 1, open: true, endedAt: null })] }));
-		expect(open).toContain('1 · open'); // stepNo=0 → row 1
+		expect(open).toContain('>1<'); // stepNo=0 → row 1
+		expect(open).toContain('>open<');
 		expect(open).toContain('running');
 
 		const empty = renderPanel(makeDetail());

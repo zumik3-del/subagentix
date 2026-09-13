@@ -435,7 +435,7 @@
 								{@const cells = tokenBreakdown(step.usage)}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr class="step-row" onclick={() => toggleRow(row.key)}>
-									<td class="num col-num">{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
+									<td class="col-num">{row.stepIndex + 1}</td>
 									<td class="col-event">
 										<button
 											type="button"
@@ -449,10 +449,13 @@
 										>
 											<TreeIcon name="chevron" expanded={open} size={14} />
 										</button>
-										<span class="ui-badge ui-badge--step">step</span>
+										<span class="dot dot-kind-step"></span>
 										<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
 											{step.reason ?? 'step'}
 										</span>
+										{#if step.open}
+											<span class="ui-badge">open</span>
+										{/if}
 										{#if summary.count > 0}
 											<span class="muted">{summary.count} tool{summary.count === 1 ? '' : 's'}</span>
 										{/if}
@@ -472,7 +475,7 @@
 								</tr>
 								{#each children as child (child.key)}
 									<tr class={`child-row child-${child.kind}`} class:row-collapsed={!open}>
-										<td class="num child-mark col-num" aria-hidden="true">↳</td>
+										<td class="child-mark col-num" aria-hidden="true">↳</td>
 										<td class="child-cell col-event">
 											{#if child.kind === 'tool' && child.call}
 												{@const call = child.call}
@@ -495,7 +498,7 @@
 												{/if}
 												<span class="muted">{call.status}</span>
 											{:else}
-												<span class={`ui-badge ui-badge--${child.kind}`}>{child.kind}</span>
+												<span class={`dot dot-kind-${child.kind}`}></span>
 												<button
 													type="button"
 													class="ui-link-btn action-link"
@@ -504,11 +507,6 @@
 												>
 													{child.label && child.label !== child.kind ? child.label : child.kind}
 												</button>
-												{#if child.summary}
-													<span class="muted child-summary"
-														>{truncateText(child.summary, 160).text}</span
-													>
-												{/if}
 											{/if}
 										</td>
 										<td class="mono col-time">{formatClock(child.at)}</td>
@@ -530,19 +528,17 @@
 									class={`marker-row marker-${row.kind}`}
 									onclick={() => scrollToAction(row.actionId)}
 								>
-									<td class="num marker-mark col-num" aria-hidden="true">
+									<td class="marker-mark col-num" aria-hidden="true">
 										{row.kind === 'start' ? '▶' : row.kind === 'prompt' ? '▸' : '·'}
 									</td>
 									<td class="child-cell col-event">
 										{#if row.kind === 'start'}
-											<span class="ui-badge ui-badge--start">start</span>
+											<span class="dot dot-kind-start"></span>
 											<span>{displayAgent(row.label)}</span>
 											{#if row.summary}<span class="muted">{row.summary}</span>{/if}
 										{:else if row.kind === 'prompt'}
-											<span class="ui-badge ui-badge--prompt">prompt</span>
-											<span class="muted child-summary"
-												>{truncateText(row.summary, 160).text}</span
-											>
+											<span class="dot dot-kind-prompt"></span>
+											<span>prompt</span>
 										{:else if row.kind === 'tool' && row.call}
 											{@const call = row.call}
 											<span class={`dot dot-${statusTone(call.status)}`}></span>
@@ -558,7 +554,7 @@
 											{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
 											{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
 										{:else}
-											<span class={`ui-badge ui-badge--${row.kind}`}>{row.kind}</span>
+											<span class={`dot dot-kind-${row.kind}`}></span>
 											<button
 												type="button"
 												class="ui-link-btn action-link"
@@ -567,11 +563,6 @@
 											>
 												{row.label && row.label !== row.kind ? row.label : row.kind}
 											</button>
-											{#if row.summary}
-												<span class="muted child-summary"
-													>{truncateText(row.summary, 160).text}</span
-												>
-											{/if}
 										{/if}
 									</td>
 									<td class="mono col-time">{formatClock(row.at)}</td>
@@ -862,7 +853,9 @@
 
 	/* Fixed column widths so expanding a step never shifts the layout. */
 	.col-num {
-		width: 4.5rem;
+		width: 3rem;
+		text-align: left;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.col-event {
@@ -894,7 +887,7 @@
 	}
 
 	.col-event {
-		left: 4.5rem;
+		left: 3rem;
 		overflow: hidden;
 	}
 
@@ -987,12 +980,6 @@
 		font-size: var(--font-size-xs);
 	}
 
-	.child-summary {
-		max-width: 100%;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
 	.row-toggle {
 		vertical-align: middle;
 		margin-right: var(--space-1);
@@ -1010,10 +997,12 @@
 	}
 
 	.dot {
+		display: inline-block;
 		width: 0.55rem;
 		height: 0.55rem;
 		border-radius: var(--radius-full);
 		flex: 0 0 auto;
+		vertical-align: middle;
 	}
 
 	.dot-ok {
@@ -1026,6 +1015,27 @@
 		background: var(--color-warning-base);
 	}
 	.dot-other {
+		background: var(--icon-base);
+	}
+
+	/* Action-kind dots, mirroring the Details badge palette. */
+	.dot-kind-text,
+	.dot-kind-file,
+	.dot-kind-prompt {
+		background: var(--color-accent-base);
+	}
+	.dot-kind-reasoning,
+	.dot-kind-agent {
+		background: var(--color-info-base);
+	}
+	.dot-kind-patch {
+		background: var(--color-success-base);
+	}
+	.dot-kind-compaction {
+		background: var(--text-weak);
+	}
+	.dot-kind-start,
+	.dot-kind-step {
 		background: var(--icon-base);
 	}
 
