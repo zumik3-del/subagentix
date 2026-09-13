@@ -437,18 +437,20 @@
 								<tr class="step-row" onclick={() => toggleRow(row.key)}>
 									<td class="col-num">{row.stepIndex + 1}</td>
 									<td class="col-event step-cell">
-										<button
-											type="button"
-											class="ui-icon-btn row-toggle"
-											aria-expanded={open}
-											aria-label={open ? 'Collapse step' : 'Expand step'}
-											onclick={(event) => {
-												event.stopPropagation();
-												toggleRow(row.key);
-											}}
-										>
-											<TreeIcon name="chevron" expanded={open} size={14} />
-										</button>
+										<span class="row-icon">
+											<button
+												type="button"
+												class="ui-icon-btn row-toggle"
+												aria-expanded={open}
+												aria-label={open ? 'Collapse step' : 'Expand step'}
+												onclick={(event) => {
+													event.stopPropagation();
+													toggleRow(row.key);
+												}}
+											>
+												<TreeIcon name="chevron" expanded={open} size={14} />
+											</button>
+										</span>
 										<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
 											{step.reason ?? 'step'}
 										</span>
@@ -478,7 +480,9 @@
 										<td class="child-cell col-event">
 											{#if child.kind === 'tool' && child.call}
 												{@const call = child.call}
-												<span class={`dot dot-${statusTone(call.status)}`}></span>
+												<span class="row-icon">
+													<span class={`dot dot-${statusTone(call.status)}`}></span>
+												</span>
 												<button
 													type="button"
 													class="ui-link-btn reason-link"
@@ -497,7 +501,9 @@
 												{/if}
 												<span class="muted">{call.status}</span>
 											{:else}
-												<span class={`dot dot-kind-${child.kind}`}></span>
+												<span class="row-icon">
+													<span class={`dot dot-kind-${child.kind}`}></span>
+												</span>
 												<button
 													type="button"
 													class="ui-link-btn action-link"
@@ -532,15 +538,21 @@
 									</td>
 									<td class="child-cell col-event">
 										{#if row.kind === 'start'}
-											<span class="dot dot-kind-start"></span>
+											<span class="row-icon">
+												<span class="dot dot-kind-start"></span>
+											</span>
 											<span>{displayAgent(row.label)}</span>
 											{#if row.summary}<span class="muted">{row.summary}</span>{/if}
 										{:else if row.kind === 'prompt'}
-											<span class="dot dot-kind-prompt"></span>
+											<span class="row-icon">
+												<span class="dot dot-kind-prompt"></span>
+											</span>
 											<span>prompt</span>
 										{:else if row.kind === 'tool' && row.call}
 											{@const call = row.call}
-											<span class={`dot dot-${statusTone(call.status)}`}></span>
+											<span class="row-icon">
+												<span class={`dot dot-${statusTone(call.status)}`}></span>
+											</span>
 											<button
 												type="button"
 												class="ui-link-btn reason-link"
@@ -553,7 +565,9 @@
 											{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
 											{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
 										{:else}
-											<span class={`dot dot-kind-${row.kind}`}></span>
+											<span class="row-icon">
+												<span class={`dot dot-kind-${row.kind}`}></span>
+											</span>
 											<button
 												type="button"
 												class="ui-link-btn action-link"
@@ -853,10 +867,10 @@
 
 	/* Fixed column widths so expanding a step never shifts the layout. */
 	.col-num {
-		width: 2.5rem;
-		padding-left: var(--space-2);
+		width: 2rem;
+		padding-left: var(--space-1);
 		padding-right: var(--space-1);
-		text-align: left;
+		text-align: center;
 		font-variant-numeric: tabular-nums;
 	}
 
@@ -890,7 +904,7 @@
 	}
 
 	.col-event {
-		left: 2.5rem;
+		left: 2rem;
 		overflow: hidden;
 	}
 
@@ -965,6 +979,20 @@
 		align-items: center;
 		gap: var(--space-2);
 		min-width: 0;
+	}
+
+	/* Uniform leading-icon slot so the expand chevron and the child dots
+	   share one column and every label starts at the same x. */
+	.row-icon {
+		flex: 0 0 var(--space-6);
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+	}
+
+	/* The chevron is a control, not a button-shaped target: no own hover fill. */
+	.row-toggle:hover:not(:disabled) {
+		background: transparent;
 	}
 
 	.child-mark,
