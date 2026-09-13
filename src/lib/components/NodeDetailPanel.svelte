@@ -77,6 +77,13 @@
 	let copiedCallId = $state<string | null>(null);
 	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
+	/** Details block just jumped to; drives the temporary grey flash. */
+	let flashId = $state<string | null>(null);
+	let flashTimer: ReturnType<typeof setTimeout> | null = null;
+	/** Steps & actions table element, watched to reveal the floating back button. */
+	let tableEl: HTMLElement | null = $state(null);
+	let showBackToTable = $state(false);
+
 	const retryGroups = $derived(groupToolRetries(detail.toolCalls));
 	// Prefer the service-computed node refs (tool calls + `task` edges it
 	// spawned); fall back to the raw tool-call refs for partial DTOs.
@@ -218,9 +225,22 @@
 	}
 	/** Scroll an element with `id` into view, honouring reduced-motion. */
 	function scrollIntoViewId(id: string) {
+		flashId = id;
+		if (flashTimer) clearTimeout(flashTimer);
+		flashTimer = setTimeout(() => {
+			flashId = null;
+			flashTimer = null;
+		}, 2000);
 		document.getElementById(id)?.scrollIntoView({
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
 			block: 'center'
+		});
+	}
+	/** Jump back to the top of the Steps & actions table. */
+	function backToTable() {
+		tableEl?.scrollIntoView({
+			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+			block: 'start'
 		});
 	}
 	/** Scroll a tool-call block into view. */
@@ -263,6 +283,28 @@
 	}
 	onDestroy(() => {
 		if (copiedTimer) clearTimeout(copiedTimer);
+		if (flashTimer) clearTimeout(flashTimer);
+	});
+
+	// Reveal the floating "back to table" button once the Steps & actions
+	// table has scrolled off the top (i.e. the user is down in Details),
+	// and hide it again as soon as the table is back in view.
+	$effect(() => {
+		const el = tableEl;
+		if (!el) {
+			showBackToTable = false;
+			return;
+		}
+		const update = () => {
+			showBackToTable = el.getBoundingClientRect().bottom < 0;
+		};
+		update();
+		window.addEventListener('scroll', update, { passive: true });
+		window.addEventListener('resize', update);
+		return () => {
+			window.removeEventListener('scroll', update);
+			window.removeEventListener('resize', update);
+		};
 	});
 </script>
 
@@ -419,7 +461,7 @@
 		{:else if visibleRows.length === 0}
 			<p class="empty">No rows match the current filter.</p>
 		{:else}
-			<div class="table-scroll">
+			<div class="table-scroll" bind:this={tableEl}>
 				<ScrollView orientation="horizontal">
 				<table>
 					<thead>
@@ -623,7 +665,7 @@
 						{@const call = entry.call}
 						{@const input = truncateText(call.input, SNIPPET_LIMIT)}
 						{@const output = truncateText(call.output, SNIPPET_LIMIT)}
-						<li class="call" id={callDomId(call.id)}>
+						<li class="call" class:flash={flashId === callDomId(call.id)} id={callDomId(call.id)}>
 						<button
 							type="button"
 							class="ui-icon-btn copy"
@@ -698,7 +740,7 @@
 					{:else}
 						{@const action = entry.action}
 						{@const body = truncateText(action.summary, SNIPPET_LIMIT)}
-						<li class="call action-card" id={actionDomId(action.id)}>
+						<li class="call action-card" class:flash={flashId === actionDomId(action.id)} id={actionDomId(action.id)}>
 							<div class="call-head">
 								<span class={`ui-badge ui-badge--${action.kind}`}>{action.kind}</span>
 								{#if action.label && action.label !== action.kind}
@@ -751,6 +793,17 @@
 			</div>
 		{/if}
 	</section>
+
+	<button
+		type="button"
+		class="ui-btn back-to-table"
+		class:visible={showBackToTable}
+		aria-label="Back to the Steps & actions table"
+		title="Back to table"
+		onclick={backToTable}
+	>
+		<Icon name="arrow-up" size={16} />
+	</button>
 </section>
 
 <style>
@@ -972,6 +1025,12 @@
 		border-radius: var(--radius-sm);
 		padding: var(--space-2) var(--space-3);
 		background: var(--surface-base);
+		transition: background-color 220ms ease;
+	}
+
+	/* Temporary grey flash on the block a table row jumped to. */
+	.call.flash {
+		background: var(--surface-raised-base-hover);
 	}
 
 	.call-head {
@@ -1051,14 +1110,16 @@
 		vertical-align: middle;
 	}
 
+	/* Muted fills mirroring the Details badge palette (the -strong tone)
+	   instead of the bright -base accents. */
 	.dot-ok {
-		background: var(--color-success-base);
+		background: var(--color-success-strong);
 	}
 	.dot-err {
-		background: var(--color-danger-base);
+		background: var(--color-danger-strong);
 	}
 	.dot-run {
-		background: var(--color-warning-base);
+		background: var(--color-warning-strong);
 	}
 	.dot-other {
 		background: var(--icon-base);
@@ -1068,14 +1129,14 @@
 	.dot-kind-text,
 	.dot-kind-file,
 	.dot-kind-prompt {
-		background: var(--color-accent-base);
+		background: var(--color-accent-strong);
 	}
 	.dot-kind-reasoning,
 	.dot-kind-agent {
-		background: var(--color-info-base);
+		background: var(--color-info-strong);
 	}
 	.dot-kind-patch {
-		background: var(--color-success-base);
+		background: var(--color-success-strong);
 	}
 	.dot-kind-compaction {
 		background: var(--text-weak);
@@ -1171,5 +1232,37 @@
 		flex-wrap: wrap;
 		gap: var(--space-1);
 		font-size: var(--font-size-small);
+	}
+
+	/* Floating "back to table" control: fixed over the content, fades in
+	   once the Steps & actions table has scrolled out of view. */
+	.back-to-table {
+		position: fixed;
+		right: var(--space-4);
+		bottom: var(--space-4);
+		z-index: 20;
+		width: var(--space-10);
+		height: var(--space-10);
+		padding: 0;
+		border-radius: var(--radius-full);
+		background: var(--surface-raised-base);
+		box-shadow: var(--shadow-md);
+		opacity: 0;
+		transform: translateY(var(--space-2));
+		pointer-events: none;
+		transition:
+			opacity 160ms ease,
+			transform 160ms ease,
+			background-color 160ms ease;
+	}
+
+	.back-to-table.visible {
+		opacity: 1;
+		transform: none;
+		pointer-events: auto;
+	}
+
+	.back-to-table.visible:hover {
+		background: var(--surface-raised-base-hover);
 	}
 </style>

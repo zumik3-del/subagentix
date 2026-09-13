@@ -5,7 +5,7 @@
 	 * stays the tree-only chevron/folder provider.
 	 */
 	interface Props {
-		name: 'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse';
+		name: 'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' | 'arrow-up';
 		size?: number;
 	}
 
@@ -104,6 +104,22 @@
 	>
 		<path d="M9 7 13.5 2.5M13.5 2.5h-2.8M13.5 2.5v2.8" />
 		<path d="M7 9 2.5 13.5M2.5 13.5h2.8M2.5 13.5v-2.8" />
+	</svg>
+{:else if name === 'arrow-up'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.5"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" />
 	</svg>
 {:else}
 	<svg
