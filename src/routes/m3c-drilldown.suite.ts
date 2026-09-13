@@ -684,8 +684,8 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 		expect(gantt).toContain('function onRowKey(event: KeyboardEvent, nodeId: string)');
 		expect(gantt).toContain("event.key === 'Enter' || event.key === ' '");
 		expect(gantt).toContain('event.preventDefault()');
-		expect(gantt).toContain('toggleNode(nodeId)');
-		expect(gantt).toContain('onclick={() => toggleNode(row.node.sessionId)}');
+		expect(gantt).toContain('selectNode(nodeId)');
+		expect(gantt).toContain('onclick={() => selectNode(row.node.sessionId)}');
 	});
 
 	test('Gantt marks the selected row/node and renders the panel from the selection', () => {

@@ -36,8 +36,7 @@
 		detail,
 		ziptaskEnabled = true,
 		ziptaskBaseUrl = null,
-		onOpenTask,
-		onClose
+		onOpenTask
 	}: {
 		detail: NodeDetail;
 		/** Feature toggle: when false the tracker column is hidden. */
@@ -45,7 +44,6 @@
 		ziptaskBaseUrl?: string | null;
 		/** Open the task-detail modal for an inferred ref (owned by `Gantt`). */
 		onOpenTask?: (ref: string) => void;
-		onClose?: () => void;
 	} = $props();
 
 	/** Character budget for a tool input/output snippet. */
@@ -253,9 +251,6 @@
 			</span>
 			<span title="Cost (gross)">{formatCost(detail.node.usage.cost)}</span>
 		</div>
-		<button type="button" class="ui-btn" onclick={() => onClose?.()} aria-label="Close node detail">
-			Close
-		</button>
 	</header>
 
 	<section class="block" aria-label="Node summary">
@@ -661,10 +656,6 @@
 		align-items: center;
 		gap: var(--space-2);
 		font-size: var(--font-size-small);
-	}
-
-	.panel-head .ui-btn {
-		margin-left: auto;
 	}
 
 	.mono {

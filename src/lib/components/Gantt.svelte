@@ -88,17 +88,19 @@
 	const availableWidth = $derived(scrollWidth > 0 && labelWidth > 0 ? scrollWidth - labelWidth : 0);
 
 	// --- Selection / hover (local; no navigation) ------------------------------
+	// Selection is sticky: re-selecting the active row keeps the inspector open;
+	// only picking a different row changes it.
 	let selectedNodeId = $state<string | null>(null);
 	let hoveredNodeId = $state<string | null>(null);
 	const activeNodeId = $derived(hoveredNodeId ?? selectedNodeId);
 
-	function toggleNode(nodeId: string) {
-		selectedNodeId = selectedNodeId === nodeId ? null : nodeId;
+	function selectNode(nodeId: string) {
+		selectedNodeId = nodeId;
 	}
 	function onRowKey(event: KeyboardEvent, nodeId: string) {
 		if (event.key === 'Enter' || event.key === ' ') {
 			event.preventDefault();
-			toggleNode(nodeId);
+			selectNode(nodeId);
 		}
 	}
 
@@ -145,15 +147,15 @@
 		const rect = (event.currentTarget as SVGSVGElement).getBoundingClientRect();
 		const index = rowIndexAtY(event.clientY - rect.top);
 		if (index === null) return;
-		toggleNode(rows[index].sessionId);
+		selectNode(rows[index].sessionId);
 	}
 
 	// --- Derived model / scale -------------------------------------------------
 	const rows = $derived(orderNodes(model.nodes));
 	// Auto-open the top row whenever a new model loads. `$effect` runs only in
-	// the browser (SSR leaves the inspector collapsed), and tracking the model
-	// object — not the selection — means the user closing the inspector is not
-	// undone until the model actually changes.
+	// the browser (SSR leaves the inspector collapsed); tracking the model
+	// object — not the selection — keeps a manual row choice until the model
+	// actually changes.
 	let lastAutoOpenedModel: GanttModel | null = null;
 	$effect(() => {
 		if (model === lastAutoOpenedModel) return;
@@ -641,7 +643,7 @@
 							type="button"
 							class="label-btn"
 							aria-pressed={row.active}
-							onclick={() => toggleNode(row.node.sessionId)}
+							onclick={() => selectNode(row.node.sessionId)}
 							onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
 							onmouseleave={() => (hoveredNodeId = null)}
 							title={`${row.node.agent} · ${row.node.sessionId} · ${row.node.status}`}
@@ -808,7 +810,7 @@
 						role="button"
 						tabindex="0"
 						aria-label={`${row.node.agent} node ${nodeShortId(row.node.sessionId)}`}
-						onclick={() => toggleNode(row.node.sessionId)}
+						onclick={() => selectNode(row.node.sessionId)}
 						onkeydown={(event) => onRowKey(event, row.node.sessionId)}
 						onmouseenter={() => (hoveredNodeId = row.node.sessionId)}
 						onmouseleave={() => (hoveredNodeId = null)}
@@ -967,7 +969,6 @@
 					{ziptaskEnabled}
 					{ziptaskBaseUrl}
 					onOpenTask={openTask}
-					onClose={() => (selectedNodeId = null)}
 				/>
 			</aside>
 		{/if}
