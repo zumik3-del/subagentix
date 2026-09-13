@@ -1,0 +1,274 @@
+/**
+ * Runtime settings store (task #257, ADR `2026-09-12-adr-runtime-settings.md` §4).
+ *
+ * Owns the persisted `settings.json` file: path resolution, read/normalise,
+ * validation, an in-memory cache, atomic writes and change events. It never
+ * imports `db.ts` (no cycle); `db.ts` subscribes to this module instead.
+ *
+ * Precedence for effective values: stored file -> environment -> hardcoded
+ * default. The environment is only ever a fallback, never written back.
+ */
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
+
+/** Hardcoded fallback when neither the file nor `OPENCODE_DB` supplies a path. */
+export const DEFAULT_DB_PATH = '/home/opencode/.local/share/opencode/opencode.db';
+
+const MAX_DB_PATH_LENGTH = 4096;
+
+export type SettingsField = 'dbPath' | 'ziptaskBaseUrl' | 'ziptaskEnabled' | 'agentsPath';
+
+export interface StoredSettings {
+	dbPath?: string | null;
+	ziptaskBaseUrl?: string | null;
+	ziptaskEnabled?: boolean | null;
+	agentsPath?: string | null;
+}
+
+/** Validation failure carrying the offending field for the 400 API contract. */
+export class SettingsValidationError extends Error {
+	readonly field: SettingsField;
+
+	constructor(message: string, field: SettingsField) {
+		super(message);
+		this.name = 'SettingsValidationError';
+		this.field = field;
+	}
+}
+
+type SettingsListener = (next: StoredSettings) => void;
+
+/** Explicit `SETTINGS_FILE` -> systemd `STATE_DIRECTORY` -> dev `./.data`. */
+export function settingsFilePath(): string {
+	if (process.env.SETTINGS_FILE) return process.env.SETTINGS_FILE;
+	const stateDir = process.env.STATE_DIRECTORY;
+	if (stateDir) return join(stateDir, 'settings.json');
+	return join(process.cwd(), '.data', 'settings.json');
+}
+
+/** Validate/normalise a `dbPath` value; throws `SettingsValidationError`. */
+export function normaliseDbPath(value: unknown): string {
+	if (typeof value !== 'string' || value.trim() === '') {
+		throw new SettingsValidationError('dbPath must be a non-empty absolute path.', 'dbPath');
+	}
+	if (value.includes('\0')) {
+		throw new SettingsValidationError('dbPath must not contain NUL characters.', 'dbPath');
+	}
+	if (value.length > MAX_DB_PATH_LENGTH) {
+		throw new SettingsValidationError(`dbPath must be at most ${MAX_DB_PATH_LENGTH} characters.`, 'dbPath');
+	}
+	if (!isAbsolute(value)) {
+		throw new SettingsValidationError('dbPath must be an absolute path.', 'dbPath');
+	}
+	return resolve(value);
+}
+
+/** Validate/normalise a `ziptaskBaseUrl` value; throws `SettingsValidationError`. */
+export function normaliseZiptaskBaseUrl(value: unknown): string {
+	if (typeof value !== 'string' || value.trim() === '') {
+		throw new SettingsValidationError('ziptaskBaseUrl must be a non-empty http(s) URL.', 'ziptaskBaseUrl');
+	}
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		throw new SettingsValidationError('ziptaskBaseUrl must be a valid URL.', 'ziptaskBaseUrl');
+	}
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		throw new SettingsValidationError('ziptaskBaseUrl must use http or https.', 'ziptaskBaseUrl');
+	}
+	if (url.hostname === '') {
+		throw new SettingsValidationError('ziptaskBaseUrl must include a host.', 'ziptaskBaseUrl');
+	}
+	if (url.username !== '' || url.password !== '') {
+		throw new SettingsValidationError('ziptaskBaseUrl must not embed credentials.', 'ziptaskBaseUrl');
+	}
+	let pathname = url.pathname;
+	while (pathname.length > 1 && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
+	if (pathname === '/') pathname = '';
+	return `${url.origin}${pathname}`;
+}
+
+/** Validate a `ziptaskEnabled` value; throws `SettingsValidationError`. */
+export function normaliseZiptaskEnabled(value: unknown): boolean {
+	if (typeof value !== 'boolean') {
+		throw new SettingsValidationError('ziptaskEnabled must be a boolean.', 'ziptaskEnabled');
+	}
+	return value;
+}
+
+/** Validate/normalise an `agentsPath` value; throws `SettingsValidationError`. */
+export function normaliseAgentsPath(value: unknown): string {
+	if (typeof value !== 'string' || value.trim() === '') {
+		throw new SettingsValidationError('agentsPath must be a non-empty absolute path.', 'agentsPath');
+	}
+	if (value.includes('\0')) {
+		throw new SettingsValidationError('agentsPath must not contain NUL characters.', 'agentsPath');
+	}
+	if (value.length > MAX_DB_PATH_LENGTH) {
+		throw new SettingsValidationError(
+			`agentsPath must be at most ${MAX_DB_PATH_LENGTH} characters.`,
+			'agentsPath'
+		);
+	}
+	if (!isAbsolute(value)) {
+		throw new SettingsValidationError('agentsPath must be an absolute path.', 'agentsPath');
+	}
+	return resolve(value);
+}
+
+/** Pick the known keys off a parsed file, dropping values that fail validation. */
+function normaliseStored(raw: Record<string, unknown>): StoredSettings {
+	const out: StoredSettings = {};
+	if (typeof raw.dbPath === 'string') {
+		try {
+			out.dbPath = normaliseDbPath(raw.dbPath);
+		} catch {
+			// A hand-edited invalid value is ignored, never fatal.
+		}
+	}
+	if (typeof raw.ziptaskBaseUrl === 'string') {
+		try {
+			out.ziptaskBaseUrl = normaliseZiptaskBaseUrl(raw.ziptaskBaseUrl);
+		} catch {
+			// Same as above.
+		}
+	}
+	if (typeof raw.ziptaskEnabled === 'boolean') {
+		out.ziptaskEnabled = raw.ziptaskEnabled;
+	}
+	if (typeof raw.agentsPath === 'string') {
+		try {
+			out.agentsPath = normaliseAgentsPath(raw.agentsPath);
+		} catch {
+			// Same as above.
+		}
+	}
+	return out;
+}
+
+/**
+ * Read the settings file. A missing, corrupt or wrongly shaped file degrades to
+ * `{}` (all values fall back to env/default) and is never rewritten on read.
+ */
+function readSettingsFile(file: string): StoredSettings {
+	if (!existsSync(file)) return {};
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'));
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			console.warn(`[settings] ignoring "${file}": expected a JSON object.`);
+			return {};
+		}
+		return normaliseStored(parsed as Record<string, unknown>);
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.warn(`[settings] ignoring unreadable "${file}": ${message}`);
+		return {};
+	}
+}
+
+let cachedPath: string | null = null;
+let cached: StoredSettings = {};
+const listeners = new Set<SettingsListener>();
+
+/** Cached stored overrides; re-read when the resolved file path changes. */
+export function getStoredSettings(): StoredSettings {
+	const file = settingsFilePath();
+	if (cachedPath !== file) {
+		cachedPath = file;
+		cached = readSettingsFile(file);
+	}
+	return { ...cached };
+}
+
+function emit(next: StoredSettings): void {
+	for (const listener of [...listeners]) {
+		try {
+			listener(next);
+		} catch (error) {
+			// A subscriber must never break a successful write.
+			console.warn('[settings] change listener failed:', error);
+		}
+	}
+}
+
+/** Atomically persist settings (tmp file + rename, mode 0600). */
+function writeSettingsFile(settings: StoredSettings): void {
+	const file = settingsFilePath();
+	mkdirSync(dirname(file), { recursive: true });
+	const payload: Record<string, unknown> = { version: 1 };
+	if (settings.dbPath !== undefined) payload.dbPath = settings.dbPath;
+	if (settings.ziptaskBaseUrl !== undefined) payload.ziptaskBaseUrl = settings.ziptaskBaseUrl;
+	if (settings.ziptaskEnabled !== undefined) payload.ziptaskEnabled = settings.ziptaskEnabled;
+	if (settings.agentsPath !== undefined) payload.agentsPath = settings.agentsPath;
+	const tmp = `${file}.tmp-${process.pid}`;
+	writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
+	renameSync(tmp, file);
+}
+
+/**
+ * Apply a partial update: absent key = unchanged, `null` = clear the override.
+ * Validates and normalises before writing; on write failure the in-memory cache
+ * is left untouched and the error propagates.
+ */
+export function updateStoredSettings(patch: StoredSettings): StoredSettings {
+	const current = getStoredSettings();
+	const next: StoredSettings = { ...current };
+	if (Object.prototype.hasOwnProperty.call(patch, 'dbPath')) {
+		next.dbPath = patch.dbPath === null ? null : normaliseDbPath(patch.dbPath);
+	}
+	if (Object.prototype.hasOwnProperty.call(patch, 'ziptaskBaseUrl')) {
+		next.ziptaskBaseUrl =
+			patch.ziptaskBaseUrl === null ? null : normaliseZiptaskBaseUrl(patch.ziptaskBaseUrl);
+	}
+	if (Object.prototype.hasOwnProperty.call(patch, 'ziptaskEnabled')) {
+		next.ziptaskEnabled =
+			patch.ziptaskEnabled === null ? null : normaliseZiptaskEnabled(patch.ziptaskEnabled);
+	}
+	if (Object.prototype.hasOwnProperty.call(patch, 'agentsPath')) {
+		next.agentsPath = patch.agentsPath === null ? null : normaliseAgentsPath(patch.agentsPath);
+	}
+	writeSettingsFile(next);
+	cachedPath = settingsFilePath();
+	cached = next;
+	emit(next);
+	return { ...next };
+}
+
+/** Effective opencode DB path: file override -> env -> hardcoded default. */
+export function resolveDbPath(): string {
+	return getStoredSettings().dbPath ?? process.env.OPENCODE_DB ?? DEFAULT_DB_PATH;
+}
+
+/** Effective ziptask base URL: file override -> env -> `null` (unset). */
+export function resolveZiptaskBaseUrl(): string | null {
+	return getStoredSettings().ziptaskBaseUrl ?? process.env.ZIPTASK_BASE_URL ?? null;
+}
+
+/**
+ * Effective ziptask integration toggle: file override -> `ZIPTASK_ENABLED`
+ * env -> derived (`true` when a base URL resolves). The env layer is a soft
+ * default, matching the store's file > env > default precedence, so an explicit
+ * stored value always wins.
+ */
+export function resolveZiptaskEnabled(): boolean {
+	const stored = getStoredSettings().ziptaskEnabled;
+	if (typeof stored === 'boolean') return stored;
+	const env = process.env.ZIPTASK_ENABLED?.trim().toLowerCase();
+	if (env === '1' || env === 'true' || env === 'yes' || env === 'on') return true;
+	if (env === '0' || env === 'false' || env === 'no' || env === 'off') return false;
+	return resolveZiptaskBaseUrl() !== null;
+}
+
+/** Effective subagents directory: file override -> env -> `null` (use default scan). */
+export function resolveAgentsPath(): string | null {
+	return getStoredSettings().agentsPath ?? process.env.OPENCODE_AGENTS_DIR ?? null;
+}
+
+/** Subscribe to successful settings writes; returns an unsubscribe function. */
+export function onSettingsChange(listener: SettingsListener): () => void {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+}

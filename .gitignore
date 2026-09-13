@@ -1,0 +1,10 @@
+PLANS.md
+AGENTS.md
+docs/ui-standards.md
+node_modules
+build
+.svelte-kit
+.env
+.data/
+deploy/
+deploy-quick.sh

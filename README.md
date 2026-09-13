@@ -1,0 +1,89 @@
+# subagentix
+
+Tracking and visualization of interactions between opencode subagents
+(orchestrator → developer / tester / reviewer / git, …).
+
+**Status:** early preview — usable read-only viewer, no auth, single machine.
+
+## What it is
+
+A single-machine, retrospective browser app. Pick an opencode **turn** and see
+it as an interactive wall-clock **Gantt**: who called whom, when, how long each
+agent ran, and what tokens/cost it consumed, with per-node drill-down.
+
+## Features
+
+- Session sidebar grouped by working directory, with search and paging.
+- Turn Gantt (SVG) with delegation edges between orchestrator and subagents.
+- Per-node drill-down: steps, tool calls, errors and permission prompts.
+- Runtime settings (opencode DB path, ziptask URL, subagents dir) in a modal.
+- Optional ziptask integration (task links), gated by a runtime toggle.
+
+## Why
+
+- Attribute tokens, time and tool calls to a specific subagent.
+- Reconstruct "who talked to whom" across parallel subagents.
+- Expose waste (retries, dead loops) and coordination gaps.
+
+## Data source & privacy
+
+Reads the opencode SQLite database
+`~/.local/share/opencode/opencode.db` (read-only). Usage comes from
+`part` `step-finish` records (`input + output + reasoning + cache_read +
+cache_write`); `message`/`session` rollups are cross-checks. The data layer
+whitelists `session`, `message`, `part`, `project` and `todo`, and never returns
+`account` or `credential`. Access is strictly read-only (`readonly:true`,
+`PRAGMA query_only=1`, `busy_timeout`); the app never writes, checkpoints or
+vacuums the database. Permission asks/replies, which opencode does not persist,
+are collected from the opencode event bus while the app runs.
+
+## Requirements
+
+- [Bun](https://bun.sh/) (runtime and package manager; see `bun.lock`)
+- A local opencode installation with an existing `opencode.db`
+
+## Getting started
+
+```sh
+bun install
+cp .env.example .env   # adjust OPENCODE_DB / OPENCODE_BASE_URL if needed
+bun run dev            # http://127.0.0.1:5173
+```
+
+Production build (adapter-node):
+
+```sh
+bun run build
+bun run start          # serves build/index.js on HOST:PORT
+```
+
+Quality gates:
+
+```sh
+bun test               # unit + integration suites
+bun run check          # svelte-check / TypeScript
+```
+
+## Configuration
+
+Environment variables (see `.env.example`); values stored via the Settings UI
+take precedence over the environment.
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Path to the live opencode DB (read-only). |
+| `OPENCODE_BASE_URL` | `http://127.0.0.1:1234` | opencode web server; SSE source for permission events. |
+| `ZIPTASK_BASE_URL` | unset | Base URL used to resolve ziptask task links. |
+| `ZIPTASK_ENABLED` | derived | Feature toggle for the ziptask integration. |
+| `HOST` / `PORT` | `127.0.0.1` / `3010` | Production HTTP bind address. |
+| `STATE_DIRECTORY` | `./.data` | Runtime settings directory (systemd `StateDirectory`). |
+| `OPENCODE_AGENTS_DIR` | unset | Custom subagents directory scan root. |
+
+## Layout
+
+```
+src/lib/server/     read-only data layer (bun:sqlite) + services + settings
+src/lib/model/      domain model (Gantt, nodes, tokens, formatting)
+src/lib/components/ UI primitives and views (Gantt, sidebar, modals)
+src/routes/         SvelteKit pages and /api endpoints
+```

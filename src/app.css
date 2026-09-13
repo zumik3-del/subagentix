@@ -1,0 +1,570 @@
+/*
+ * subagentix global stylesheet — the single source of truth for design tokens
+ * and shared UI primitives. Contract and migration map: docs/ui-standards.md.
+ *
+ * OpenCode design tokens, dark-first. Curated subset vendored from
+ * `anomalyco/opencode` (`packages/ui/src/styles/{theme,colors}.css`). These are
+ * plain CSS custom properties: no Tailwind, no new dependencies.
+ *
+ * `--background-base` is the page canvas and `--text-strong` the default text.
+ * Components use the semantic tokens and the `.ui-*` classes below; raw palette
+ * scales are an implementation detail of this file only. The compat layer at the
+ * bottom maps the pre-theme legacy variables so old markup keeps working.
+ */
+:root {
+	/* Typography --------------------------------------------------------- */
+	--font-family-sans:
+		ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+	--font-family-mono:
+		ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New',
+		monospace;
+	--font-size-xs: 11px;
+	--font-size-sm: 12px;
+	--font-size-small: 13px;
+	--font-size-base: 14px;
+	--font-size-large: 16px;
+	--font-size-x-large: 20px;
+	--font-weight-regular: 400;
+	--font-weight-medium: 500;
+	--line-height-normal: 130%;
+	--line-height-large: 150%;
+	--line-height-x-large: 180%;
+
+	/* Spacing — 4px scale (docs/ui-standards.md §1) ----------------------- */
+	--space-1: 0.25rem;
+	--space-2: 0.5rem;
+	--space-3: 0.75rem;
+	--space-4: 1rem;
+	--space-5: 1.25rem;
+	--space-6: 1.5rem;
+	--space-8: 2rem;
+	--space-10: 2.5rem;
+	--space-12: 3rem;
+
+	/* Radii -------------------------------------------------------------- */
+	--radius-xs: 0.125rem;
+	--radius-sm: 0.25rem;
+	--radius-md: 0.375rem;
+	--radius-lg: 0.5rem;
+	--radius-xl: 0.625rem;
+	--radius-full: 9999px;
+	--sidebar-width: 20rem;
+	--breakpoint-lg: 64rem;
+
+	/* Shadows ------------------------------------------------------------ */
+	--shadow-xs:
+		0 1px 2px -0.5px rgba(0, 0, 0, 0.06), 0 0.5px 1.5px 0 rgba(0, 0, 0, 0.08),
+		0 1px 3px 0 rgba(0, 0, 0, 0.1);
+	--shadow-md:
+		0 6px 12px -2px rgba(0, 0, 0, 0.1), 0 4px 8px -2px rgba(0, 0, 0, 0.15),
+		0 1px 2px rgba(0, 0, 0, 0.15);
+	--shadow-lg:
+		0 16px 48px -6px rgba(0, 0, 0, 0.15), 0 6px 12px -2px rgba(0, 0, 0, 0.1),
+		0 1px 2.5px rgba(0, 0, 0, 0.1);
+
+	/* Backgrounds -------------------------------------------------------- */
+	--background-base: #101010;
+	--background-weak: #1e1e1e;
+	--background-strong: #121212;
+	--background-stronger: #151515;
+
+	/* Surfaces ----------------------------------------------------------- */
+	--surface-base: rgba(255, 255, 255, 0.031);
+	--surface-base-hover: rgba(255, 255, 255, 0.039);
+	--surface-base-active: rgba(255, 255, 255, 0.059);
+	--surface-inset-base: rgba(0, 0, 0, 0.5);
+	--surface-inset-strong: rgba(0, 0, 0, 0.8);
+	--surface-raised-base: rgba(255, 255, 255, 0.059);
+	--surface-raised-base-hover: rgba(255, 255, 255, 0.078);
+	--surface-raised-base-active: rgba(255, 255, 255, 0.102);
+	--surface-raised-strong: rgba(255, 255, 255, 0.078);
+	--surface-raised-strong-hover: rgba(255, 255, 255, 0.129);
+	--surface-raised-stronger: rgba(255, 255, 255, 0.129);
+	--surface-raised-stronger-hover: rgba(255, 255, 255, 0.169);
+	--surface-weak: rgba(255, 255, 255, 0.078);
+	--surface-weaker: rgba(255, 255, 255, 0.102);
+	--surface-strong: rgba(255, 255, 255, 0.169);
+	--surface-float-base: #161616;
+	--surface-float-base-hover: #1c1c1c;
+	/* Interactive surfaces are neutral overlays (task #215: no blue accent). */
+	--surface-interactive-base: rgba(255, 255, 255, 0.059);
+	--surface-interactive-hover: rgba(255, 255, 255, 0.078);
+	--surface-interactive-weak: rgba(255, 255, 255, 0.031);
+	--surface-success-base: #062d04;
+	--surface-success-weak: #0a1e08;
+	--surface-success-strong: #12c905;
+	--surface-warning-base: #fdf3cf;
+	--surface-warning-weak: #fdfaed;
+	--surface-warning-strong: #fcd53a;
+	--surface-critical-base: #1f0603;
+	--surface-critical-weak: #28110c;
+	--surface-critical-strong: #fc533a;
+	--surface-info-base: #feecfe;
+	--surface-info-weak: #fdf7fe;
+	--surface-info-strong: #edb2f1;
+
+	/* Text --------------------------------------------------------------- */
+	--text-base: rgba(255, 255, 255, 0.618);
+	--text-weak: rgba(255, 255, 255, 0.422);
+	--text-weaker: rgba(255, 255, 255, 0.284);
+	--text-strong: rgba(255, 255, 255, 0.936);
+	--text-stronger: rgba(255, 255, 255, 0.936);
+	--text-interactive-base: var(--text-strong);
+	--text-on-interactive-base: var(--text-strong);
+	--text-on-success-base: #12c905;
+	--text-on-warning-base: rgba(255, 255, 255, 0.603);
+	--text-on-critical-base: #fc533a;
+	--text-on-info-base: rgba(255, 255, 255, 0.603);
+
+	/* Borders ------------------------------------------------------------ */
+	--border-base: rgba(255, 255, 255, 0.195);
+	--border-hover: rgba(255, 255, 255, 0.284);
+	--border-active: rgba(255, 255, 255, 0.418);
+	--border-selected: rgba(255, 255, 255, 0.418);
+	--border-focus: rgba(255, 255, 255, 0.418);
+	--border-weak-base: #282828;
+	--border-weaker-base: #202020;
+	--border-strong-base: rgba(255, 255, 255, 0.266);
+	--border-interactive-base: rgba(255, 255, 255, 0.284);
+	--border-interactive-hover: rgba(255, 255, 255, 0.418);
+	--border-interactive-selected: rgba(255, 255, 255, 0.418);
+	--border-success-base: #96ec8e;
+	--border-warning-base: #e9d282;
+	--border-critical-base: #6a1206;
+	--border-info-base: #eac5ec;
+
+	/*
+	 * Tree / overlay tokens (task #212). Dark-only aliases for the
+	 * `file-tree-v2` row states, guide line and faint text.
+	 */
+	--overlay-hover: rgba(255, 255, 255, 0.04);
+	--overlay-pressed: rgba(255, 255, 255, 0.08);
+	--border-muted: rgba(255, 255, 255, 0.1);
+	--text-faint: rgba(255, 255, 255, 0.284);
+
+	/* Icons -------------------------------------------------------------- */
+	--icon-base: #7e7e7e;
+	--icon-hover: #a0a0a0;
+	--icon-active: #ededed;
+	--icon-selected: #ededed;
+	--icon-weak-base: #343434;
+	--icon-strong-base: #ededed;
+	--icon-interactive-base: #ededed;
+	--icon-success-base: #12c905;
+	--icon-warning-base: #fbb73c;
+	--icon-critical-base: #fc533a;
+	--icon-info-base: #68446b;
+
+	/*
+	 * Chart / status palette, taken from `colors.css` dark scales (level 9,
+	 * plus 10/11 for hover/emphasis). Raw scales — components use the semantic
+	 * aliases below, never these directly (docs/ui-standards.md §4).
+	 */
+	--blue-dark-9: #0091ff;
+	--blue-dark-10: #389eff;
+	--blue-dark-11: #51a8ff;
+	--amber-dark-9: #ffb224;
+	--amber-dark-10: #ffcb47;
+	--amber-dark-11: #f1a10d;
+	--ember-dark-9: #fc533a;
+	--ember-dark-10: #ee462d;
+	--ember-dark-11: #ff917b;
+	--mint-dark-9: #c8ffc4;
+	--mint-dark-10: #bff5bb;
+	--mint-dark-11: #9dde99;
+	--cobalt-dark-9: #034cff;
+	--cobalt-dark-10: #0038ee;
+	--cobalt-dark-11: #89b5ff;
+	--solaris-dark-9: #fcd53a;
+	--solaris-dark-10: #f2cb2a;
+	--solaris-dark-11: #fdd63c;
+	--lilac-dark-9: #edb2f1;
+	--lilac-dark-10: #e2a8e6;
+	--lilac-dark-11: #dca2e0;
+
+	--chart-1: var(--blue-dark-9);
+	--chart-2: var(--amber-dark-9);
+	--chart-3: var(--ember-dark-9);
+	--chart-4: var(--mint-dark-9);
+	--chart-5: var(--cobalt-dark-9);
+	--chart-6: var(--solaris-dark-9);
+	--chart-7: var(--lilac-dark-9);
+
+	/*
+	 * Semantic status colors (docs/ui-standards.md §4). These are the only color
+	 * tokens components may use for success/warning/danger/info/accent.
+	 */
+	--color-success-base: var(--mint-dark-9);
+	--color-success-strong: var(--mint-dark-11);
+	--color-success-surface: color-mix(in srgb, var(--mint-dark-9) 22%, transparent);
+	--color-warning-base: var(--amber-dark-9);
+	--color-warning-strong: var(--amber-dark-11);
+	--color-warning-surface: color-mix(in srgb, var(--amber-dark-9) 22%, transparent);
+	--color-danger-base: var(--ember-dark-9);
+	--color-danger-strong: var(--ember-dark-11);
+	--color-danger-surface: color-mix(in srgb, var(--ember-dark-9) 22%, transparent);
+	--color-danger-border: var(--border-critical-base);
+	--color-info-base: var(--lilac-dark-9);
+	--color-info-strong: var(--lilac-dark-11);
+	--color-info-surface: color-mix(in srgb, var(--lilac-dark-9) 22%, transparent);
+	--color-accent-base: var(--blue-dark-9);
+	--color-accent-strong: var(--blue-dark-11);
+	--color-accent-surface: color-mix(in srgb, var(--blue-dark-9) 22%, transparent);
+
+	/* Compat layer: legacy tokens (pre-theme components) ------------------ */
+	--bg: var(--background-base);
+	--surface: var(--background-weak);
+	--border: var(--border-weak-base);
+	--fg: var(--text-strong);
+	--muted: var(--text-weak);
+	--accent: var(--text-strong);
+
+	color-scheme: dark;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	background: var(--background-base);
+	color: var(--text-strong);
+	font-family: var(--font-family-sans);
+	font-size: var(--font-size-base);
+	line-height: var(--line-height-large);
+}
+
+a {
+	color: var(--text-strong);
+}
+
+.muted {
+	color: var(--text-weak);
+}
+
+/* One focus ring for every interactive element (docs/ui-standards.md §5).
+   Components must not re-declare it; rows that need an inset ring use
+   `.ui-focus-inset`. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+	outline: 2px solid var(--border-selected);
+	outline-offset: 1px;
+}
+
+.ui-focus-inset {
+	outline-offset: -2px;
+}
+
+/* Screen-reader-only utility (shared by the sidebar and the node panel). */
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* ===================================================================== */
+/* Shared primitives (docs/ui-standards.md §6)                            */
+/* ===================================================================== */
+
+/* Buttons ------------------------------------------------------------- */
+.ui-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: var(--space-1);
+	padding: var(--space-1) var(--space-2);
+	background: var(--surface-base);
+	color: var(--text-base);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-sm);
+	font: inherit;
+	font-size: var(--font-size-small);
+	line-height: var(--line-height-normal);
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.ui-btn:hover:not(:disabled) {
+	background: var(--surface-base-hover);
+	color: var(--text-strong);
+}
+
+.ui-btn:active:not(:disabled) {
+	background: var(--surface-base-active);
+}
+
+.ui-btn:disabled {
+	cursor: default;
+	color: var(--text-weaker);
+}
+
+.ui-btn--primary {
+	background: var(--surface-raised-base);
+	color: var(--text-strong);
+}
+
+.ui-btn--primary:hover:not(:disabled) {
+	background: var(--surface-raised-base-hover);
+}
+
+.ui-btn--danger {
+	color: var(--color-danger-strong);
+	border-color: var(--color-danger-border);
+}
+
+.ui-btn--danger:hover:not(:disabled) {
+	background: var(--color-danger-surface);
+	color: var(--color-danger-strong);
+}
+
+.ui-btn--block {
+	width: 100%;
+}
+
+/* Square, borderless icon control (gear, copy, …). */
+.ui-icon-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: var(--space-6);
+	height: var(--space-6);
+	padding: 0;
+	background: transparent;
+	color: var(--icon-base);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	font: inherit;
+	line-height: 1;
+	cursor: pointer;
+}
+
+.ui-icon-btn:hover:not(:disabled) {
+	background: var(--overlay-hover);
+	color: var(--text-strong);
+}
+
+/* Borderless text action (expand, reason links, …). */
+.ui-link-btn {
+	padding: 0;
+	background: none;
+	border: none;
+	font: inherit;
+	color: var(--text-interactive-base);
+	text-align: left;
+	cursor: pointer;
+}
+
+.ui-link-btn:hover {
+	color: var(--text-strong);
+	text-decoration: underline;
+}
+
+/* Agent swatch: geometry is standard, the colour is data (agent frontmatter). */
+.ui-swatch {
+	display: block;
+	flex: none;
+	width: var(--space-2);
+	height: var(--space-2);
+	border-radius: var(--radius-xs);
+	box-shadow: inset 0 0 0 1px var(--border-weak-base);
+}
+
+/* Inputs -------------------------------------------------------------- */
+.ui-input {
+	width: 100%;
+	padding: var(--space-1) var(--space-2);
+	background: var(--surface-base);
+	color: var(--text-strong);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-sm);
+	font: inherit;
+	font-size: var(--font-size-small);
+}
+
+.ui-input::placeholder {
+	color: var(--text-weak);
+}
+
+/* Chips and badges ---------------------------------------------------- */
+.ui-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 0 var(--space-2);
+	background: var(--surface-raised-base);
+	color: var(--text-base);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-full);
+	font: inherit;
+	font-size: var(--font-size-small);
+	line-height: var(--line-height-large);
+	white-space: nowrap;
+}
+
+.ui-chip--link {
+	color: var(--text-interactive-base);
+	cursor: pointer;
+}
+
+.ui-chip--link:hover {
+	background: var(--surface-raised-base-hover);
+	color: var(--text-strong);
+}
+
+.ui-chip--toggle {
+	color: var(--text-interactive-base);
+	cursor: pointer;
+}
+
+.ui-chip--toggle:hover {
+	background: var(--surface-raised-base-hover);
+	color: var(--text-strong);
+}
+
+.ui-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 0 var(--space-1);
+	background: var(--surface-raised-base);
+	color: var(--text-weak);
+	border-radius: var(--radius-full);
+	font-size: var(--font-size-xs);
+	line-height: var(--line-height-large);
+	white-space: nowrap;
+}
+
+.ui-badge--success {
+	background: var(--color-success-surface);
+	color: var(--color-success-strong);
+}
+.ui-badge--warning {
+	background: var(--color-warning-surface);
+	color: var(--color-warning-strong);
+}
+.ui-badge--danger {
+	background: var(--color-danger-surface);
+	color: var(--color-danger-strong);
+}
+.ui-badge--info {
+	background: var(--color-info-surface);
+	color: var(--color-info-strong);
+}
+.ui-badge--accent,
+.ui-badge--mcp,
+.ui-badge--text,
+.ui-badge--file {
+	background: var(--color-accent-surface);
+	color: var(--color-accent-strong);
+}
+.ui-badge--deleg,
+.ui-badge--reasoning,
+.ui-badge--agent {
+	background: var(--color-info-surface);
+	color: var(--color-info-strong);
+}
+.ui-badge--patch {
+	background: var(--color-success-surface);
+	color: var(--color-success-strong);
+}
+.ui-badge--perm {
+	background: var(--color-warning-surface);
+	color: var(--color-warning-strong);
+}
+.ui-badge--removed {
+	background: var(--color-danger-surface);
+	color: var(--color-danger-strong);
+}
+.ui-badge--compaction {
+	background: color-mix(in srgb, var(--text-strong) 18%, transparent);
+	color: var(--text-strong);
+}
+
+/* Modal --------------------------------------------------------------- */
+.ui-modal {
+	position: fixed;
+	inset: 0;
+	z-index: 100;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: var(--space-4);
+}
+
+.ui-modal__backdrop {
+	position: absolute;
+	inset: 0;
+	border: 0;
+	padding: 0;
+	background: rgba(0, 0, 0, 0.5);
+	cursor: pointer;
+}
+
+.ui-modal__dialog {
+	position: relative;
+	z-index: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+	max-height: calc(100dvh - var(--space-8));
+	overflow: hidden;
+	background: var(--background-strong);
+	color: var(--text-base);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-lg);
+}
+
+.ui-modal__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-4);
+	padding: var(--space-3) var(--space-4);
+	border-bottom: 1px solid var(--border-weak-base);
+}
+
+.ui-modal__title {
+	margin: 0;
+	font-size: var(--font-size-large);
+	font-weight: var(--font-weight-medium);
+	color: var(--text-strong);
+}
+
+.ui-modal__body {
+	display: flex;
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 0;
+}
+
+.ui-modal__content {
+	padding: var(--space-4);
+}
+
+.ui-modal__foot {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-2);
+	padding: var(--space-3) var(--space-4);
+	border-top: 1px solid var(--border-weak-base);
+}
+
+.ui-notice {
+	margin: 0;
+	margin-inline-end: auto;
+	font-size: var(--font-size-small);
+	color: var(--color-success-base);
+}

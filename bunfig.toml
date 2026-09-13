@@ -1,0 +1,4 @@
+# Run package.json scripts and their binaries with Bun instead of a
+# potentially outdated system Node.js (`--bun` behaviour).
+[run]
+bun = true
