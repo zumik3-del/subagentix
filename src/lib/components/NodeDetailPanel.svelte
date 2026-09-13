@@ -164,11 +164,16 @@
 	function toggleRow(key: string) {
 		expanded[key] = !expanded[key];
 	}
-	function expandAll() {
-		for (const row of rows) if (row.kind === 'step') expanded[row.key] = true;
-	}
-	function collapseAll() {
-		expanded = {};
+	const stepKeys = $derived(rows.filter((row) => row.kind === 'step').map((row) => row.key));
+	const allExpanded = $derived(
+		stepKeys.length > 0 && stepKeys.every((key) => expanded[key] === true)
+	);
+	function toggleAll() {
+		if (allExpanded) {
+			expanded = {};
+		} else {
+			for (const key of stepKeys) expanded[key] = true;
+		}
 	}
 
 	// Unified details list below the table: tool calls + non-tool actions,
@@ -371,10 +376,6 @@
 	<section class="block">
 		<div class="actions-head">
 			<h4>Steps &amp; actions ({stepCount} steps · {itemCount} items)</h4>
-			<div class="actions-buttons">
-				<button type="button" class="ui-link-btn" onclick={expandAll}>Expand all</button>
-				<button type="button" class="ui-link-btn" onclick={collapseAll}>Collapse all</button>
-			</div>
 			<input
 				class="ui-input search"
 				type="search"
@@ -384,6 +385,16 @@
 			/>
 		</div>
 		<div class="filters" role="group" aria-label="Row type filter">
+			<button
+				type="button"
+				class="ui-btn toggle-all"
+				aria-pressed={allExpanded}
+				aria-label={allExpanded ? 'Collapse all steps' : 'Expand all steps'}
+				title={allExpanded ? 'Collapse all' : 'Expand all'}
+				onclick={toggleAll}
+			>
+				<Icon name={allExpanded ? 'collapse' : 'expand'} size={14} />
+			</button>
 			{#each ROW_FILTERS as filter (filter.value)}
 				<button
 					type="button"
@@ -436,33 +447,35 @@
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr class="step-row" onclick={() => toggleRow(row.key)}>
 									<td class="col-num">{row.stepIndex + 1}</td>
-									<td class="col-event step-cell">
-										<span class="row-icon">
-											<button
-												type="button"
-												class="ui-icon-btn row-toggle"
-												aria-expanded={open}
-												aria-label={open ? 'Collapse step' : 'Expand step'}
-												onclick={(event) => {
-													event.stopPropagation();
-													toggleRow(row.key);
-												}}
-											>
-												<TreeIcon name="chevron" expanded={open} size={14} />
-											</button>
+									<td class="col-event">
+										<span class="cell-flex">
+											<span class="row-icon">
+												<button
+													type="button"
+													class="ui-icon-btn row-toggle"
+													aria-expanded={open}
+													aria-label={open ? 'Collapse step' : 'Expand step'}
+													onclick={(event) => {
+														event.stopPropagation();
+														toggleRow(row.key);
+													}}
+												>
+													<TreeIcon name="chevron" expanded={open} size={14} />
+												</button>
+											</span>
+											<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
+												{step.reason ?? 'step'}
+											</span>
+											{#if step.open}
+												<span class="ui-badge">open</span>
+											{/if}
+											{#if summary.count > 0}
+												<span class="muted">{summary.count} tool{summary.count === 1 ? '' : 's'}</span>
+											{/if}
+											{#if summary.errorCount > 0}
+												<span class="reason-err">· {summary.errorCount} err</span>
+											{/if}
 										</span>
-										<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
-											{step.reason ?? 'step'}
-										</span>
-										{#if step.open}
-											<span class="ui-badge">open</span>
-										{/if}
-										{#if summary.count > 0}
-											<span class="muted">{summary.count} tool{summary.count === 1 ? '' : 's'}</span>
-										{/if}
-										{#if summary.errorCount > 0}
-											<span class="reason-err">· {summary.errorCount} err</span>
-										{/if}
 									</td>
 									<td class="mono col-time">{formatClock(step.startedAt)}</td>
 									<td class="mono col-time">
@@ -477,7 +490,8 @@
 								{#each children as child (child.key)}
 									<tr class={`child-row child-${child.kind}`} class:row-collapsed={!open}>
 										<td class="child-mark col-num" aria-hidden="true">↳</td>
-										<td class="child-cell col-event">
+										<td class="col-event">
+										<span class="cell-flex">
 											{#if child.kind === 'tool' && child.call}
 												{@const call = child.call}
 												<span class="row-icon">
@@ -513,7 +527,8 @@
 													{child.label && child.label !== child.kind ? child.label : child.kind}
 												</button>
 											{/if}
-										</td>
+										</span>
+									</td>
 										<td class="mono col-time">{formatClock(child.at)}</td>
 										<td class="mono col-time">
 											{child.endedAt === null ? '—' : formatClock(child.endedAt)}
@@ -536,47 +551,49 @@
 									<td class="marker-mark col-num" aria-hidden="true">
 										{row.kind === 'start' ? '▶' : row.kind === 'prompt' ? '▸' : '·'}
 									</td>
-									<td class="child-cell col-event">
-										{#if row.kind === 'start'}
-											<span class="row-icon">
-												<span class="dot dot-kind-start"></span>
-											</span>
-											<span>{displayAgent(row.label)}</span>
-											{#if row.summary}<span class="muted">{row.summary}</span>{/if}
-										{:else if row.kind === 'prompt'}
-											<span class="row-icon">
-												<span class="dot dot-kind-prompt"></span>
-											</span>
-											<span>prompt</span>
-										{:else if row.kind === 'tool' && row.call}
-											{@const call = row.call}
-											<span class="row-icon">
-												<span class={`dot dot-${statusTone(call.status)}`}></span>
-											</span>
-											<button
-												type="button"
-												class="ui-link-btn reason-link"
-												title={`${call.name} · ${call.status}`}
-												aria-label={`Jump to ${call.name} call`}
-												onclick={(event) => focusCall(event, call.id)}
-											>
-												{call.name}
-											</button>
-											{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
-											{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
-										{:else}
-											<span class="row-icon">
-												<span class={`dot dot-kind-${row.kind}`}></span>
-											</span>
-											<button
-												type="button"
-												class="ui-link-btn action-link"
-												title={`Jump to ${row.kind} details`}
-												onclick={(event) => focusAction(event, row.actionId)}
-											>
-												{row.label && row.label !== row.kind ? row.label : row.kind}
-											</button>
-										{/if}
+									<td class="col-event">
+										<span class="cell-flex">
+											{#if row.kind === 'start'}
+												<span class="row-icon">
+													<span class="dot dot-kind-start"></span>
+												</span>
+												<span>{displayAgent(row.label)}</span>
+												{#if row.summary}<span class="muted">{row.summary}</span>{/if}
+											{:else if row.kind === 'prompt'}
+												<span class="row-icon">
+													<span class="dot dot-kind-prompt"></span>
+												</span>
+												<span>prompt</span>
+											{:else if row.kind === 'tool' && row.call}
+												{@const call = row.call}
+												<span class="row-icon">
+													<span class={`dot dot-${statusTone(call.status)}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn reason-link"
+													title={`${call.name} · ${call.status}`}
+													aria-label={`Jump to ${call.name} call`}
+													onclick={(event) => focusCall(event, call.id)}
+												>
+													{call.name}
+												</button>
+												{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+												{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+											{:else}
+												<span class="row-icon">
+													<span class={`dot dot-kind-${row.kind}`}></span>
+												</span>
+												<button
+													type="button"
+													class="ui-link-btn action-link"
+													title={`Jump to ${row.kind} details`}
+													onclick={(event) => focusAction(event, row.actionId)}
+												>
+													{row.label && row.label !== row.kind ? row.label : row.kind}
+												</button>
+											{/if}
+										</span>
 									</td>
 									<td class="mono col-time">{formatClock(row.at)}</td>
 									<td class="mono col-time">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
@@ -812,6 +829,12 @@
 		margin-bottom: var(--space-2);
 	}
 
+	/* Single square icon button that toggles expand/collapse for all steps. */
+	.toggle-all {
+		padding: 0 var(--space-1);
+		color: var(--text-interactive-base);
+	}
+
 	.filter.active {
 		background: var(--surface-interactive-base);
 		color: var(--text-strong);
@@ -972,8 +995,9 @@
 		display: none;
 	}
 
-	.child-cell,
-	.step-cell {
+	/* Inner flex wrapper: keeps the <td> a real table-cell (so its bottom
+	   border spans the column) while aligning the row's contents. */
+	.cell-flex {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -1010,11 +1034,6 @@
 
 	.row-toggle {
 		vertical-align: middle;
-	}
-
-	.actions-buttons {
-		display: flex;
-		gap: var(--space-2);
 	}
 
 	.copy {
