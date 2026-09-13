@@ -980,7 +980,7 @@
 
 <style>
 	.gantt {
-		margin-top: var(--space-4);
+		margin-top: 0;
 		/*
 		 * Running hatch on the dark chart: a dark amber base (not the near-white
 		 * `--surface-warning-weak`) so the amber stripes stay legible against the
