@@ -795,7 +795,7 @@ describe('NodeDetailPanel SSR — Steps numbered by list position (task #230)', 
 		const html = renderPanel(
 			makeDetail({ steps: [makeStep({ id: 's1', index: 7 })] })
 		);
-		expect(html).toMatch(/<td class="svelte-[^"]*">1[^<]*<\/td>/);
+		expect(html).toMatch(/<td class="[^"]*col-num[^"]*">1<\/td>/);
 	});
 
 	test('Reason tooltip uses list position, not step.index, for each step', () => {

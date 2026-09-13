@@ -11,7 +11,7 @@
 	 */
 	import { onDestroy, tick } from 'svelte';
 	import type { NodeDetail, Step, ToolCall } from '$lib/model/types';
-	import { formatClock, formatCost, formatDuration, formatNumber } from '$lib/model/format';
+	import { formatClock, formatCost, formatDuration, formatNumber, tokenBreakdown } from '$lib/model/format';
 	import {
 		buildDetailEntries,
 		buildNodeRows,
@@ -23,6 +23,7 @@
 	} from '$lib/model/node';
 	import type { NodeRow, StepToolSummary } from '$lib/model/node';
 	import { displayAgent } from '$lib/model/agent';
+	import { TOKEN_LABELS } from '$lib/model/token';
 	import Icon from './Icon.svelte';
 	import TreeIcon from './TreeIcon.svelte';
 	import ScrollView from './ScrollView.svelte';
@@ -43,6 +44,16 @@
 
 	/** Character budget for a tool input/output snippet. */
 	const SNIPPET_LIMIT = 600;
+
+	// Token categories in rendering order (matches `tokenBreakdown`).
+	const usageColumns = [
+		TOKEN_LABELS.input,
+		TOKEN_LABELS.output,
+		TOKEN_LABELS.reasoning,
+		TOKEN_LABELS.cacheRead,
+		TOKEN_LABELS.cacheWrite,
+		TOKEN_LABELS.total
+	];
 
 	/** Steps & actions timeline: row filters + free-text search (client-side). */
 	type RowFilter = 'all' | 'step' | 'tool' | 'text' | 'reasoning' | 'files' | 'misc';
@@ -402,13 +413,15 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col" class="num">#</th>
-							<th scope="col">Event / action</th>
-							<th scope="col">Start</th>
-							<th scope="col">End</th>
-							<th scope="col">Duration</th>
-							<th scope="col" class="num">Tokens</th>
-							<th scope="col" class="num">Cost</th>
+							<th scope="col" class="num col-num">#</th>
+							<th scope="col" class="col-event">Event / action</th>
+							<th scope="col" class="col-time">Start</th>
+							<th scope="col" class="col-time">End</th>
+							<th scope="col" class="col-time">Duration</th>
+							{#each usageColumns as label (label)}
+								<th scope="col" class="num col-token">{label}</th>
+							{/each}
+							<th scope="col" class="num col-cost">Cost</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -419,10 +432,11 @@
 									children.filter((child) => child.kind === 'tool').map((child) => child.call!)
 								)}
 								{@const open = isOpen(row)}
+								{@const cells = tokenBreakdown(step.usage)}
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr class="step-row" onclick={() => toggleRow(row.key)}>
-									<td class="num">{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
-									<td>
+									<td class="num col-num">{row.stepIndex + 1}{step.open ? ' · open' : ''}</td>
+									<td class="col-event">
 										<button
 											type="button"
 											class="ui-icon-btn row-toggle"
@@ -446,18 +460,20 @@
 											<span class="reason-err">· {summary.errorCount} err</span>
 										{/if}
 									</td>
-									<td class="mono">{formatClock(step.startedAt)}</td>
-									<td class="mono">
+									<td class="mono col-time">{formatClock(step.startedAt)}</td>
+									<td class="mono col-time">
 										{step.endedAt === null ? 'running' : formatClock(step.endedAt)}
 									</td>
-									<td>{formatDuration(step.startedAt, step.endedAt)}</td>
-									<td class="num">{formatNumber(step.usage.total)}</td>
-									<td class="num">{formatCost(step.usage.cost)}</td>
+									<td class="col-time">{formatDuration(step.startedAt, step.endedAt)}</td>
+									{#each cells as cell (cell.label)}
+										<td class="num col-token">{formatNumber(cell.value)}</td>
+									{/each}
+									<td class="num col-cost">{formatCost(step.usage.cost)}</td>
 								</tr>
 								{#each children as child (child.key)}
 									<tr class={`child-row child-${child.kind}`} class:row-collapsed={!open}>
-										<td class="num child-mark" aria-hidden="true">↳</td>
-										<td class="child-cell">
+										<td class="num child-mark col-num" aria-hidden="true">↳</td>
+										<td class="child-cell col-event">
 											{#if child.kind === 'tool' && child.call}
 												{@const call = child.call}
 												<span class={`dot dot-${statusTone(call.status)}`}></span>
@@ -495,15 +511,17 @@
 												{/if}
 											{/if}
 										</td>
-										<td class="mono">{formatClock(child.at)}</td>
-										<td class="mono">
+										<td class="mono col-time">{formatClock(child.at)}</td>
+										<td class="mono col-time">
 											{child.endedAt === null ? '—' : formatClock(child.endedAt)}
 										</td>
-										<td>
+										<td class="col-time">
 											{child.endedAt === null ? '—' : formatDuration(child.at, child.endedAt)}
 										</td>
-										<td class="num">—</td>
-										<td class="num">—</td>
+										{#each usageColumns as label (label)}
+											<td class="num col-token">—</td>
+										{/each}
+										<td class="num col-cost">—</td>
 									</tr>
 								{/each}
 							{:else}
@@ -512,10 +530,10 @@
 									class={`marker-row marker-${row.kind}`}
 									onclick={() => scrollToAction(row.actionId)}
 								>
-									<td class="num marker-mark" aria-hidden="true">
+									<td class="num marker-mark col-num" aria-hidden="true">
 										{row.kind === 'start' ? '▶' : row.kind === 'prompt' ? '▸' : '·'}
 									</td>
-									<td class="child-cell">
+									<td class="child-cell col-event">
 										{#if row.kind === 'start'}
 											<span class="ui-badge ui-badge--start">start</span>
 											<span>{displayAgent(row.label)}</span>
@@ -556,11 +574,13 @@
 											{/if}
 										{/if}
 									</td>
-									<td class="mono">{formatClock(row.at)}</td>
-									<td class="mono">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
-									<td>{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
-									<td class="num">—</td>
-									<td class="num">—</td>
+									<td class="mono col-time">{formatClock(row.at)}</td>
+									<td class="mono col-time">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
+									<td class="col-time">{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
+									{#each usageColumns as label (label)}
+										<td class="num col-token">—</td>
+									{/each}
+									<td class="num col-cost">—</td>
 								</tr>
 							{/if}
 						{/each}
@@ -818,8 +838,11 @@
 	}
 
 	table {
-		border-collapse: collapse;
+		border-collapse: separate;
+		border-spacing: 0;
+		table-layout: fixed;
 		width: 100%;
+		min-width: 74rem;
 		font-size: var(--font-size-sm);
 		white-space: nowrap;
 	}
@@ -835,6 +858,55 @@
 		color: var(--text-weak);
 		font-weight: var(--font-weight-medium);
 		background: var(--surface-base);
+	}
+
+	/* Fixed column widths so expanding a step never shifts the layout. */
+	.col-num {
+		width: 4.5rem;
+	}
+
+	.col-event {
+		width: 20rem;
+	}
+
+	.col-time {
+		width: 6.5rem;
+	}
+
+	.col-token {
+		width: 6rem;
+	}
+
+	.col-cost {
+		width: 6rem;
+	}
+
+	/* Pin the first two columns while the token columns scroll horizontally. */
+	.col-num,
+	.col-event {
+		position: sticky;
+		z-index: 2;
+		background: var(--background-strong);
+	}
+
+	.col-num {
+		left: 0;
+	}
+
+	.col-event {
+		left: 4.5rem;
+		overflow: hidden;
+	}
+
+	th.col-num,
+	th.col-event {
+		z-index: 3;
+		background: var(--surface-base);
+	}
+
+	.step-row:hover .col-num,
+	.step-row:hover .col-event {
+		background: var(--surface-raised-base-hover);
 	}
 
 	.num {
@@ -895,6 +967,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-2);
+		min-width: 0;
 	}
 
 	.child-mark,
@@ -915,7 +988,7 @@
 	}
 
 	.child-summary {
-		max-width: 32rem;
+		max-width: 100%;
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
