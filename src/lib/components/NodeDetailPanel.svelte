@@ -413,7 +413,7 @@
 				<table>
 					<thead>
 						<tr>
-							<th scope="col" class="num col-num">#</th>
+							<th scope="col" class="col-num">#</th>
 							<th scope="col" class="col-event">Event / action</th>
 							<th scope="col" class="col-time">Start</th>
 							<th scope="col" class="col-time">End</th>
@@ -436,7 +436,7 @@
 								<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_noninteractive_element_interactions -->
 								<tr class="step-row" onclick={() => toggleRow(row.key)}>
 									<td class="col-num">{row.stepIndex + 1}</td>
-									<td class="col-event">
+									<td class="col-event step-cell">
 										<button
 											type="button"
 											class="ui-icon-btn row-toggle"
@@ -449,7 +449,6 @@
 										>
 											<TreeIcon name="chevron" expanded={open} size={14} />
 										</button>
-										<span class="dot dot-kind-step"></span>
 										<span class="step-reason" title={reasonTitle(row.stepIndex, step, summary)}>
 											{step.reason ?? 'step'}
 										</span>
@@ -843,6 +842,7 @@
 		padding: var(--space-1) var(--space-2);
 		border-bottom: 1px solid var(--border-weaker-base);
 		text-align: left;
+		vertical-align: middle;
 	}
 
 	th {
@@ -853,13 +853,16 @@
 
 	/* Fixed column widths so expanding a step never shifts the layout. */
 	.col-num {
-		width: 3rem;
+		width: 2.5rem;
+		padding-left: var(--space-2);
+		padding-right: var(--space-1);
 		text-align: left;
 		font-variant-numeric: tabular-nums;
 	}
 
 	.col-event {
 		width: 20rem;
+		padding-left: var(--space-1);
 	}
 
 	.col-time {
@@ -887,7 +890,7 @@
 	}
 
 	.col-event {
-		left: 3rem;
+		left: 2.5rem;
 		overflow: hidden;
 	}
 
@@ -955,7 +958,8 @@
 		display: none;
 	}
 
-	.child-cell {
+	.child-cell,
+	.step-cell {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
@@ -968,10 +972,6 @@
 		color: var(--text-weak);
 	}
 
-	.child-mark {
-		padding-left: var(--space-4);
-	}
-
 	.marker-row {
 		color: var(--text-weak);
 	}
@@ -982,7 +982,6 @@
 
 	.row-toggle {
 		vertical-align: middle;
-		margin-right: var(--space-1);
 	}
 
 	.actions-buttons {
@@ -1034,8 +1033,7 @@
 	.dot-kind-compaction {
 		background: var(--text-weak);
 	}
-	.dot-kind-start,
-	.dot-kind-step {
+	.dot-kind-start {
 		background: var(--icon-base);
 	}
 
