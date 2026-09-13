@@ -254,7 +254,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 });
 
 describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => {
-	test('renders Retries | Markers | Tracker links | Permissions as a 4-column strip before the Steps table', () => {
+	test('renders Retries on its own row and the other three sections below, before the Steps table', () => {
 		const html = renderPanel(
 			makeDetail({
 				steps: [makeStep({ id: 's1', index: 0 }), makeStep({ id: 's2', index: 1 })],
@@ -266,12 +266,14 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 			}),
 			'https://zt.example'
 		);
-		// One strip carrying exactly four columns.
+		// One merged strip: identity, then Retries, then the three other columns.
 		const classTokens = [...html.matchAll(/class="([^"]*)"/g)].map((match) =>
 			match[1].split(/\s+/)
 		);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-strip')).length).toBe(1);
-		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(4);
+		expect(classTokens.filter((tokens) => tokens.includes('identity')).length).toBe(1);
+		expect(classTokens.filter((tokens) => tokens.includes('summary-row')).length).toBe(3);
+		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(3);
 		// All four headings render, including the empty tracker/permission states.
 		expect(html).toContain('Retries (1)');
 		expect(html).toContain('Markers (1)');

@@ -306,111 +306,194 @@
 			window.removeEventListener('resize', update);
 		};
 	});
+
+	/**
+	 * Keep a summary row exactly one line tall: items that no longer fit are
+	 * covered by an absolutely-positioned "+N ещё" counter whose tooltip lists
+	 * them. Re-measured on resize and whenever `signal` (the node detail)
+	 * changes, so the panel height stays stable when switching nodes.
+	 */
+	function clampLine(node: HTMLElement, signal: unknown) {
+		void signal;
+		let frame = 0;
+		const measure = () => {
+			frame = 0;
+			const counter = node.querySelector<HTMLElement>('[data-overflow-counter]');
+			const items = Array.from(node.querySelectorAll<HTMLElement>('[data-overflow-item]'));
+			if (!counter || items.length === 0) return;
+			const right = node.getBoundingClientRect().right;
+			let visible = items.length;
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].getBoundingClientRect().right > right + 0.5) {
+					visible = i;
+					break;
+				}
+			}
+			if (visible >= items.length) {
+				counter.hidden = true;
+				return;
+			}
+			const limit = right - (counter.offsetWidth || 64) - 4;
+			let fit = 0;
+			for (let i = 0; i < items.length; i++) {
+				if (items[i].getBoundingClientRect().right <= limit) fit++;
+				else break;
+			}
+			const hidden = items.length - fit;
+			if (hidden <= 0) {
+				counter.hidden = true;
+				return;
+			}
+			counter.hidden = false;
+			counter.textContent = `+${hidden} ещё`;
+			counter.title = items
+				.slice(fit)
+				.map((el) => el.textContent?.trim() ?? '')
+				.filter(Boolean)
+				.join('\n');
+		};
+		const schedule = () => {
+			if (frame) cancelAnimationFrame(frame);
+			frame = requestAnimationFrame(measure);
+		};
+		schedule();
+		const observer = new ResizeObserver(schedule);
+		observer.observe(node);
+		return {
+			update: schedule,
+			destroy() {
+				if (frame) cancelAnimationFrame(frame);
+				observer.disconnect();
+			}
+		};
+	}
 </script>
 
 <section class="panel" aria-label="Node detail">
-	<header class="panel-head">
-		<div>
-			<h3>{displayAgent(detail.node.agent)} node</h3>
-			<p class="muted mono">{detail.node.sessionId}</p>
-		</div>
-		<div class="meta">
-			<span class="ui-chip">{detail.node.kind}</span>
-			<span class="ui-chip">{detail.node.status}</span>
-			<span class="ui-chip">{detail.node.modelId ?? 'unknown model'}</span>
-			<span class="muted">
-				{formatClock(detail.node.startedAt)} →
-				{detail.node.endedAt === null ? 'running' : formatClock(detail.node.endedAt)}
-				· {formatDuration(detail.node.startedAt, detail.node.endedAt)}
-			</span>
-			<span title="Cost (gross)">{formatCost(detail.node.usage.cost)}</span>
-		</div>
-	</header>
-
-	<section class="block" aria-label="Node summary">
+	<section aria-label="Node summary">
 		<div class="summary-strip">
-			<div class="summary-col">
+			<div class="summary-row identity">
+				<div class="identity-left">
+					<div class="identity-title">
+						<h3>{displayAgent(detail.node.agent)} node</h3>
+						<span class="ui-chip">{detail.node.kind}</span>
+						<span class="ui-chip">{detail.node.status}</span>
+						<span class="ui-chip">{detail.node.modelId ?? 'unknown model'}</span>
+					</div>
+					<p class="muted mono">{detail.node.sessionId}</p>
+				</div>
+				<div class="identity-right">
+					<span class="mono">
+						{formatClock(detail.node.startedAt)} →
+						{detail.node.endedAt === null ? 'running' : formatClock(detail.node.endedAt)}
+					</span>
+					<span class="muted" title="Cost (gross)">
+						{formatDuration(detail.node.startedAt, detail.node.endedAt)} · {formatCost(
+							detail.node.usage.cost
+						)}
+					</span>
+				</div>
+			</div>
+			<div class="summary-row">
 				<h4>Retries ({retryGroups.length})</h4>
 				{#if retryGroups.length === 0}
 					<p class="empty">No retries.</p>
 				{:else}
-					<ul class="retries">
-						{#each retryGroups as group (group.name)}
-							<li class:has-error={group.hasError}>
-								<span class="name mono">{group.name}</span>
-								<span class="muted">
-									{group.calls.length} invocations · {group.retryCount} retr{group.retryCount === 1 ? 'y' : 'ies'}{group.hasError
-										? ' · includes error'
-										: ''}
-								</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-			<div class="summary-col">
-				<h4>Markers ({detail.markers.length})</h4>
-				{#if detail.markers.length === 0}
-					<p class="empty">No compaction or removed-content markers.</p>
-				{:else}
-					<ul class="markers">
-						{#each detail.markers as marker, index (marker.type + index)}
-							<li>
-								<span class={`ui-badge ui-badge--${marker.type}`}>{marker.type}</span>
-								<span class="muted">
-									{marker.type === 'compaction'
-										? marker.at === null
-											? 'context summarization point'
-											: `context summarization at ${formatClock(marker.at)}`
-										: 'removed content (no timestamp)'}
-								</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-			</div>
-			{#if ziptaskEnabled}
-				<div class="summary-col">
-					<h4>Tracker links <span class="muted">(inferred)</span></h4>
-					{#if trackerRefs.length === 0}
-						<p class="empty">No tracker link.</p>
-					{:else if refBase === null}
-						<p class="empty">ZIPTASK_BASE_URL is not configured.</p>
-					{:else}
-						<ul class="chips">
-							{#each trackerRefs as ref (ref)}
-								<li>
-									<button type="button" class="ui-chip ui-chip--link" onclick={() => onOpenTask?.(ref)}>
-										Task #{ref}
-									</button>
+					<div class="line" use:clampLine={detail}>
+						<ul class="line-list">
+							{#each retryGroups as group (group.name)}
+								<li class="line-item" data-overflow-item class:has-error={group.hasError}>
+									<span class="name mono">{group.name}</span>
+									<span class="muted">
+										{group.calls.length} invocations · {group.retryCount} retr{group.retryCount === 1
+											? 'y'
+											: 'ies'}{group.hasError ? ' · includes error' : ''}
+									</span>
 								</li>
 							{/each}
 						</ul>
-					{/if}
-				</div>
-			{/if}
-			<div class="summary-col">
-				<h4>Permissions ({permissionRows.length})</h4>
-				{#if permissionRows.length === 0}
-					<p class="empty">No permission prompts recorded.</p>
-				{:else}
-					<ul class="markers">
-						{#each permissionRows as permission (permission.requestId)}
-							<li>
-								<span
-									class={`ui-badge ${permission.reply === 'reject' ? 'ui-badge--removed' : 'ui-badge--perm'}`}
-								>
-									{permission.reply ?? 'pending'}
-								</span>
-								<span class="muted">
-									{permission.permission || 'permission'}{permission.patterns.length
-										? ` · ${permission.patterns.join(', ')}`
-										: ''}
-								</span>
-							</li>
-						{/each}
-					</ul>
+						<span class="line-more" data-overflow-counter hidden></span>
+					</div>
 				{/if}
+			</div>
+			<div class="summary-row summary-row--rest">
+				<section class="summary-col">
+					<h4>Markers ({detail.markers.length})</h4>
+					{#if detail.markers.length === 0}
+						<p class="empty">No compaction or removed-content markers.</p>
+					{:else}
+						<div class="line" use:clampLine={detail}>
+							<ul class="line-list">
+								{#each detail.markers as marker, index (marker.type + index)}
+									<li class="line-item" data-overflow-item>
+										<span class={`ui-badge ui-badge--${marker.type}`}>{marker.type}</span>
+										<span class="muted">
+											{marker.type === 'compaction'
+												? marker.at === null
+													? 'context summarization point'
+													: `context summarization at ${formatClock(marker.at)}`
+												: 'removed content (no timestamp)'}
+										</span>
+									</li>
+								{/each}
+							</ul>
+							<span class="line-more" data-overflow-counter hidden></span>
+						</div>
+					{/if}
+				</section>
+				{#if ziptaskEnabled}
+					<section class="summary-col">
+						<h4>Tracker links <span class="muted">(inferred)</span></h4>
+						{#if trackerRefs.length === 0}
+							<p class="empty">No tracker link.</p>
+						{:else if refBase === null}
+							<p class="empty">ZIPTASK_BASE_URL is not configured.</p>
+						{:else}
+							<div class="line" use:clampLine={detail}>
+								<ul class="line-list">
+									{#each trackerRefs as ref (ref)}
+										<li class="line-item" data-overflow-item>
+											<button
+												type="button"
+												class="ui-chip ui-chip--link"
+												onclick={() => onOpenTask?.(ref)}
+											>
+												Task #{ref}
+											</button>
+										</li>
+									{/each}
+								</ul>
+								<span class="line-more" data-overflow-counter hidden></span>
+							</div>
+						{/if}
+					</section>
+				{/if}
+				<section class="summary-col">
+					<h4>Permissions ({permissionRows.length})</h4>
+					{#if permissionRows.length === 0}
+						<p class="empty">No permission prompts recorded.</p>
+					{:else}
+						<div class="line" use:clampLine={detail}>
+							<ul class="line-list">
+								{#each permissionRows as permission (permission.requestId)}
+									<li class="line-item" data-overflow-item>
+										<span
+											class={`ui-badge ${permission.reply === 'reject' ? 'ui-badge--removed' : 'ui-badge--perm'}`}
+										>
+											{permission.reply ?? 'pending'}
+										</span>
+										<span class="muted">
+											{permission.permission || 'permission'}{permission.patterns.length
+												? ` · ${permission.patterns.join(', ')}`
+												: ''}
+										</span>
+									</li>
+								{/each}
+							</ul>
+							<span class="line-more" data-overflow-counter hidden></span>
+						</div>
+					{/if}
+				</section>
 			</div>
 		</div>
 	</section>
@@ -827,28 +910,42 @@
 		color: var(--text-base);
 	}
 
-	.panel-head {
+	/* Identity line: name + chips + session on the left, time range and
+	   duration · cost stacked on the right. Sits directly above the
+	   summary rows in the same block (no divider). */
+	.identity {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-start;
-		gap: var(--space-3);
-		border-bottom: 1px solid var(--border-weak-base);
-		padding-bottom: var(--space-2);
+		justify-content: space-between;
+		gap: var(--space-1) var(--space-3);
 	}
 
-	.panel-head h3 {
-		margin: 0;
-		font-size: var(--font-size-large);
-		font-weight: var(--font-weight-medium);
-		color: var(--text-strong);
+	.identity-left,
+	.identity-right {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
 	}
 
-	.panel-head .meta {
+	.identity-right {
+		align-items: flex-end;
+		text-align: right;
+	}
+
+	.identity-title {
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
 		gap: var(--space-2);
-		font-size: var(--font-size-small);
+	}
+
+	.identity-title h3 {
+		margin: 0;
+		font-size: var(--font-size-large);
+		font-weight: var(--font-weight-medium);
+		color: var(--text-strong);
 	}
 
 	.mono {
@@ -908,9 +1005,24 @@
 		color: var(--text-weak);
 		font-size: var(--font-size-small);
 		margin: 0;
+		display: flex;
+		align-items: center;
+		min-height: var(--space-6);
 	}
 
+	/* One block: identity, then Retries, then the three columns — two
+	   single-line rows, so the height stays stable when switching nodes.
+	   No divider or extra spacing between them. */
 	.summary-strip {
+		display: grid;
+		gap: var(--space-2);
+	}
+
+	.summary-row {
+		min-width: 0;
+	}
+
+	.summary-row--rest {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
 		align-items: start;
@@ -919,6 +1031,53 @@
 
 	.summary-col {
 		min-width: 0;
+	}
+
+	/* A summary row clipped to a single line; overflow items are covered by
+	   the absolutely positioned `.line-more` counter. */
+	.line {
+		position: relative;
+		overflow: hidden;
+		min-height: var(--space-6);
+	}
+
+	.line-list {
+		display: flex;
+		flex-wrap: nowrap;
+		gap: var(--space-3);
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		font-size: var(--font-size-small);
+	}
+
+	.line-item {
+		display: inline-flex;
+		align-items: baseline;
+		gap: var(--space-1);
+		flex: 0 0 auto;
+		white-space: nowrap;
+	}
+
+	.line-item.has-error .name {
+		color: var(--color-danger-strong);
+	}
+
+	.line-more {
+		position: absolute;
+		top: 0;
+		right: 0;
+		bottom: 0;
+		display: inline-flex;
+		align-items: center;
+		padding-left: var(--space-2);
+		background: var(--background-strong);
+		color: var(--text-interactive-base);
+		font-size: var(--font-size-small);
+	}
+
+	.line-more[hidden] {
+		display: none;
 	}
 
 	.table-scroll {
@@ -1015,10 +1174,7 @@
 		color: var(--color-danger-strong);
 	}
 
-	.calls,
-	.retries,
-	.markers,
-	.chips {
+	.calls {
 		list-style: none;
 		margin: 0;
 		padding: 0;
@@ -1228,37 +1384,6 @@
 
 	.raw-head h4 {
 		margin: 0;
-	}
-
-	.retries,
-	.markers {
-		display: grid;
-		gap: var(--space-1);
-		font-size: var(--font-size-small);
-	}
-
-	.retries li {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-2);
-		align-items: baseline;
-	}
-
-	.retries li.has-error .name {
-		color: var(--color-danger-strong);
-	}
-
-	.markers li {
-		display: flex;
-		gap: var(--space-2);
-		align-items: baseline;
-	}
-
-	.chips {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-1);
-		font-size: var(--font-size-small);
 	}
 
 	/* Floating "back to table" control: fixed over the content, fades in
