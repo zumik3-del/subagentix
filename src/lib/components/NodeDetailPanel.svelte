@@ -288,23 +288,24 @@
 
 	// Reveal the floating "back to table" button once the Steps & actions
 	// table has scrolled off the top (i.e. the user is down in Details),
-	// and hide it again as soon as the table is back in view.
+	// and hide it again as soon as the table is back in view. The app scrolls
+	// inside an inner ScrollView viewport, not the window, so observe the
+	// table against that scrollport as the IntersectionObserver root.
 	$effect(() => {
 		const el = tableEl;
 		if (!el) {
 			showBackToTable = false;
 			return;
 		}
-		const update = () => {
-			showBackToTable = el.getBoundingClientRect().bottom < 0;
-		};
-		update();
-		window.addEventListener('scroll', update, { passive: true });
-		window.addEventListener('resize', update);
-		return () => {
-			window.removeEventListener('scroll', update);
-			window.removeEventListener('resize', update);
-		};
+		const root = el.closest<HTMLElement>('.scroll-view__viewport--vertical');
+		const observer = new IntersectionObserver(
+			([entry]) => {
+				showBackToTable = !entry.isIntersecting && entry.boundingClientRect.height > 0;
+			},
+			{ root, threshold: 0 }
+		);
+		observer.observe(el);
+		return () => observer.disconnect();
 	});
 
 	/**
