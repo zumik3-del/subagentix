@@ -82,6 +82,8 @@
 	let flashTimer: ReturnType<typeof setTimeout> | null = null;
 	/** Steps & actions table element, watched to reveal the floating back button. */
 	let tableEl: HTMLElement | null = $state(null);
+	/** Steps & actions section heading target for the floating back button. */
+	let tableSectionEl: HTMLElement | null = $state(null);
 	let showBackToTable = $state(false);
 
 	const retryGroups = $derived(groupToolRetries(detail.toolCalls));
@@ -236,9 +238,9 @@
 			block: 'center'
 		});
 	}
-	/** Jump back to the top of the Steps & actions table. */
+	/** Jump back to the top of the Steps & actions section (its heading). */
 	function backToTable() {
-		tableEl?.scrollIntoView({
+		(tableSectionEl ?? tableEl)?.scrollIntoView({
 			behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
 			block: 'start'
 		});
@@ -501,7 +503,7 @@
 		</div>
 	</section>
 
-	<section class="block">
+	<section class="block" bind:this={tableSectionEl}>
 		<div class="actions-head">
 			<h4>Steps &amp; actions ({stepCount} steps · {itemCount} items)</h4>
 			<input
