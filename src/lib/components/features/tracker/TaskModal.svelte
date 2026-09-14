@@ -8,7 +8,7 @@
 	 * from an `$effect`; SSR renders the loading state.
 	 */
 	import { normaliseTaskDetail, type TrackerTaskDetail } from '$lib/model/tracker';
-	import ScrollView from './ScrollView.svelte';
+	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import TaskDetailView from './TaskDetailView.svelte';
 
 	let { id, onClose }: { id: string; onClose?: () => void } = $props();

@@ -38,7 +38,7 @@ beforeAll(async () => {
 		(await vite.ssrLoadModule('svelte')) as { createRawSnippet: RawSnippetFactory }
 	).createRawSnippet;
 	ScrollView = (
-		(await vite.ssrLoadModule('/src/lib/components/ScrollView.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/primitives/ScrollView.svelte')) as {
 			default: unknown;
 		}
 	).default;
@@ -98,7 +98,7 @@ describe('ScrollView SSR — wrapper/viewport structure', () => {
 // --- CSS contract -----------------------------------------------------------
 
 describe('ScrollView CSS — native bar hidden, neutral overlay thumb', () => {
-	const svelte = source('./ScrollView.svelte');
+	const svelte = source('./primitives/ScrollView.svelte');
 	const style = svelte.slice(svelte.indexOf('<style>'));
 
 	test('hides the native scrollbar on the viewport', () => {
@@ -135,7 +135,7 @@ describe('ScrollView CSS — native bar hidden, neutral overlay thumb', () => {
 // --- Client behaviour (source contract; no DOM runtime) ---------------------
 
 describe('ScrollView behaviour — visibility, auto-hide and drag (source contract)', () => {
-	const svelte = source('./ScrollView.svelte');
+	const svelte = source('./primitives/ScrollView.svelte');
 
 	test('vertical and horizontal are derived from the orientation prop', () => {
 		expect(svelte).toContain(
@@ -201,13 +201,18 @@ describe('ScrollView behaviour — visibility, auto-hide and drag (source contra
 
 describe('ScrollView adoption — every native scroll region is wrapped (task #225)', () => {
 	const layout = source('../../routes/+layout.svelte');
-	const gantt = source('./Gantt.svelte');
-	const panel = source('./NodeDetailPanel.svelte');
+	const gantt = source('./features/gantt/Gantt.svelte');
+	const panel = source('./features/node-detail/NodeDetailPanel.svelte');
+	const nodeActionsTable = source('./features/node-detail/NodeActionsTable.svelte');
+	const ioBlock = source('./composites/IoBlock.svelte');
+	const toolCallCard = source('./features/node-detail/ToolCallCard.svelte');
+	const actionCard = source('./features/node-detail/ActionCard.svelte');
+	const rawJson = source('./features/node-detail/RawJsonBlock.svelte');
 
 	// #228: the outer ScrollView is removed from +layout; only the content column
 	// is wrapped. The sidebar's own ScrollView lives inside SessionSidebar.
 	test('+layout wraps only the content column (sidebar ScrollView moved into SessionSidebar, task #228)', () => {
-		expect(layout).toContain("import ScrollView from '$lib/components/ScrollView.svelte';");
+		expect(layout).toContain("import ScrollView from '$lib/components/primitives/ScrollView.svelte';");
 		const sidebarSlot = layout.slice(
 			layout.indexOf('class="sidebar-slot"'),
 			layout.indexOf('class="content"')
@@ -231,15 +236,25 @@ describe('ScrollView adoption — every native scroll region is wrapped (task #2
 		expect(scrollRule).not.toContain('overflow-x: auto');
 	});
 
-	test('NodeDetailPanel wraps the steps table, both io texts and the raw JSON', () => {
-		expect(panel).toContain('class="table-scroll"');
-		const tableScroll = panel.slice(panel.indexOf('class="table-scroll"'));
+	test('NodeActionsTable wraps the steps table; IoBlock and RawJsonBlock wrap their values', () => {
+		// The steps table moved into NodeActionsTable (ADR 2.6).
+		expect(nodeActionsTable).toContain('class="table-scroll"');
+		const tableScroll = nodeActionsTable.slice(
+			nodeActionsTable.indexOf('class="table-scroll"')
+		);
 		expect(tableScroll.indexOf('<ScrollView orientation="horizontal">')).toBeLessThan(
 			tableScroll.indexOf('<table>')
 		);
-		// Both input and output values use the default (vertical) ScrollView.
-		expect(panel.split('<ScrollView>{').length - 1).toBe(3);
-		expect(panel).toMatch(
+		// The three IO blocks (input/output/content) are IoBlock instances owned by
+		// the extracted Details cards (ADR 2.4); the vertical ScrollView for each
+		// value lives inside IoBlock. The panel root no longer hosts any IoBlock.
+		expect(panel.split('<IoBlock').length - 1).toBe(0);
+		expect(toolCallCard.split('<IoBlock').length - 1).toBe(2);
+		expect(actionCard.split('<IoBlock').length - 1).toBe(1);
+		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
+		// The raw-JSON ScrollView moved into RawJsonBlock with its section (ADR 2.5).
+		expect(panel).toContain('<RawJsonBlock {detail} />');
+		expect(rawJson).toMatch(
 			/<div class="raw">\s*<ScrollView>\{JSON\.stringify\(detail, null, 2\)\}<\/ScrollView>/
 		);
 	});
@@ -261,7 +276,7 @@ describe('ScrollView adoption — every native scroll region is wrapped (task #2
 // --- Task #228: Sidebar header fixed, inner ScrollView, inset-active cue ------
 
 describe('SessionSidebar structure — header outside inner ScrollView (task #228)', () => {
-	const sidebar = source('./SessionSidebar.svelte');
+	const sidebar = source('./features/sidebar/SessionSidebar.svelte');
 
 	test('header is flex:none and sits above a single inner ScrollView', () => {
 		// The .sidebar-header must be flex:none so it never scrolls.
@@ -312,35 +327,41 @@ describe('SessionSidebar structure — header outside inner ScrollView (task #22
 // --- Task #229: Gantt labels/.chart shared background + full-row hit -----------
 
 describe('Gantt layout — labels/chart share --background-strong, full-row label hit (task #229)', () => {
-	const gantt = source('./Gantt.svelte');
+	const gantt = source('./features/gantt/Gantt.svelte');
+	// Task #279: the sticky label column moved to GanttLabels.svelte and one
+	// row's label markup/CSS to GanttLabelRow.svelte.
+	const ganttLabels = source('./features/gantt/GanttLabels.svelte');
+	const ganttLabelRow = source('./features/gantt/GanttLabelRow.svelte');
+	// Task #280: the `<svg class="chart">` shell moved to GanttChart.svelte.
+	const ganttChart = source('./features/gantt/GanttChart.svelte');
 
 	test('.labels and .chart both use --background-strong for a seamless row band', () => {
-		const labelsRule = gantt.match(/\.labels \{[^}]*\}/)?.[0] ?? '';
-		const chartRule = gantt.match(/\.chart \{[^}]*\}/)?.[0] ?? '';
+		const labelsRule = ganttLabels.match(/\.labels \{[^}]*\}/)?.[0] ?? '';
+		const chartRule = ganttChart.match(/\.chart \{[^}]*\}/)?.[0] ?? '';
 		expect(labelsRule).toContain('background: var(--background-strong)');
 		expect(chartRule).toContain('background: var(--background-strong)');
 	});
 
 	test('no zebra stripe remains: class:stripe, .label.stripe and SVG .stripe are all gone', () => {
 		// Issue #8: uniform canvas, no alternating row backgrounds.
-		expect(gantt).not.toContain('class:stripe={row.index % 2 === 1}');
-		const stripeRule = gantt.match(/\.label\.stripe \{[^}]*\}/)?.[0] ?? '';
+		expect(ganttLabelRow).not.toContain('class:stripe={row.index % 2 === 1}');
+		const stripeRule = ganttLabelRow.match(/\.label\.stripe \{[^}]*\}/)?.[0] ?? '';
 		expect(stripeRule).toBe('');
 		expect(gantt).not.toMatch(/<rect[^>]*class="stripe"/);
-		expect(gantt).not.toMatch(/\.stripe\s*\{/);
+		expect(`${gantt}\n${ganttLabels}\n${ganttLabelRow}\n${ganttChart}`).not.toMatch(/\.stripe\s*\{/);
 	});
 
 	test('Gantt block shares one --background-strong canvas across .scroll/.labels/.chart', () => {
 		const scrollRule = gantt.match(/\.scroll\s*\{[^}]*\}/)?.[0] ?? '';
-		const labelsRule = gantt.match(/\.labels\s*\{[^}]*\}/)?.[0] ?? '';
-		const chartRule = gantt.match(/\.chart\s*\{[^}]*\}/)?.[0] ?? '';
+		const labelsRule = ganttLabels.match(/\.labels\s*\{[^}]*\}/)?.[0] ?? '';
+		const chartRule = ganttChart.match(/\.chart\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(scrollRule).toContain('background: var(--background-strong)');
 		expect(labelsRule).toContain('background: var(--background-strong)');
 		expect(chartRule).toContain('background: var(--background-strong)');
 	});
 
 	test('the label button flex-fills the row for a full-row hit area', () => {
-		const btnRule = gantt.match(/\.label-btn \{[\s\S]*?\}/)?.[0] ?? '';
+		const btnRule = ganttLabelRow.match(/\.label-btn \{[\s\S]*?\}/)?.[0] ?? '';
 		expect(btnRule).toContain('width: 100%');
 		expect(btnRule).toContain('flex: 1');
 	});
@@ -357,7 +378,11 @@ describe('Gantt layout — labels/chart share --background-strong, full-row labe
 // --- Task #234: uniform canvas + inset axis header band (#8 / #9) --------------
 
 describe('Gantt #234 — uniform canvas, inset band, axis header (issues #8 / #9)', () => {
-	const gantt = source('./Gantt.svelte');
+	const gantt = source('./features/gantt/Gantt.svelte');
+	// Task #279: the `.axis-spacer` lives in the extracted label column.
+	const ganttLabels = source('./features/gantt/GanttLabels.svelte');
+	// Task #280: the SVG shell + axis band + row backgrounds moved to GanttChart.
+	const ganttChart = source('./features/gantt/GanttChart.svelte');
 
 	test('INSET and TICK_EDGE constants are declared', () => {
 		expect(gantt).toContain('const INSET = 16;');
@@ -366,44 +391,44 @@ describe('Gantt #234 — uniform canvas, inset band, axis header (issues #8 / #9
 
 	test('SVG row hairline uses --border-weaker-base per row', () => {
 		// Each row gets a <line class="row-hairline"> spanning the chart width.
-		expect(gantt).toContain('class="row-hairline"');
-		expect(gantt).toContain('x2={chartWidth}');
-		const hairlineRule = gantt.match(/\.row-hairline\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(ganttChart).toContain('class="row-hairline"');
+		expect(ganttChart).toContain('x2={chartWidth}');
+		const hairlineRule = ganttChart.match(/\.row-hairline\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(hairlineRule).toContain('stroke: var(--border-weaker-base)');
 	});
 
 	test('SVG row emphasis: hover weak, selected base + accent, no zebra', () => {
 		// Row background rect with state-driven classes.
-		expect(gantt).toContain('class="row-bg"');
-		expect(gantt).toContain('class:hovered={hoveredNodeId === row.node.sessionId}');
-		expect(gantt).toContain('class:active={row.active}');
+		expect(ganttChart).toContain('class="row-bg"');
+		expect(ganttChart).toContain('class:hovered={hoveredNodeId === row.node.sessionId}');
+		expect(ganttChart).toContain('class:active={row.active}');
 		// CSS: transparent base, weak on hover, base on active.
-		const rowBgRule = gantt.match(/\.row-bg\s*\{[^}]*\}/)?.[0] ?? '';
+		const rowBgRule = ganttChart.match(/\.row-bg\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(rowBgRule).toContain('fill: transparent');
-		const rowHoveredRule = gantt.match(/\.row-bg\.hovered\s*\{[^}]*\}/)?.[0] ?? '';
+		const rowHoveredRule = ganttChart.match(/\.row-bg\.hovered\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(rowHoveredRule).toContain('fill: var(--surface-interactive-weak)');
-		const rowActiveRule = gantt.match(/\.row-bg\.active\s*\{[^}]*\}/)?.[0] ?? '';
+		const rowActiveRule = ganttChart.match(/\.row-bg\.active\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(rowActiveRule).toContain('fill: var(--surface-interactive-base)');
 		// Selected row gets a 2px accent at the chart's right edge.
-		expect(gantt).toContain('class="row-accent"');
-		expect(gantt).toContain('x={chartWidth - 2}');
-		expect(gantt).toContain('width="2"');
-		const accentRule = gantt.match(/\.row-accent\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(ganttChart).toContain('class="row-accent"');
+		expect(ganttChart).toContain('x={chartWidth - 2}');
+		expect(ganttChart).toContain('width="2"');
+		const accentRule = ganttChart.match(/\.row-accent\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(accentRule).toContain('fill: var(--border-selected)');
 	});
 
 	test('axis header band: full-width --background-stronger fill + --border-weak-base bottom border', () => {
 		// SVG rect and line for the axis band.
-		expect(gantt).toContain('class="axis-band"');
-		expect(gantt).toContain('class="axis-band-border"');
-		const bandRule = gantt.match(/\.axis-band\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(ganttChart).toContain('class="axis-band"');
+		expect(ganttChart).toContain('class="axis-band-border"');
+		const bandRule = ganttChart.match(/\.axis-band\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(bandRule).toContain('fill: var(--background-stronger)');
-		const borderRule = gantt.match(/\.axis-band-border\s*\{[^}]*\}/)?.[0] ?? '';
+		const borderRule = ganttChart.match(/\.axis-band-border\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(borderRule).toContain('stroke: var(--border-weak-base)');
 	});
 
 	test('.axis-spacer mirrors the SVG axis band (stronger bg + bottom border)', () => {
-		const spacerRule = gantt.match(/\.axis-spacer\s*\{[\s\S]*?\}/)?.[0] ?? '';
+		const spacerRule = ganttLabels.match(/\.axis-spacer\s*\{[\s\S]*?\}/)?.[0] ?? '';
 		expect(spacerRule).toContain('background: var(--background-stronger)');
 		expect(spacerRule).toContain('border-bottom: 1px solid var(--border-weak-base)');
 	});
@@ -413,8 +438,9 @@ describe('Gantt #234 — uniform canvas, inset band, axis header (issues #8 / #9
 		expect(gantt).toContain("if (px - INSET < TICK_EDGE) return 'start'");
 		expect(gantt).toContain("if (chartWidth - INSET - px < TICK_EDGE) return 'end'");
 		expect(gantt).toContain("return 'middle'");
-		// Ticks use the anchor function.
-		expect(gantt).toContain('text-anchor={tickAnchor(x(tick))}');
+		// The root maps each tick to its anchor; the SVG shell renders it.
+		expect(gantt).toContain('anchor: tickAnchor(x(t))');
+		expect(ganttChart).toContain('text-anchor={tick.anchor}');
 	});
 
 	test('cursor time math inverts the inset transform and clamps to the band', () => {
@@ -434,7 +460,7 @@ describe('Gantt #234 — uniform canvas, inset band, axis header (issues #8 / #9
 	});
 
 	test('axis line spans only the inset band, not the full chart width', () => {
-		expect(gantt).toContain('x1={INSET}');
-		expect(gantt).toContain('x2={chartWidth - INSET}');
+		expect(ganttChart).toContain('x1={inset}');
+		expect(ganttChart).toContain('x2={chartWidth - inset}');
 	});
 });

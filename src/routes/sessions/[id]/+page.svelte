@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
-	import Gantt from '$lib/components/Gantt.svelte';
+	import Gantt from '$lib/components/features/gantt/Gantt.svelte';
 	import { displayAgent } from '$lib/model/agent';
 	import {
 		formatClock,

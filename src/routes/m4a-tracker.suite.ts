@@ -42,7 +42,7 @@ beforeAll(async () => {
 	const server = (await vite.ssrLoadModule('svelte/server')) as { render: unknown };
 	render = server.render as RenderFn;
 	Gantt = (
-		(await vite.ssrLoadModule('/src/lib/components/Gantt.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/features/gantt/Gantt.svelte')) as {
 			default: unknown;
 		}
 	).default;
@@ -148,12 +148,26 @@ function countOf(html: string, needle: string): number {
 	return html.split(needle).length - 1;
 }
 
-const ganttSource = readFileSync(new URL('../lib/components/Gantt.svelte', import.meta.url), 'utf8');
-const panelSource = readFileSync(
-	new URL('../lib/components/NodeDetailPanel.svelte', import.meta.url),
+const ganttSource = readFileSync(new URL('../lib/components/features/gantt/Gantt.svelte', import.meta.url), 'utf8');
+const chipListSource = readFileSync(
+	new URL('../lib/components/composites/TrackerChipList.svelte', import.meta.url),
 	'utf8'
 );
-const modalSource = readFileSync(new URL('../lib/components/TaskModal.svelte', import.meta.url), 'utf8');
+// Task #279: the per-row label markup (which forwards `onOpen` to the chip
+// list) moved to GanttLabelRow.svelte.
+const labelRowSource = readFileSync(
+	new URL('../lib/components/features/gantt/GanttLabelRow.svelte', import.meta.url),
+	'utf8'
+);
+const panelSource = readFileSync(
+	new URL('../lib/components/features/node-detail/NodeDetailPanel.svelte', import.meta.url),
+	'utf8'
+);
+const summaryStripSource = readFileSync(
+	new URL('../lib/components/features/node-detail/NodeSummaryStrip.svelte', import.meta.url),
+	'utf8'
+);
+const modalSource = readFileSync(new URL('../lib/components/features/tracker/TaskModal.svelte', import.meta.url), 'utf8');
 
 // --- Chip buttons and labels -------------------------------------------------
 
@@ -310,13 +324,18 @@ describe('Gantt SSR — escaping and raw-HTML hygiene', () => {
 	});
 
 	test('the chip is wired to open the modal, not navigate', () => {
-		expect(ganttSource).toContain("import TaskModal from './TaskModal.svelte';");
+		expect(ganttSource).toContain("import TaskModal from '$lib/components/features/tracker/TaskModal.svelte';");
 		expect(ganttSource).toContain('let activeTaskId = $state<string | null>(null);');
-		expect(ganttSource).toContain('onclick={() => openTask(ref)}');
+		// Task #278: the chip markup moved to TrackerChipList, which calls the
+		// `onOpen` callback the Gantt root still owns.
+		expect(chipListSource).toContain('onclick={() => onOpen?.(ref)}');
+		expect(labelRowSource).toContain('onOpen={refBase !== null ? onOpenTask : undefined}');
 		expect(ganttSource).toContain('onOpenTask={openTask}');
 		expect(ganttSource).toContain('<TaskModal id={activeTaskId} onClose={closeTask} />');
-		// The panel delegates to the same owner instead of linking out.
-		expect(panelSource).toContain('onOpenTask?.(ref)');
+		// The panel forwards the callback to the summary strip, which delegates
+		// to the same owner instead of linking out.
+		expect(panelSource).toContain('{onOpenTask}');
+		expect(summaryStripSource).toContain('onOpenTask?.(ref)');
 	});
 
 	test('the modal fetches subagentix\'s own proxy and uses no raw HTML', () => {

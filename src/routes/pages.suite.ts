@@ -1041,8 +1041,8 @@ describe('U1/U2 shell — full-width layout, opencode theme, client hygiene', ()
 
 	test('shell client sources keep no server-only import and no {@html}', () => {
 		for (const rel of [
-			'src/lib/components/SessionSidebar.svelte',
-			'src/lib/components/SettingsModal.svelte',
+			'src/lib/components/features/sidebar/SessionSidebar.svelte',
+			'src/lib/components/features/settings/SettingsModal.svelte',
 			'src/routes/+layout.svelte'
 		]) {
 			const source = readFileSync(join(repoRoot, rel), 'utf8');
@@ -1082,7 +1082,7 @@ describe('U1/U2 shell — full-width layout, opencode theme, client hygiene', ()
 	}, 60_000);
 
 	test('SessionSidebar builds turn links, active-turn highlight and lazy fetch (source)', () => {
-		const source = readFileSync(join(repoRoot, 'src/lib/components/SessionSidebar.svelte'), 'utf8');
+		const source = readFileSync(join(repoRoot, 'src/lib/components/features/sidebar/SessionSidebar.svelte'), 'utf8');
 		expect(source).toContain('?turn=${encodeURIComponent(turn.turnId)}');
 		expect(source).toContain('turn.turnId === activeTurnId');
 		expect(source).toContain("searchParams.get('turn')");
@@ -1200,7 +1200,7 @@ describe('UI #210/#225 — scroll ownership in the built CSS', () => {
 });
 
 describe('UI #215 — inspector below the chart + first-node auto-open', () => {
-	const gantt = readFileSync(join(repoRoot, 'src/lib/components/Gantt.svelte'), 'utf8');
+	const gantt = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/Gantt.svelte'), 'utf8');
 
 	test('the node inspector markup renders below the chart (source)', () => {
 		const mainCol = gantt.indexOf('<div class="main-col">');
@@ -1299,14 +1299,30 @@ describe('UI #210 — closed-sidebar focus safety', () => {
 });
 
 describe('UI #210 — Gantt selection vs hover', () => {
-	const gantt = readFileSync(join(repoRoot, 'src/lib/components/Gantt.svelte'), 'utf8');
+	const gantt = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/Gantt.svelte'), 'utf8');
+	// Task #276: the turn header (and its summary) moved to GanttHeader.svelte.
+	const ganttHeader = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/GanttHeader.svelte'), 'utf8');
+	// Task #279: the label button moved to GanttLabelRow.svelte.
+	const ganttLabelRow = readFileSync(
+		join(repoRoot, 'src/lib/components/features/gantt/GanttLabelRow.svelte'),
+		'utf8'
+	);
+	// Task #280: the SVG row background (its `class:active` hook) moved to
+	// GanttChart.svelte.
+	const ganttChart = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/GanttChart.svelte'), 'utf8');
+	// Task #282: the SVG node group (the other `aria-pressed`/`class:active`
+	// surface) moved to GanttNodeRow.svelte.
+	const ganttNodeRow = readFileSync(
+		join(repoRoot, 'src/lib/components/features/gantt/GanttNodeRow.svelte'),
+		'utf8'
+	);
 
 	// Task #237: no h3 title; summary starts with time range, not node/edge counts.
 	test('no <h3>Turn Gantt</h3> and summary has no count prefixes (source)', () => {
-		expect(gantt).not.toContain('<h3>');
-		expect(gantt).not.toContain('Turn Gantt');
-		expect(gantt).toContain('{formatClock(extent.start)} → {formatClock(extent.end)}');
-		expect(gantt).not.toMatch(/node.*count|delegation.*edge.*count/i);
+		expect(ganttHeader).not.toContain('<h3>');
+		expect(ganttHeader).not.toContain('Turn Gantt');
+		expect(ganttHeader).toContain('{formatClock(extent.start)} → {formatClock(extent.end)}');
+		expect(ganttHeader).not.toMatch(/node.*count|delegation.*edge.*count/i);
 	});
 
 	test('aria-pressed/selected derives from selectedNodeId only, never hover (source)', () => {
@@ -1317,10 +1333,19 @@ describe('UI #210 — Gantt selection vs hover', () => {
 		// (dimming + edge emphasis), which must not reach `row.active`.
 		expect(gantt).toContain('active: selectedNodeId === node.sessionId,');
 		expect(gantt).not.toContain('active: active === node.sessionId,');
-		// Both the label button and the SVG node group bind the selection-only flag.
-		expect(gantt.match(/aria-pressed=\{row\.active\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
-		// The `class:active` styling hook is still present on both surfaces.
-		expect(gantt.match(/class:active=\{row\.active\}/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+		// The label button (in GanttLabelRow) and the SVG node group (in
+		// GanttNodeRow, task #282) bind the selection-only flag.
+		expect(
+			(ganttLabelRow + ganttNodeRow).match(/aria-pressed=\{row\.active\}/g)?.length ?? 0
+		).toBeGreaterThanOrEqual(2);
+		// The `class:active` styling hook is still present on both surfaces
+		// (SVG row-bg in GanttChart + node group in GanttNodeRow). Task #280 moved
+		// the row background to GanttChart; task #282 moved the node group to
+		// GanttNodeRow.
+		expect(
+			((ganttChart + ganttNodeRow).match(/class:active=\{row\.active\}/g)?.length ?? 0)
+		).toBeGreaterThanOrEqual(2);
+		expect(ganttLabelRow.match(/class:active=\{row\.active\}/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
 	});
 
 	test('SSR renders no pressed node before any selection (hover cannot set it)', async () => {
@@ -1347,20 +1372,31 @@ describe('UI #210 — Gantt selection vs hover', () => {
 
 describe('UI #210 — dark running hatch', () => {
 	test('running hatch + legend share a dark amber color-mix, not the light warning token (source)', () => {
-		const gantt = readFileSync(join(repoRoot, 'src/lib/components/Gantt.svelte'), 'utf8');
+		const gantt = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/Gantt.svelte'), 'utf8');
+		// Task #277: the legend markup and CSS moved to GanttLegend.svelte; the
+		// `--running-hatch-bg` declaration stays on the `.gantt` root in Gantt.
+		// Task #280: the SVG hatch pattern CSS moved to GanttChart.svelte.
+		const ganttChart = readFileSync(join(repoRoot, 'src/lib/components/features/gantt/GanttChart.svelte'), 'utf8');
+		const ganttLegend = readFileSync(
+			join(repoRoot, 'src/lib/components/features/gantt/GanttLegend.svelte'),
+			'utf8'
+		);
 		// The light warning token may be mentioned in the explanatory comment;
 		// what matters is that no declaration consumes it.
 		expect(gantt).not.toContain('var(--surface-warning-weak)');
+		expect(ganttChart).not.toContain('var(--surface-warning-weak)');
 		expect(gantt).toMatch(
 			/--running-hatch-bg:\s*color-mix\(in srgb, var\(--color-warning-base\) 25%, var\(--background-strong\)\)/
 		);
 		// The SVG pattern background uses the shared dark token.
-		expect(gantt).toContain('fill: var(--running-hatch-bg)');
-		expect(gantt).toContain('stroke: var(--color-warning-base)');
+		expect(ganttChart).toContain('fill: var(--running-hatch-bg)');
+		expect(ganttChart).toContain('stroke: var(--color-warning-base)');
 		// The legend chip is the same hatch, not a second light colour.
-		expect(gantt).toContain('<span class="running-chip"></span>');
-		expect(gantt).toMatch(/\.running-chip \{[\s\S]*?var\(--running-hatch-bg\)[\s\S]*?var\(--color-warning-base\)/);
-		expect(gantt).not.toMatch(/\.running-chip \{[\s\S]*?surface-warning-weak/);
+		expect(ganttLegend).toContain('<span class="running-chip"></span>');
+		expect(ganttLegend).toMatch(
+			/\.running-chip \{[\s\S]*?var\(--running-hatch-bg\)[\s\S]*?var\(--color-warning-base\)/
+		);
+		expect(ganttLegend).not.toMatch(/\.running-chip \{[\s\S]*?surface-warning-weak/);
 	});
 
 	test('built Gantt CSS keeps the dark running hatch token (no surface-warning-weak)', () => {
@@ -1381,7 +1417,7 @@ describe('UI #212 — sidebar request race guards (SessionSidebar source)', () =
 	// DOM runtime in `bun test`, so these are scoped static assertions rather
 	// than executed interleavings. They are falsifiable: removing a guard, the
 	// sequence bump or the catch-branch list reset fails them.
-	const source = readFileSync(join(repoRoot, 'src/lib/components/SessionSidebar.svelte'), 'utf8');
+	const source = readFileSync(join(repoRoot, 'src/lib/components/features/sidebar/SessionSidebar.svelte'), 'utf8');
 
 	test('flat search takes a monotonic searchSeq and superseded responses bail out', () => {
 		// Task #212 split the old single `requestSeq` into `searchSeq` (flat

@@ -44,22 +44,22 @@ beforeAll(async () => {
 	const server = (await vite.ssrLoadModule('svelte/server')) as { render: unknown };
 	render = server.render as RenderFn;
 	Panel = (
-		(await vite.ssrLoadModule('/src/lib/components/NodeDetailPanel.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/features/node-detail/NodeDetailPanel.svelte')) as {
 			default: unknown;
 		}
 	).default;
 	Gantt = (
-		(await vite.ssrLoadModule('/src/lib/components/Gantt.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/features/gantt/Gantt.svelte')) as {
 			default: unknown;
 		}
 	).default;
 	TaskDetailView = (
-		(await vite.ssrLoadModule('/src/lib/components/TaskDetailView.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/features/tracker/TaskDetailView.svelte')) as {
 			default: unknown;
 		}
 	).default;
 	TaskModal = (
-		(await vite.ssrLoadModule('/src/lib/components/TaskModal.svelte')) as {
+		(await vite.ssrLoadModule('/src/lib/components/features/tracker/TaskModal.svelte')) as {
 			default: unknown;
 		}
 	).default;
@@ -298,9 +298,9 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 	});
 
 	test('the strip is a responsive auto-fit grid (source)', () => {
-		const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
-		expect(panel).toContain('class="summary-strip"');
-		expect(panel).toMatch(
+		const strip = componentSource('../lib/components/features/node-detail/NodeSummaryStrip.svelte');
+		expect(strip).toContain('class="summary-strip"');
+		expect(strip).toMatch(
 			/grid-template-columns:\s*repeat\(auto-fit,\s*minmax\(14rem,\s*1fr\)\)/
 		);
 	});
@@ -679,31 +679,50 @@ function componentSource(relative: string): string {
 }
 
 describe('client source wiring — keyboard, selection and raw-HTML hygiene', () => {
-	const gantt = componentSource('../lib/components/Gantt.svelte');
-	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
+	const gantt = componentSource('../lib/components/features/gantt/Gantt.svelte');
+	// Task #282: the SVG node group (keyboard/click bindings + class:active)
+	// moved to GanttNodeRow.svelte.
+	const ganttNodeRow = componentSource('../lib/components/features/gantt/GanttNodeRow.svelte');
+	const panel = componentSource('../lib/components/features/node-detail/NodeDetailPanel.svelte');
+	const toolCallCard = componentSource('../lib/components/features/node-detail/ToolCallCard.svelte');
 
 	test('Gantt rows bind Enter/Space to selection with preventDefault', () => {
-		expect(gantt).toContain('onkeydown={(event) => onRowKey(event, row.node.sessionId)}');
+		// The node group markup lives in GanttNodeRow; the `onRowKey` handler and
+		// `selectNode` state stay in the Gantt root.
+		expect(ganttNodeRow).toContain('onkeydown={(event) => onRowKey(event, row.node.sessionId)}');
 		expect(gantt).toContain('function onRowKey(event: KeyboardEvent, nodeId: string)');
 		expect(gantt).toContain("event.key === 'Enter' || event.key === ' '");
 		expect(gantt).toContain('event.preventDefault()');
 		expect(gantt).toContain('selectNode(nodeId)');
-		expect(gantt).toContain('onclick={() => selectNode(row.node.sessionId)}');
+		expect(ganttNodeRow).toContain('onclick={() => onSelect(row.node.sessionId)}');
 	});
 
 	test('Gantt marks the selected row/node and renders the panel from the selection', () => {
-		expect(gantt).toContain('class:active={row.active}');
+		// Task #282: the node group `class:active` hook moved to GanttNodeRow.
+		expect(ganttNodeRow).toContain('class:active={row.active}');
 		expect(gantt).toContain('{#if selectedDetail}');
 		expect(gantt).toContain('<NodeDetailPanel');
 	});
 
-	test('the panel Expand / raw-JSON toggles render the full value when active', () => {
-		expect(panel).toContain('onclick={() => toggleExpanded(`${call.id}:input`)}');
-		expect(panel).toContain('onclick={() => toggleExpanded(`${call.id}:output`)}');
-		expect(panel).toContain('? call.input : input.text');
-		expect(panel).toContain('? call.output : output.text');
-		expect(panel).toContain('onclick={() => (showRaw = !showRaw)}');
-		expect(panel).toContain('{#if showRaw}');
+	test('the IO blocks render the full value when active and the raw-JSON toggle lives in RawJsonBlock', () => {
+		// The label + ScrollView + expand-toggle chrome moved into IoBlock; the
+		// value decision (`? full : truncated`) and the toggle wiring moved into
+		// ToolCallCard with the tool-call card (ADR 2.4), because `children`
+		// carries the already-decided text. The raw-JSON section + its collapsed
+		// toggle moved into RawJsonBlock (ADR 2.5).
+		const ioBlock = componentSource('../lib/components/composites/IoBlock.svelte');
+		const rawJson = componentSource('../lib/components/features/node-detail/RawJsonBlock.svelte');
+		expect(ioBlock).toContain('<span class="io-label">{label}</span>');
+		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
+		expect(ioBlock).toContain('aria-expanded={expanded}');
+		expect(ioBlock).toContain('onclick={onToggle}');
+		expect(ioBlock).toContain("name={expanded ? 'collapse' : 'expand'}");
+		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:input`)}');
+		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:output`)}');
+		expect(toolCallCard).toContain('? call.input : input.text');
+		expect(toolCallCard).toContain('? call.output : output.text');
+		expect(rawJson).toContain('onclick={() => (showRaw = !showRaw)}');
+		expect(rawJson).toContain('{#if showRaw}');
 	});
 
 	test('neither client component uses {@html} or imports server-only modules', () => {
@@ -724,19 +743,22 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 });
 
 describe('client source wiring — step expand + per-call jump', () => {
-	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
+	const panel = componentSource('../lib/components/features/node-detail/NodeDetailPanel.svelte');
+	const stepRow = componentSource('../lib/components/features/node-detail/StepRow.svelte');
+	const subRow = componentSource('../lib/components/features/node-detail/SubRow.svelte');
+	const toolCallCard = componentSource('../lib/components/features/node-detail/ToolCallCard.svelte');
 	const nodeModel = componentSource('../lib/model/node.ts');
 
 	test('the step row toggles its children via row-toggle and toggleRow', () => {
-		expect(panel).toContain('class="ui-icon-btn row-toggle"');
-		expect(panel).toContain('aria-expanded={open}');
-		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		expect(stepRow).toContain('class="ui-icon-btn row-toggle"');
+		expect(stepRow).toContain('aria-expanded={open}');
+		expect(stepRow).toContain('onclick={() => onToggle(row.key)}');
 		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
 	test('call/action jump helpers tick, then scroll the target into view', () => {
-		expect(panel).toContain('onclick={(event) => focusCall(event, call.id)}');
-		expect(panel).toContain('onclick={(event) => focusAction(event, row.actionId)}');
+		expect(subRow).toContain('onclick={(event) => onFocusCall(event, call.id)}');
+		expect(subRow).toContain('onclick={(event) => onFocusAction(event, row.actionId)}');
 		expect(panel).toContain('await tick()');
 		expect(panel).toContain('scrollIntoView({');
 		expect(panel).toContain("block: 'center'");
@@ -747,6 +769,7 @@ describe('client source wiring — step expand + per-call jump', () => {
 	});
 
 	test('the old highlight wiring is fully removed', () => {
+		const tableSource = `${panel}\n${stepRow}\n${subRow}`;
 		for (const token of [
 			'focusedStepId',
 			'focusedCalls',
@@ -754,14 +777,16 @@ describe('client source wiring — step expand + per-call jump', () => {
 			'class:focused',
 			'call.stepId === focusedStepId'
 		]) {
-			expect(`${token}:${panel.includes(token)}`).toBe(`${token}:false`);
+			expect(`${token}:${tableSource.includes(token)}`).toBe(`${token}:false`);
 		}
 		// No `.focused` styling hook survives in the panel styles.
-		expect(panel).not.toMatch(/\.focused\b/);
+		expect(tableSource).not.toMatch(/\.focused\b/);
 	});
 
 	test('tool-call rows keep stable jump ids but carry no focus class', () => {
-		expect(panel).toContain('id={callDomId(call.id)}');
+		// The `tool-call-<id>` anchor moved into ToolCallCard with the tool card;
+		// the id helper stays in the panel root where the jump logic lives.
+		expect(toolCallCard).toContain('id={callDomId(call.id)}');
 		expect(panel).toContain('function callDomId(id: string): string');
 		expect(panel).not.toContain('class:focused');
 	});
@@ -863,28 +888,36 @@ describe('NodeDetailPanel SSR — Reason cell: one button per call, no ×N colla
 });
 
 describe('NodeDetailPanel source — row/call click wiring and copy + clipboard (task #230)', () => {
-	const panel = componentSource('../lib/components/NodeDetailPanel.svelte');
+	const panel = componentSource('../lib/components/features/node-detail/NodeDetailPanel.svelte');
+	const stepRow = componentSource('../lib/components/features/node-detail/StepRow.svelte');
+	const subRow = componentSource('../lib/components/features/node-detail/SubRow.svelte');
+	const toolCallCard = componentSource('../lib/components/features/node-detail/ToolCallCard.svelte');
 
 	test('the step row toggles its children via toggleRow', () => {
-		expect(panel).toContain('onclick={() => toggleRow(row.key)}');
+		// The step-row markup moved into StepRow (ADR 2.6); the toggle handler
+		// stays in the panel root.
+		expect(stepRow).toContain('onclick={() => onToggle(row.key)}');
 		expect(panel).toContain('function toggleRow(key: string)');
 	});
 
 	test('each call button stops propagation and jumps to its own call id', () => {
-		expect(panel).toContain('onclick={(event) => focusCall(event, call.id)}');
+		expect(subRow).toContain('onclick={(event) => onFocusCall(event, call.id)}');
 		expect(panel).toContain('async function focusCall(event: MouseEvent, id: string)');
 		expect(panel).toContain('event.stopPropagation()');
 	});
 
 	test('the copy button carries an aria-label and renders an inline SVG icon', () => {
-		expect(panel).toContain('class="ui-icon-btn copy"');
-		expect(panel).toMatch(/aria-label=\{.*?Copy .*? call/);
+		// The copy button moved into ToolCallCard with the tool-call card (ADR 2.4).
+		expect(toolCallCard).toContain('class="ui-icon-btn copy"');
+		expect(toolCallCard).toMatch(/aria-label=\{.*?Copy .*? call/);
 		// Default state: clipboard icon; copied state: check icon (shared Icon set).
-		expect(panel).toContain('<Icon name="copy"');
-		expect(panel).toContain('<Icon name="check"');
+		expect(toolCallCard).toContain('<Icon name="copy"');
+		expect(toolCallCard).toContain('<Icon name="check"');
 	});
 
 	test('copyCall writes via clipboard API, sets copiedCallId, and resets after 1.5s', () => {
+		// copyCall stays in the panel root (state + timer ownership); only the
+		// button markup moved into ToolCallCard.
 		expect(panel).toContain('navigator.clipboard.writeText(formatToolCallText(call))');
 		expect(panel).toContain('copiedCallId = call.id');
 		expect(panel).toContain('setTimeout(() => {'),
@@ -896,6 +929,7 @@ describe('NodeDetailPanel source — row/call click wiring and copy + clipboard 
 	});
 
 	test('formatToolCallText is imported from $lib/model/node (pure helper)', () => {
+		// Consumed by the panel root's copyCall, which owns clipboard + reset.
 		expect(panel).toContain("import {");
 		expect(panel).toContain('formatToolCallText');
 		expect(panel).toContain("from '$lib/model/node'");

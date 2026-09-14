@@ -348,7 +348,7 @@ describe('computeTimeScale()', () => {
 });
 
 describe('Gantt.svelte — fitted chart relies on ScrollView, not horizontal overflow (#224)', () => {
-	const gantt = readFileSync(new URL('../components/Gantt.svelte', import.meta.url), 'utf8');
+	const gantt = readFileSync(new URL('../components/features/gantt/Gantt.svelte', import.meta.url), 'utf8');
 
 	test('the chart is wrapped in a horizontal ScrollView that measures the viewport', () => {
 		expect(gantt).toContain(
@@ -543,44 +543,62 @@ describe('nodeShortId()', () => {
 // --- Task #239 / #247: agent swatch, neutral tube, no Agents legend ----------
 
 describe('Gantt #239/#247 — agent swatch, neutral tube, legend contract', () => {
-	const gantt = readFileSync(new URL('../components/Gantt.svelte', import.meta.url), 'utf8');
+	const gantt = readFileSync(new URL('../components/features/gantt/Gantt.svelte', import.meta.url), 'utf8');
+	// Task #277: the legend markup and CSS moved to GanttLegend.svelte.
+	const ganttLegend = readFileSync(new URL('../components/features/gantt/GanttLegend.svelte', import.meta.url), 'utf8');
+	// Task #279: the label row (swatch/name/model/flags/chips) moved to GanttLabelRow.svelte.
+	const ganttLabelRow = readFileSync(
+		new URL('../components/features/gantt/GanttLabelRow.svelte', import.meta.url),
+		'utf8'
+	);
+	// Task #280: the SVG shell and its <defs> patterns moved to GanttChart.svelte.
+	const ganttChart = readFileSync(new URL('../components/features/gantt/GanttChart.svelte', import.meta.url), 'utf8');
+	// Task #282: the SVG node group (tube/steps/tools/markers) moved to GanttNodeRow.svelte.
+	const ganttNodeRow = readFileSync(
+		new URL('../components/features/gantt/GanttNodeRow.svelte', import.meta.url),
+		'utf8'
+	);
 
 	test('node swatch uses row.agentColor (agentColors fallback to AGENT_FALLBACK_COLOR)', () => {
 		// The swatch style is driven by the RowView agentColor field, not a raw lookup.
-		expect(gantt).toContain("style={`background:${row.agentColor}`}");
+		expect(ganttLabelRow).toContain("style={`background:${row.agentColor}`}");
 	});
 
 	test('no Agents legend group: title, iteration and derived are all absent', () => {
-		// Task #247 dropped the Agents legend section entirely.
-		expect(gantt).not.toContain('<span class="legend-title">Agents</span>');
-		expect(gantt).not.toContain('{#each legendAgents as [agent, color] (agent)}');
-		expect(gantt).not.toContain('legendAgents');
+		// Task #247 dropped the Agents legend section entirely; task #277 moved
+		// the remaining legend to GanttLegend, so assert against its source.
+		expect(ganttLegend).not.toContain('<span class="legend-title">Agents</span>');
+		expect(ganttLegend).not.toContain('{#each legendAgents as [agent, color] (agent)}');
+		expect(ganttLegend).not.toContain('legendAgents');
 	});
 
 	test('legendAgents is not derived anywhere in the component', () => {
 		// The derived must not appear as a variable or binding.
-		expect(gantt).not.toMatch(/legendAgents/);
+		expect(ganttLegend).not.toMatch(/legendAgents/);
 	});
 
 	test('the gray .model span renders row.node.modelId above the flags and is omitted when null', () => {
 		// The model label sits inside the .label-btn, above the flags and before tracker refs.
-		expect(gantt).toContain('{#if row.node.modelId}');
-		expect(gantt).toContain('<span class="model">{row.node.modelId}</span>');
-		// No Models legend section exists (task #253 dropped it alongside Agents).
-		expect(gantt).not.toContain('<span class="legend-title">Models</span>');
-		expect(gantt).not.toMatch(/legendModels/);
+		expect(ganttLabelRow).toContain('{#if row.node.modelId}');
+		expect(ganttLabelRow).toContain('<span class="model">{row.node.modelId}</span>');
+		// No Models legend section exists (task #253 dropped it alongside Agents;
+		// task #277 moved the legend source to GanttLegend).
+		expect(ganttLegend).not.toContain('<span class="legend-title">Models</span>');
+		expect(ganttLegend).not.toMatch(/legendModels/);
 	});
 
 	test('the node group carries --agent so .bar and .step derive their tints from it', () => {
 		// Each row <g> sets the custom property that the CSS rules consume.
-		expect(gantt).toContain('style={`--agent:${row.agentColor}`}');
+		// Task #282: the node group moved to GanttNodeRow.
+		expect(ganttNodeRow).toContain('style={`--agent:${row.agentColor}`}');
 		// RowView.agentColor falls back to AGENT_FALLBACK_COLOR when agentColors has no entry.
 		expect(gantt).toContain('AGENT_FALLBACK_COLOR');
 	});
 
 	test('the node tube is agent-tinted: fill/stroke via color-mix of var(--agent)', () => {
 		// Task #253: the tube is no longer neutral — it tints by the row's agent color.
-		const barRule = gantt.match(/\.bar\s*\{[^}]*\}/)?.[0] ?? '';
+		// Task #282: the tube CSS moved to GanttNodeRow.
+		const barRule = ganttNodeRow.match(/\.bar\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(barRule).toContain('fill: color-mix(in srgb, var(--agent) 30%, var(--background-strong))');
 		expect(barRule).toContain('stroke: color-mix(in srgb, var(--agent) 65%, var(--background-strong))');
 		expect(barRule).toContain('stroke-width: 0.75');
@@ -590,40 +608,45 @@ describe('Gantt #239/#247 — agent swatch, neutral tube, legend contract', () =
 
 	test('a running node keeps the url(#running-hatch) fill', () => {
 		// The rect's fill presentation attribute switches to the running hatch pattern.
-		expect(gantt).toContain("fill={row.running ? 'url(#running-hatch)' : undefined}");
+		// Task #282: the tube markup/CSS moved to GanttNodeRow.
+		expect(ganttNodeRow).toContain("fill={row.running ? 'url(#running-hatch)' : undefined}");
 		// The CSS class mirrors this so the pattern stays visible under the neutral base.
-		expect(gantt).toContain('class:bar-running={row.running}');
-		const runningRule = gantt.match(/\.bar\.bar-running\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(ganttNodeRow).toContain('class:bar-running={row.running}');
+		const runningRule = ganttNodeRow.match(/\.bar\.bar-running\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(runningRule).toContain('fill: url(#running-hatch)');
 	});
 
 	test('step spans use agent-tone color-mix CSS, not an inline step.color fill', () => {
 		// Task #253: steps no longer carry an inline fill from a model-color lookup.
-		expect(gantt).not.toContain('fill={step.color}');
+		// Task #282: the step markup/CSS moved to GanttNodeRow.
+		expect(ganttNodeRow).not.toContain('fill={step.color}');
 		// The .step CSS rule sets the fill via --agent (stronger tube tint).
-		const stepRule = gantt.match(/\.step\s*\{[^}]*\}/)?.[0] ?? '';
+		const stepRule = ganttNodeRow.match(/\.step\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(stepRule).toContain('fill: color-mix(in srgb, var(--agent) 55%, var(--background-strong))');
 		expect(stepRule).toContain('stroke: var(--background-base)');
 		expect(stepRule).toContain('stroke-width: 1');
 	});
 
 	test('the running-hatch SVG pattern is defined in <defs>', () => {
-		expect(gantt).toContain('id="running-hatch"');
-		expect(gantt).toContain('patternTransform="rotate(45)"');
+		// Task #280: the pattern definitions moved to GanttChart.svelte.
+		expect(ganttChart).toContain('id="running-hatch"');
+		expect(ganttChart).toContain('patternTransform="rotate(45)"');
 	});
 
 	// --- Task #247: removed marker and legend styling --------------------------
 
-	test('the chart removed marker rect has height={BAR_H} and rx="3" with no removed-text/rem label', () => {
+	test('the chart removed marker rect has height={barHeight} and rx="3" with no removed-text/rem label', () => {
 		// The removed rect is rendered without any text child — only a <title>.
-		expect(gantt).toContain('height={BAR_H}');
-		expect(gantt).toContain('rx="3"');
-		expect(gantt).not.toContain('removed-text');
-		expect(gantt).not.toMatch(/<text[^>]*>rem<\/text>/);
+		// Task #282: the marker rect moved to GanttNodeRow (height prop = BAR_H).
+		expect(ganttNodeRow).toContain('height={barHeight}');
+		expect(ganttNodeRow).toContain('rx="3"');
+		expect(ganttNodeRow).not.toContain('removed-text');
+		expect(ganttNodeRow).not.toMatch(/<text[^>]*>rem<\/text>/);
 	});
 
 	test('.removed-chip is 14×9 with border-radius 2px, critical hatch, no font-size/padding/color', () => {
-		const chipRule = gantt.match(/\.removed-chip\s*\{[^}]*\}/)?.[0] ?? '';
+		// Task #277: the markers legend (and this chip) moved to GanttLegend.
+		const chipRule = ganttLegend.match(/\.removed-chip\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(chipRule).toContain('width: 14px');
 		expect(chipRule).toContain('height: 9px');
 		expect(chipRule).toContain('border-radius: 2px');
@@ -635,23 +658,35 @@ describe('Gantt #239/#247 — agent swatch, neutral tube, legend contract', () =
 	});
 
 	test('.legend is center-aligned; no .flags-legend / Flags present / presentFlags / ALL_FLAG_HELP; icon alignment via display:block + align-items/line-height', () => {
-		const legendRule = gantt.match(/\.legend\s*\{[^}]*\}/)?.[0] ?? '';
-		const flagsRule = gantt.match(/\.flags-legend\s*\{[^}]*\}/)?.[0] ?? '';
+		// Task #277: the `.legend` styles moved to GanttLegend.svelte.
+		const legendRule = ganttLegend.match(/\.legend\s*\{[^}]*\}/)?.[0] ?? '';
+		const flagsRule = ganttLegend.match(/\.flags-legend\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(legendRule).toContain('justify-content: center');
 		expect(flagsRule).toBe('');
-		expect(gantt).not.toContain('Flags present');
-		expect(gantt).not.toContain('presentFlags');
-		expect(gantt).not.toContain('ALL_FLAG_HELP');
+		expect(ganttLegend).not.toContain('Flags present');
+		expect(ganttLegend).not.toContain('presentFlags');
+		expect(ganttLegend).not.toContain('ALL_FLAG_HELP');
 		// Legend tick icons are block-aligned with parent flex row.
 		expect(legendRule).toContain('align-items: center');
-		expect(gantt).toMatch(/\.legend \.tick[^{]*\{[^}]*display:\s*block/);
+		expect(ganttLegend).toMatch(/\.legend \.tick[^{]*\{[^}]*display:\s*block/);
 	});
 });
 
 // --- Task #241/#243/#255: smooth delegation connectors ------------------------
 
 describe('Gantt #241/#243/#255 — delegation connector contract (source)', () => {
-	const gantt = readFileSync(new URL('../components/Gantt.svelte', import.meta.url), 'utf8');
+	// The `edgeLayout` derivation and `edgeTitle()` stay in the `Gantt` root.
+	const gantt = readFileSync(new URL('../components/features/gantt/Gantt.svelte', import.meta.url), 'utf8');
+	// Task #281: the edge <path> + diamond marker markup moved to GanttEdges.
+	const ganttEdges = readFileSync(
+		new URL('../components/features/gantt/GanttEdges.svelte', import.meta.url),
+		'utf8'
+	);
+	// Task #282: the node tube markup/CSS moved to GanttNodeRow.
+	const ganttNodeRow = readFileSync(
+		new URL('../components/features/gantt/GanttNodeRow.svelte', import.meta.url),
+		'utf8'
+	);
 
 	test('a single-child edge is a cubic Bézier from the spawn tick into the child tube cap', () => {
 		// Edge layout: start at the spawn tick (edge.startedAt) on the parent row,
@@ -670,9 +705,9 @@ describe('Gantt #241/#243/#255 — delegation connector contract (source)', () =
 		expect(gantt).toContain(
 			'path: `M ${sx} ${sy} C ${sx + a} ${sy + dy * 0.33}, ${ex - a} ${ey}, ${ex} ${ey}`'
 		);
-		expect(gantt).toContain('d={edge.path}');
-		expect(gantt).not.toContain('x1={edge.x}');
-		expect(gantt).not.toContain('points={edge.arrow}');
+		expect(ganttEdges).toContain('d={edge.path}');
+		expect(ganttEdges).not.toContain('x1={edge.x}');
+		expect(ganttEdges).not.toContain('points={edge.arrow}');
 	});
 
 	test('multi-spawn renders N parallel curves — no trunk, no branches', () => {
@@ -682,70 +717,94 @@ describe('Gantt #241/#243/#255 — delegation connector contract (source)', () =
 		expect(gantt).not.toContain('y1={bundle.topY}');
 		expect(gantt).not.toContain('y2={bundle.bottomY}');
 		expect(gantt).not.toContain('const baseX = childX >= trunkX');
-		// Each edge renders the same cubic <path> pattern.
-		expect(gantt).toContain('<path');
-		expect(gantt).toContain('d={edge.path}');
+		// Each edge renders the same cubic <path> pattern (in GanttEdges).
+		expect(ganttEdges).toContain('<path');
+		expect(ganttEdges).toContain('d={edge.path}');
 	});
 
 	test('a no-child edge keeps the diamond marker and is excluded from links', () => {
 		// No-child edges push into `markers` and skip the link list.
 		expect(gantt).toContain('markers.push({');
-		// Diamond points: (mx, my-5) (mx+5, my) (mx, my+5) (mx-5, my)
-		expect(gantt).toContain('edge.markerY - 5');
-		expect(gantt).toContain('edge.markerY + 5');
-		expect(gantt).toContain('edge.markerX + 5');
-		expect(gantt).toContain('edge.markerX - 5');
+		// Diamond points: (mx, my-5) (mx+5, my) (mx, my+5) (mx-5, my) — the
+		// marker markup moved to GanttEdges with the edge layer.
+		expect(ganttEdges).toContain('edge.markerY - 5');
+		expect(ganttEdges).toContain('edge.markerY + 5');
+		expect(ganttEdges).toContain('edge.markerX + 5');
+		expect(ganttEdges).toContain('edge.markerX - 5');
 		// Marker Y centres on the parent row.
 		expect(gantt).toContain('markerY: parentIndex === undefined ? null : parentTop + ROW_H / 2');
 	});
 
 	test('running edges keep the dash pattern; each edge keeps its <title>', () => {
-		// Running dash on the drop line.
-		expect(gantt).toContain("stroke-dasharray={edge.running ? '4 3' : undefined}");
+		// Running dash on the drop line (rendered in GanttEdges).
+		expect(ganttEdges).toContain("stroke-dasharray={edge.running ? '4 3' : undefined}");
 		// Every edge link carries a <title>.
-		expect(gantt).toContain('<title>{edge.title}</title>');
+		expect(ganttEdges).toContain('<title>{edge.title}</title>');
 	});
 
 	test('the tube rect carries no class:bar-active binding (task #245)', () => {
 		// Selection/focus no longer toggles a bar-active class on the node tube.
-		expect(gantt).not.toContain('class:bar-active');
+		// Task #282: the tube markup moved to GanttNodeRow.
+		expect(ganttNodeRow).not.toContain('class:bar-active');
 	});
 
 	test('.bar CSS is invariant: no .bar.bar-active rule and no .node:focus-visible .bar stroke override (task #245)', () => {
 		// The tube border uses the agent-tone stroke (task #253) and stays invariant.
-		const barRule = gantt.match(/\.bar\s*\{[^}]*\}/)?.[0] ?? '';
+		// Task #282: the tube/node CSS moved to GanttNodeRow.
+		const barRule = ganttNodeRow.match(/\.bar\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(barRule).toContain('stroke: color-mix(in srgb, var(--agent) 65%, var(--background-strong))');
 		expect(barRule).toContain('stroke-width: 0.75');
 		// No recolor rule for .bar.bar-active.
-		const activeRule = gantt.match(/\.bar\.bar-active\s*\{[^}]*\}/)?.[0] ?? '';
+		const activeRule = ganttNodeRow.match(/\.bar\.bar-active\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(activeRule).toBe('');
 		// No stroke/stroke-width override on .bar under :focus-visible.
-		const focusRule = gantt.match(/\.node:focus-visible \.bar\s*\{[^}]*\}/)?.[0] ?? '';
+		const focusRule = ganttNodeRow.match(/\.node:focus-visible \.bar\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(focusRule).toBe('');
 		// The :focus-visible rule that does exist only sets outline on the node.
-		const nodeFocusRule = gantt.match(/\.node:focus-visible\s*\{[^}]*\}/)?.[0] ?? '';
+		const nodeFocusRule = ganttNodeRow.match(/\.node:focus-visible\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(nodeFocusRule).toContain('outline: 2px solid var(--border-selected)');
 	});
 
 	test('delegation links are a thin gray stroke; dash and dim-opacity survive (task #255)', () => {
-		// Each edge <path> uses the neutral gray token and a 1px width.
-		expect(gantt).toContain('style="stroke:var(--icon-base)"');
-		expect(gantt).toContain('stroke-width="1"');
+		// Each edge <path> uses the neutral gray token and a 1px width
+		// (the path markup lives in GanttEdges).
+		expect(ganttEdges).toContain('style="stroke:var(--icon-base)"');
+		expect(ganttEdges).toContain('stroke-width="1"');
 		// The edge <path> itself must not reference --border-selected.
-		const edgePathMatch = gantt.match(/<path[^>]*d=\{edge\.path\}[^>]*>/);
+		const edgePathMatch = ganttEdges.match(/<path[^>]*d=\{edge\.path\}[^>]*>/);
 		expect(edgePathMatch).toBeTruthy();
 		const edgePath = edgePathMatch![0];
 		expect(edgePath).not.toContain('--border-selected');
 		// Running dash and dimmed opacity are preserved.
-		expect(gantt).toContain("stroke-dasharray={edge.running ? '4 3' : undefined}");
-		expect(gantt).toContain('opacity={edge.dimmed ? 0.25 : 0.9}');
+		expect(ganttEdges).toContain("stroke-dasharray={edge.running ? '4 3' : undefined}");
+		expect(ganttEdges).toContain('opacity={edge.dimmed ? 0.25 : 0.9}');
 	});
 });
 
 // --- Task #251: node-column contract (session id removed, plain #N links) ------
 
 describe('Gantt #251 — node-column regression', () => {
-	const gantt = readFileSync(new URL('../components/Gantt.svelte', import.meta.url), 'utf8');
+	const gantt = readFileSync(new URL('../components/features/gantt/Gantt.svelte', import.meta.url), 'utf8');
+	// Task #278: the tracker-chip markup (and its `.ui-chip` classes) moved to
+	// TrackerChipList.svelte.
+	const trackerChipList = readFileSync(
+		new URL('../components/composites/TrackerChipList.svelte', import.meta.url),
+		'utf8'
+	);
+	// Task #279: the label column (`.labels`/`.axis-spacer`) moved to
+	// GanttLabels.svelte and one row's label (`.label`/`.label-btn`/`.node-refs`)
+	// to GanttLabelRow.svelte.
+	const ganttLabels = readFileSync(new URL('../components/features/gantt/GanttLabels.svelte', import.meta.url), 'utf8');
+	const ganttLabelRow = readFileSync(
+		new URL('../components/features/gantt/GanttLabelRow.svelte', import.meta.url),
+		'utf8'
+	);
+	// Task #282: the SVG node group (aria-label with the short id) moved to
+	// GanttNodeRow.svelte.
+	const ganttNodeRow = readFileSync(
+		new URL('../components/features/gantt/GanttNodeRow.svelte', import.meta.url),
+		'utf8'
+	);
 
 	test('no `.sid` CSS rule and no `<span class="sid">` in the component', () => {
 		const sidRule = gantt.match(/\.sid\s*\{[^}]*\}/)?.[0] ?? '';
@@ -755,7 +814,7 @@ describe('Gantt #251 — node-column regression', () => {
 	});
 
 	test('.label is a flex row with align-items: stretch and fixed row height', () => {
-		const labelRule = gantt.match(/\.label\s*\{[^}]*\}/)?.[0] ?? '';
+		const labelRule = ganttLabelRow.match(/\.label\s*\{[^}]*\}/)?.[0] ?? '';
 		expect(labelRule).toContain('display: flex');
 		expect(labelRule).toContain('flex-direction: row');
 		expect(labelRule).toContain('align-items: stretch');
@@ -764,20 +823,24 @@ describe('Gantt #251 — node-column regression', () => {
 	});
 
 	test('.label-btn flex-fills remaining row space; .node-refs is a sibling, not nested', () => {
-		const btnRule = gantt.match(/\.label-btn\s*\{[\s\S]*?\}/)?.[0] ?? '';
+		const btnRule = ganttLabelRow.match(/\.label-btn\s*\{[\s\S]*?\}/)?.[0] ?? '';
 		expect(btnRule).toContain('flex: 1');
 		expect(btnRule).toContain('min-width: 0');
 		// `.node-refs` must appear after the closing `</button>`, not inside it.
-		const btnCloseIdx = gantt.indexOf('</button>');
-		const nodeRefsIdx = gantt.indexOf('node-refs');
+		const btnCloseIdx = ganttLabelRow.indexOf('</button>');
+		const nodeRefsIdx = ganttLabelRow.indexOf('node-refs');
 		expect(btnCloseIdx).toBeGreaterThan(-1);
 		expect(nodeRefsIdx).toBeGreaterThan(btnCloseIdx);
+		// The label column keeps the sticky `.labels`/`.axis-spacer` in GanttLabels.
+		expect(ganttLabels).toContain('class="labels"');
+		expect(ganttLabels).toContain('class="axis-spacer"');
 	});
 
 	test('tracker chips use the shared .ui-chip primitive (pill, defined in app.css)', () => {
-		expect(gantt).toContain('class="ui-chip ui-chip--link"');
-		expect(gantt).toContain('class="ui-chip ui-chip--toggle"');
-		// The old local `.chip` rule is gone.
+		expect(trackerChipList).toContain('class="ui-chip ui-chip--link"');
+		expect(trackerChipList).toContain('class="ui-chip ui-chip--toggle"');
+		// The old local `.chip` rule is gone from both surfaces.
+		expect(trackerChipList).not.toMatch(/\.chip\s*\{/);
 		expect(gantt).not.toMatch(/\.chip\s*\{/);
 		const css = readFileSync(new URL('../../app.css', import.meta.url), 'utf8');
 		expect(css).toMatch(/\.ui-chip\s*\{[^}]*border-radius:\s*var\(--radius-full\)/);
@@ -791,12 +854,12 @@ describe('Gantt #251 — node-column regression', () => {
 	});
 
 	test('.ui-chip--toggle remains a <button> in source', () => {
-		expect(gantt).toContain('class="ui-chip ui-chip--toggle"');
-		expect(gantt).toContain('<button');
+		expect(trackerChipList).toContain('class="ui-chip ui-chip--toggle"');
+		expect(trackerChipList).toContain('<button');
 		// The toggle class must be on a <button>, not an <a>.
-		const toggleIdx = gantt.indexOf('ui-chip--toggle');
+		const toggleIdx = trackerChipList.indexOf('ui-chip--toggle');
 		// Look backwards from the class to find the opening tag.
-		const preceding = gantt.slice(Math.max(0, toggleIdx - 200), toggleIdx);
+		const preceding = trackerChipList.slice(Math.max(0, toggleIdx - 200), toggleIdx);
 		expect(preceding).toMatch(/<button/);
 		expect(preceding).not.toMatch(/<a[^>]*ui-chip--toggle/);
 	});
@@ -804,6 +867,7 @@ describe('Gantt #251 — node-column regression', () => {
 	test('nodeShortId survives in the SVG row aria-label', () => {
 		// The header no longer reports the selection; only the SVG aria-label keeps it.
 		expect(gantt).not.toContain('{nodeShortId(selectedNodeId)}');
-		expect(gantt).toContain('aria-label={`${displayAgent(row.node.agent)} node ${nodeShortId(row.node.sessionId)}`}');
+		// Task #282: the SVG node group moved to GanttNodeRow.
+		expect(ganttNodeRow).toContain('aria-label={`${displayAgent(row.node.agent)} node ${nodeShortId(row.node.sessionId)}`}');
 	});
 });
