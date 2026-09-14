@@ -472,7 +472,7 @@ describe('POST /api/settings/discover/agents', () => {
 describe('SettingsModal server-only leak guard', () => {
 	test('SettingsModal.svelte has no $lib/server / bun:sqlite / opencode.db / OPENCODE_DB imports', () => {
 		const modal = readFileSync(
-			join(__dirname, '../../../../src/lib/components/SettingsModal.svelte'),
+			join(__dirname, '../../../../src/lib/components/features/settings/SettingsModal.svelte'),
 			'utf8'
 		);
 		const imports = modal

@@ -16,9 +16,9 @@
 	import { formatDateTime } from '$lib/model/format';
 	import { displayAgent } from '$lib/model/agent';
 	import type { DirectorySummary, TurnSummary } from '$lib/model/types';
-	import TreeIcon from './TreeIcon.svelte';
-	import Icon from './Icon.svelte';
-	import ScrollView from './ScrollView.svelte';
+	import TreeIcon from '$lib/components/primitives/TreeIcon.svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
+	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 
 	interface SidebarSession {
 		id: string;

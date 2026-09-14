@@ -277,6 +277,104 @@ a {
 /* Shared primitives (docs/ui-standards.md §6)                            */
 /* ===================================================================== */
 
+/*
+ * Class-vs-component rule (ADR: frontend component architecture, §4)
+ * ---------------------------------------------------------------------
+ * An element stays a plain `.ui-*` CSS class in this file iff ALL hold:
+ *   1. it renders a single DOM node (no internal element tree);
+ *   2. its entire contract is styling + built-in pseudo-state (:hover,
+ *      :focus-visible, :active, :disabled, [data-*]) with no JS state,
+ *      lifecycle, timer, observer or event wiring;
+ *   3. it exposes no typed API beyond class composition (no variant / size /
+ *      name prop, no bindable value).
+ * It becomes a Svelte component as soon as ANY holds:
+ *   1. it owns behaviour ($state, $effect, observers, timers, focus/keyboard
+ *      logic, pointer handling);
+ *   2. it has a multi-element internal structure that must stay consistent,
+ *      or must be composed with a snippet;
+ *   3. it needs a typed parameter API (name / tone / size unions) or
+ *      bindable state;
+ *   4. it is a repeated pattern with behaviour whose duplication would drift
+ *      across call sites.
+ * Consequences: no Badge / Chip / Button wrapper components — variants stay
+ * `class="ui-badge ui-badge--{tone}"` until a typed API is actually needed.
+ * The one global focus ring above (:where(...):focus-visible) covers every
+ * class here; components must not re-declare it. See docs/ui-standards.md §6.
+ */
+
+/*
+ * `.ui-*` primitive catalog
+ * ---------------------------------------------------------------------
+ * Every `.ui-*` class defined in this file, with purpose, modifiers and
+ * states. `unused` marks a class defined here but referenced by no current
+ * markup; it is kept deliberately for call sites to adopt (do not delete).
+ *
+ * Focus
+ *   .ui-focus-inset   — inset variant of the global focus ring (rows that
+ *                       clip an outward outline); defined above.
+ *
+ * Buttons
+ *   .ui-btn           — default bordered action button; states :hover,
+ *                       :active, :disabled.
+ *   .ui-btn--primary  — raised emphasis (surface-raised-* tokens).
+ *   .ui-btn--danger   — destructive tone (danger border/text, danger hover
+ *                       surface). unused.
+ *   .ui-btn--block    — full-width button.
+ *   .ui-icon-btn      — square, borderless icon-only control (gear, copy…);
+ *                       hover uses the neutral overlay.
+ *   .ui-link-btn      — borderless inline text action; :hover underlines and
+ *                       brightens to --text-strong.
+ *   .ui-swatch        — fixed 8px agent colour chip; geometry is standard,
+ *                       the background colour is data (agent frontmatter).
+ *
+ * Inputs
+ *   .ui-input         — full-width text input; ::placeholder uses --text-weak.
+ *
+ * Chips and badges (pills; no wrapper components by the rule above)
+ *   .ui-chip              — pill container for tracker refs / filters.
+ *   .ui-chip--link        — clickable chip that behaves as a link.
+ *   .ui-chip--toggle      — pressable filter/toggle chip.
+ *   .ui-badge             — small status pill, neutral by default.
+ *   .ui-badge--success    — generic success tone. unused.
+ *   .ui-badge--warning    — generic warning tone (flagTone: running /
+ *                           end=null / openStep).
+ *   .ui-badge--danger     — generic danger tone (flagTone default).
+ *   .ui-badge--info       — generic info tone. unused.
+ *   .ui-badge--accent     — generic accent tone. unused.
+ *   .ui-badge--mcp        — MCP tool-call marker.
+ *   .ui-badge--text       — action kind "text".
+ *   .ui-badge--file       — action kind "file".
+ *   .ui-badge--deleg      — delegation tool-call marker.
+ *   .ui-badge--reasoning  — action kind "reasoning".
+ *   .ui-badge--agent      — action kind "agent".
+ *   .ui-badge--patch      — action kind "patch".
+ *   .ui-badge--perm       — permission-request tone.
+ *   .ui-badge--removed    — removed/rejected marker and rejected permission.
+ *   .ui-badge--compaction — compaction marker / action kind.
+ *   Some tones reach markup only through dynamic composition —
+ *   `ui-badge--${flagTone(key)}` → warning|danger,
+ *   `ui-badge--${marker.type}` → compaction|removed,
+ *   `ui-badge--${action.kind}` → text|reasoning|patch|file|agent|compaction —
+ *   so a literal-token grep reports them unused; they are live.
+ *
+ * Modal (structure only; focus trap / Escape behaviour lives in the feature
+ * components that own it — a ModalShell composite is deferred, ADR §4/§7)
+ *   .ui-modal            — fixed full-viewport centering wrapper.
+ *   .ui-modal__backdrop  — clickable dimming layer.
+ *   .ui-modal__dialog    — the dialog surface (border, radius, shadow-lg).
+ *   .ui-modal__head      — header row (title + close), bottom border.
+ *   .ui-modal__title     — dialog heading.
+ *   .ui-modal__body      — scrollable content region.
+ *   .ui-modal__content   — padded content inner block.
+ *   .ui-modal__foot      — footer action row, top border.
+ *
+ * Notice
+ *   .ui-notice        — inline success notice text (role=status call sites).
+ *
+ * Not `.ui-*` but shared from this layer: `.muted` (weak text) and `.sr-only`
+ * (screen-reader-only utility) are defined above the primitives section.
+ */
+
 /* Buttons ------------------------------------------------------------- */
 .ui-btn {
 	display: inline-flex;

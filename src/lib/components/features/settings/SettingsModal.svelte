@@ -9,7 +9,7 @@
 	 * The parent owns `open` and closes it.
 	 */
 	import { onDestroy, tick } from 'svelte';
-	import ScrollView from './ScrollView.svelte';
+	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 
 	type Tab = 'opencode' | 'ziptask';
 	type DiscoverKind = Tab | 'agents';

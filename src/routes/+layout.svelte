@@ -8,10 +8,10 @@
 	 * by the button in the content area, so the main content stays usable.
 	 */
 	import '../app.css';
-	import SessionSidebar from '$lib/components/SessionSidebar.svelte';
-	import ScrollView from '$lib/components/ScrollView.svelte';
-	import SettingsModal from '$lib/components/SettingsModal.svelte';
-	import Icon from '$lib/components/Icon.svelte';
+	import SessionSidebar from '$lib/components/features/sidebar/SessionSidebar.svelte';
+	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import SettingsModal from '$lib/components/features/settings/SettingsModal.svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
