@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync, readdirSync } from 'node:fs';
 import { formatClock, formatDate, formatDateTime, formatDuration, formatIsoDateTime } from './format';
 
 /**
@@ -68,5 +69,109 @@ describe('format.ts time helpers (adjacent coverage)', () => {
 		expect(formatDuration(0, 3_600_000)).toBe('1h 0m');
 		// A negative span clamps to zero rather than rendering a negative duration.
 		expect(formatDuration(1_000, 0)).toBe('0s');
+	});
+});
+
+/**
+ * Task #371 / #372: tz-aware formatting and the source guard that keeps every
+ * call site in .svelte files anchored to clock.tz (SSR stays UTC; client swaps
+ * post-hydration via initBrowserTimeZone in +layout.svelte).
+ */
+describe('tz-aware formatting (task #371/#372)', () => {
+	const MS = 1_700_000_000_000; // 2023-11-14T22:13:20.000Z
+
+	test('formatDateTime Asia/Kolkata rolls date forward (UTC+5:30)', () => {
+		expect(formatDateTime(MS, 'Asia/Kolkata')).toBe('2023-11-15 03:43:20');
+	});
+
+	test('formatClock America/New_York is UTC-5 in EST (post-DST Nov 14 2023)', () => {
+		expect(formatClock(MS, 'America/New_York')).toBe('17:13:20');
+	});
+
+	test('formatDate Asia/Kolkata rolls the date into the next day', () => {
+		expect(formatDate(MS, 'Asia/Kolkata')).toBe('Nov 15, 2023');
+	});
+
+	test('formatDate rolls over year boundary in a forward-shifted zone', () => {
+		// 2025-12-31 23:59:59 UTC -> 2026-01-01 05:29:59 Asia/Kolkata
+		expect(formatDate(Date.UTC(2025, 11, 31, 23, 59, 59), 'Asia/Kolkata')).toBe('Jan 1, 2026');
+	});
+
+	test('formatIsoDateTime respects the tz arg', () => {
+		expect(formatIsoDateTime('2023-11-14T22:13:20.000Z', 'Asia/Kolkata')).toBe('2023-11-15 03:43:20');
+	});
+
+	test('invalid / unknown tz falls back to UTC without throwing', () => {
+		// Malformed IANA string: formatterFor catches the exception and uses UTC.
+		expect(() => formatDateTime(MS, 'Not/AZone')).not.toThrow();
+		expect(formatDateTime(MS, 'Not/AZone')).toBe('2023-11-14 22:13:20');
+		expect(() => formatClock(MS, '')).not.toThrow();
+		expect(formatClock(MS, '')).toBe('22:13:20');
+		expect(() => formatDate(MS, '???')).not.toThrow();
+		expect(formatDate(MS, '???')).toBe('Nov 14, 2023');
+		expect(() => formatIsoDateTime('2023-11-14T22:13:20.000Z', 'xyz')).not.toThrow();
+		expect(formatIsoDateTime('2023-11-14T22:13:20.000Z', 'xyz')).toBe('2023-11-14 22:13:20');
+	});
+
+	test('default (no tz arg) preserves the old UTC behavior', () => {
+		expect(formatDateTime(MS)).toBe('2023-11-14 22:13:20');
+		expect(formatClock(MS)).toBe('22:13:20');
+		expect(formatDate(MS)).toBe('Nov 14, 2023');
+		expect(formatIsoDateTime('2023-11-14T22:13:20.000Z')).toBe('2023-11-14 22:13:20');
+	});
+});
+
+describe('source guard — clock.tz at every call site (task #371/#372)', () => {
+	test('clock.svelte.ts defaults to UTC and exports initBrowserTimeZone', () => {
+		const source = readFileSync(new URL('./clock.svelte.ts', import.meta.url), 'utf8');
+		expect(source).toContain("tz: 'UTC'");
+		expect(source).toContain('export function initBrowserTimeZone');
+	});
+
+	test('+layout.svelte calls initBrowserTimeZone on mount', () => {
+		const source = readFileSync(
+			new URL('../../routes/+layout.svelte', import.meta.url),
+			'utf8'
+		);
+		expect(source).toContain("import { initBrowserTimeZone } from '$lib/model/clock.svelte'");
+		expect(source).toContain('onMount(() => initBrowserTimeZone())');
+	});
+
+	test('every format-clock call in .svelte sources passes clock.tz as the second arg', () => {
+		// We scan the component source trees for calls to the four public format
+		// helpers. Any call without an explicit second argument would silently
+		// fall back to UTC and defeat the whole point of the browser-timezone
+		// swap, so we assert that every usage is anchored to clock.tz.
+		const svelteDirs = [
+			new URL('../../lib/components/features/gantt/', import.meta.url),
+			new URL('../../lib/components/features/node-detail/', import.meta.url),
+			new URL('../../lib/components/features/sidebar/', import.meta.url),
+			new URL('../../lib/components/features/tracker/', import.meta.url),
+			new URL('../../routes/sessions/[id]/', import.meta.url)
+		];
+		const orphanCalls: string[] = [];
+		for (const dir of svelteDirs) {
+			const files = readdirSync(dir, { recursive: true });
+			for (const file of files) {
+				if (typeof file !== 'string' || !file.endsWith('.svelte')) continue;
+				const text = readFileSync(new URL(file, dir), 'utf8');
+				// Match formatClock/formatDateTime/formatDate/formatIsoDateTime calls
+				// that do NOT have a second argument containing clock.tz.
+				// We look for patterns like formatXxx(arg) with no comma after arg,
+				// excluding the helper definitions themselves.
+				for (const fn of ['formatClock', 'formatDateTime', 'formatDate', 'formatIsoDateTime']) {
+					const re = new RegExp(`${fn}\\([^)]*\\)`, 'g');
+					let m: RegExpExecArray | null;
+					while ((m = re.exec(text)) !== null) {
+						const call = m[0];
+						// Skip if the call already has a second arg with clock.tz
+						if (/clock\.tz/.test(call)) continue;
+						// Skip the function definitions in format.ts (not in these dirs)
+						orphanCalls.push(`${file}:${call}`);
+					}
+				}
+			}
+		}
+		expect(orphanCalls, `orphan format calls missing clock.tz: ${orphanCalls.join(', ')}`).toEqual([]);
 	});
 });

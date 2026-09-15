@@ -7,6 +7,7 @@
 	 * no state, no callbacks.
 	 */
 	import type { Node } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock, formatCost, formatDuration } from '$lib/model/format';
 	import { displayAgent } from '$lib/model/agent';
 
@@ -29,8 +30,8 @@
 	</div>
 	<div class="identity-right">
 		<span class="identity-time">
-			{formatClock(node.startedAt)} →
-			{node.endedAt === null ? 'running' : formatClock(node.endedAt)}
+			{formatClock(node.startedAt, clock.tz)} →
+			{node.endedAt === null ? 'running' : formatClock(node.endedAt, clock.tz)}
 		</span>
 		<span class="muted" title="Cost (gross)">
 			{formatDuration(node.startedAt, node.endedAt)} · {formatCost(node.usage.cost)}

@@ -11,6 +11,7 @@
 	 * the `clampLine` action.
 	 */
 	import type { NodeDetail, PermissionInfo } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock } from '$lib/model/format';
 	import type { ToolRetryGroup } from '$lib/model/node';
 	import NodeIdentity from './NodeIdentity.svelte';
@@ -80,7 +81,7 @@
 										{marker.type === 'compaction'
 											? marker.at === null
 												? 'context summarization point'
-												: `context summarization at ${formatClock(marker.at)}`
+												: `context summarization at ${formatClock(marker.at, clock.tz)}`
 											: 'removed content (no timestamp)'}
 									</span>
 								</li>

@@ -16,6 +16,7 @@
 	 */
 	import { onDestroy, tick } from 'svelte';
 	import type { NodeDetail, ToolCall } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import {
 		buildDetailEntries,
 		buildNodeRows,
@@ -225,7 +226,7 @@
 	/** Copy a call's full text dump; show a brief "copied" state or fail silently. */
 	async function copyCall(call: ToolCall) {
 		try {
-			await navigator.clipboard.writeText(formatToolCallText(call));
+			await navigator.clipboard.writeText(formatToolCallText(call, clock.tz));
 			copiedCallId = call.id;
 			if (copiedTimer) clearTimeout(copiedTimer);
 			copiedTimer = setTimeout(() => {

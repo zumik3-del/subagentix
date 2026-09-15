@@ -14,6 +14,7 @@
 	 * `action-<id>` scroll targets resolving.
 	 */
 	import type { NodeRow } from '$lib/model/node';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock, formatDuration } from '$lib/model/format';
 	import { displayAgent } from '$lib/model/agent';
 
@@ -93,9 +94,9 @@
 				{/if}
 			</span>
 		</td>
-		<td class="mono col-time">{formatClock(row.at)}</td>
+		<td class="mono col-time">{formatClock(row.at, clock.tz)}</td>
 		<td class="mono col-time">
-			{row.endedAt === null ? '—' : formatClock(row.endedAt)}
+			{row.endedAt === null ? '—' : formatClock(row.endedAt, clock.tz)}
 		</td>
 		<td class="col-time">
 			{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}
@@ -158,8 +159,8 @@
 				{/if}
 			</span>
 		</td>
-		<td class="mono col-time">{formatClock(row.at)}</td>
-		<td class="mono col-time">{row.endedAt === null ? '—' : formatClock(row.endedAt)}</td>
+		<td class="mono col-time">{formatClock(row.at, clock.tz)}</td>
+		<td class="mono col-time">{row.endedAt === null ? '—' : formatClock(row.endedAt, clock.tz)}</td>
 		<td class="col-time">{row.endedAt === null ? '—' : formatDuration(row.at, row.endedAt)}</td>
 		{#each usageColumns as label (label)}
 			<td class="num col-token">—</td>

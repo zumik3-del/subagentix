@@ -2,6 +2,7 @@
 	import type { PageProps } from './$types';
 	import Gantt from '$lib/components/features/gantt/Gantt.svelte';
 	import { displayAgent } from '$lib/model/agent';
+	import { clock } from '$lib/model/clock.svelte';
 	import {
 		formatClock,
 		formatCost,
@@ -34,13 +35,13 @@
 		</div>
 		<div class="timing">
 			<span class="time-range">
-				{formatClock(data.session.createdAt)} → {formatClock(data.session.updatedAt)}
+				{formatClock(data.session.createdAt, clock.tz)} → {formatClock(data.session.updatedAt, clock.tz)}
 			</span>
 			<span class="date">
-				{#if formatDate(data.session.createdAt) === formatDate(data.session.updatedAt)}
-					{formatDate(data.session.createdAt)}
+				{#if formatDate(data.session.createdAt, clock.tz) === formatDate(data.session.updatedAt, clock.tz)}
+					{formatDate(data.session.createdAt, clock.tz)}
 				{:else}
-					{formatDate(data.session.createdAt)} → {formatDate(data.session.updatedAt)}
+					{formatDate(data.session.createdAt, clock.tz)} → {formatDate(data.session.updatedAt, clock.tz)}
 				{/if}
 			</span>
 			<span class="duration">

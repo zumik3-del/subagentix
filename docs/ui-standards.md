@@ -19,7 +19,7 @@ reviewable.
   primitive; it consumes them.
 - Components follow the layer rules in [§10](#10-layer--component-conventions).
   Where a rule here and a legacy comment disagree, this file and the guarding
-  suite ([§11](#11-verification-map)) win.
+  suite ([§12](#12-verification-map)) win.
 - No Tailwind, no UI library, no new runtime dependency. Plain CSS custom
   properties only.
 
@@ -33,7 +33,7 @@ reviewable.
 - **Full-viewport shell.** The app shell is a two-column grid
   (`grid-template-columns: var(--sidebar-width) minmax(0, 1fr)`) with
   `height`/`min-height: 100dvh`; the sidebar column is `position: sticky`
-  (`src/routes/+layout.svelte:89-105`). `--sidebar-width` is `20rem`
+  (`src/routes/+layout.svelte:95-111`). `--sidebar-width` is `20rem`
   (`src/app.css:51`).
 - **No centered max-width container.** List and session pages must not wrap
   content in a `max-width: 64rem` container or center it with `margin: auto`
@@ -42,9 +42,9 @@ reviewable.
   grid + narrow toggle").
 - **Narrow viewport.** Below `--breakpoint-lg` (`64rem`, `src/app.css:52`) the
   shell collapses to one column (`@media (max-width: 63.99rem)`,
-  `src/routes/+layout.svelte:130`) and the sidebar becomes an off-canvas overlay
+  `src/routes/+layout.svelte:136`) and the sidebar becomes an off-canvas overlay
   (`fixed`, `translateX(-100%)`, `visibility: hidden`) re-enabled by
-  `.shell.sidebar-open` (`src/routes/+layout.svelte:135-154`).
+  `.shell.sidebar-open` (`src/routes/+layout.svelte:141-160`).
 - Radii (`--radius-xs … --radius-full`), shadows (`--shadow-xs/md/lg`) and
   `--sidebar-width` are declared in `src/app.css:44-63`.
 
@@ -88,15 +88,16 @@ reviewable.
   `--font-weight-regular/medium`, line heights
   `--line-height-normal/large/x-large` (`src/app.css:21-31`).
 - **Numbers use `font-variant-numeric: tabular-nums`** so token/cost/time
-  columns stay aligned (e.g. `GanttHeader.svelte:98,115`,
-  `NodeIdentity.svelte:73`, `StepRow.svelte:121,160`, `SubRow.svelte:193,232`,
-  `NodeActionsTable.svelte:311,356`, `SessionSidebar.svelte:589`,
-  `TaskDetailView.svelte:164`, `src/routes/sessions/[id]/+page.svelte:99,137,152`).
+  columns stay aligned (e.g. `GanttHeader.svelte:99,116`,
+  `NodeIdentity.svelte:74`, `StepRow.svelte:122,161`, `SubRow.svelte:194,233`,
+  `NodeActionsTable.svelte:311,356`, `SessionSidebar.svelte:590`,
+  `TaskDetailView.svelte:165`, `src/routes/sessions/[id]/+page.svelte:100,138,153`).
+  Timestamps follow the same rule; their zone handling is [§11](#11-timestamp-rendering).
 - **Identifiers and raw payloads use mono** (`var(--font-family-mono)`): session
-  ids (`NodeIdentity.svelte:97`), raw JSON (`RawJsonBlock.svelte:58`), IO values
+  ids (`NodeIdentity.svelte:98`), raw JSON (`RawJsonBlock.svelte:58`), IO values
   (`IoBlock.svelte:100`), tool/action text (`ToolCallCard.svelte:194`,
-  `ActionCard.svelte:97`, `StepRow.svelte:111`, `SubRow.svelte:183`),
-  summary ids (`NodeSummaryStrip.svelte:212`).
+  `ActionCard.svelte:98`, `StepRow.svelte:112`, `SubRow.svelte:184`),
+  summary ids (`NodeSummaryStrip.svelte:213`).
 
 ---
 
@@ -138,17 +139,17 @@ success/warning/danger/info/accent:
   Components must not redeclare it.
 - **Inset variant:** `.ui-focus-inset` (`outline-offset: -2px`,
   `src/app.css:259-261`) is for rows that clip an outward outline (sidebar rows,
-  `SessionSidebar.svelte:258,290,374,404`).
+  `SessionSidebar.svelte:259,291,375,405`).
 - **Screen-reader-only utility:** `.sr-only` (`src/app.css:263-274`) — used for
-  the search label (`SessionSidebar.svelte:321`) and the copy status
+  the search label (`SessionSidebar.svelte:322`) and the copy status
   (`ToolCallCard.svelte:80`).
 - **Keyboard conventions:**
   - Gantt node rows are focusable buttons (`role="button"`, `tabindex="0"`) and
     select on **Enter or Space**, with `preventDefault`
-    (`Gantt.svelte:102-107`; row wiring `GanttNodeRow.svelte`).
+    (`Gantt.svelte:103-108`; row wiring `GanttNodeRow.svelte`).
   - Off-canvas sidebar focus management runs only on the narrow breakpoint:
     opening focuses the first focusable element, closing restores focus to the
-    toggle (`+layout.svelte:33-47`). The closed panel is `visibility: hidden`, so
+    toggle (`+layout.svelte:39-53`). The closed panel is `visibility: hidden`, so
     it leaves the tab order.
 - **Node-label cell click target.** Every pixel of a Gantt label cell selects
   the node: `.label-btn` spans the row and a full-bleed `.label-btn::after`
@@ -160,9 +161,9 @@ success/warning/danger/info/accent:
   (`GanttLabelRow.svelte:104-124`).
 - **Reduced motion:** programmatic scrolls use `behavior: 'auto'` when
   `window.matchMedia('(prefers-reduced-motion: reduce)').matches`, otherwise
-  `'smooth'` (`NodeDetailPanel.svelte:197`, `NodeActionsTable.svelte:95`).
+  `'smooth'` (`NodeDetailPanel.svelte:198`, `NodeActionsTable.svelte:95`).
 - **ARIA:** selection is exposed with `aria-pressed={row.active}` and is
-  **selection-only** — hover must never set it (`Gantt.svelte:97,102-107`;
+  **selection-only** — hover must never set it (`Gantt.svelte:98,103-108`;
   guarded by `pages.suite.ts`, "aria-pressed/selected derives from
   selectedNodeId only, never hover"). Dialogs are labelled; see
   [§9](#9-modal--dialog-contract).
@@ -260,13 +261,18 @@ inferred refs (the Gantt node column, the node summary strip) uses the one
 `TrackerChipList` mechanism: 0 refs render nothing, 1 ref renders a single `#N`
 `.ui-chip--link` button, and `>=2` refs collapse into an `N tasks`
 `.ui-chip--toggle` whose disclosure list holds one `#N` button per ref
-(`TrackerChipList.svelte:109-155`). The toggle exposes `aria-expanded` and
-`data-refs-toggle`; the list closes on Escape or an outside pointer press and
-flips up when the nearest clipping ancestor leaves no room below
-(`TrackerChipList.svelte:73-106`). With `onOpen` omitted (no tracker base) the
-refs stay inert `.ui-chip` text (`TrackerChipList.svelte:147-155`). This
-replaces the former `>=4` collapse / `Show fewer` expander — there is no
-separate expand state or `Show fewer` label.
+(`TrackerChipList.svelte:147-201`). The toggle exposes `aria-expanded` and
+`data-refs-toggle` (`TrackerChipList.svelte:166-175`); the list closes on
+Escape, an outside pointer press, choosing a ref, or the pointer leaving the
+whole control, and flips up when the nearest clipping ancestor leaves no room
+below. A `150ms` grace delay bridges the trigger→panel gap — the panel is
+absolutely positioned one `--space-1` below the trigger, so leaving the trigger
+alone must not close it before the pointer reaches the panel, and `mouseenter`
+on the wrapper cancels the pending close
+(`TrackerChipList.svelte:37-77,105-125,159-165`). With `onOpen` omitted (no
+tracker base) the refs stay inert `.ui-chip` text
+(`TrackerChipList.svelte:193-201`). This replaces the former `>=4` collapse /
+`Show fewer` expander — there is no separate expand state or `Show fewer` label.
 
 Some tones reach markup only through dynamic composition —
 `ui-badge--${flagTone(key)}` → warning|danger,
@@ -337,7 +343,7 @@ components that own it — a `ModalShell` composite is deferred, see
   `always`; it auto-hides `800ms` after the last scroll
   (`ScrollView.svelte:47,67-72,122-128`).
 - **Adoption:** the content column is the single vertical scroll region
-  (`+layout.svelte:61`); the sidebar header is outside its inner `ScrollView`
+  (`+layout.svelte:67`); the sidebar header is outside its inner `ScrollView`
   (`SessionSidebar.svelte`); the Gantt chart is wrapped in a horizontal
   `ScrollView` (`Gantt.svelte`); `NodeActionsTable`, `IoBlock` and
   `RawJsonBlock` wrap their values. Verification names each site
@@ -352,23 +358,31 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **Structure is the `.ui-modal*` classes** in `src/app.css` (see
   [§6](#6-shared-primitives-ui-)); a component adds sizing only
-  (`TaskModal.svelte:141-148`, `SettingsModal.svelte:623`).
+  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`).
 - **Dialog semantics:** `role="dialog"`, `aria-modal="true"`, `tabindex="-1"`,
   and a label (`aria-label` or `aria-labelledby`), on the
-  `.ui-modal__dialog` element (`TaskModal.svelte:109-117`;
+  `.ui-modal__dialog` element (`TaskModal.svelte:110-118`;
   `SettingsModal.svelte:467-475`). The backdrop is a button with a close
-  `aria-label` (`TaskModal.svelte:103-108`, `SettingsModal.svelte:460-465`).
+  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`).
 - **Behaviour owned by the component** (a `ModalShell` composite is **not**
   landed):
-  - **Escape** closes (`TaskModal.svelte:76-81`;
+  - **Escape** closes (`TaskModal.svelte:77-82`;
     `SettingsModal.svelte:205`).
   - **Focus trap:** Tab/Shift+Tab cycle within the dialog
-    (`TaskModal.svelte:82-98`; `SettingsModal.svelte:211-225`).
+    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`).
   - **Initial focus and focus return:** the dialog is focused on mount and the
     previously focused element is restored on unmount
-    (`TaskModal.svelte:71-74`; `SettingsModal.svelte:163-176`).
+    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`).
 - The panel body hosts a `ScrollView` (`.ui-modal__body` + `.ui-modal__content`,
-  e.g. `TaskModal.svelte:124-136`).
+  e.g. `TaskModal.svelte:125-137`).
+- **Detail payload is validated, not re-normalised.** The modal fetches
+  subagentix's own `/api/tracker/task/:id` proxy, whose server layer already
+  mapped ziptask's snake_case fields to the camelCase `TrackerTaskDetail`; the
+  client therefore validates that contract with `isTaskDetail` instead of
+  re-running `normaliseTaskDetail`, so real `createdAt`/`updatedAt`
+  (Created/Updated) render instead of the normaliser's empty-string defaults
+  (`TaskModal.svelte:49-55`; `src/routes/api/tracker/task/[id]/+server.ts:53`;
+  `src/lib/model/tracker.ts:116-149,151-176`).
 - **SSR:** a closed modal renders no dialog markup (guarded by `pages.suite.ts`,
   "SSR closed-modal: settings button present, no dialog markup"); an open
   `TaskModal` renders the accessible loading dialog
@@ -447,32 +461,69 @@ src/
 ### Svelte 5 idioms (mandatory for new / extracted components)
 
 - Props via `let { … }: Props = $props();` with a local `interface Props` — no
-  `export let`. (Example: `Gantt.svelte:38-53`, `ScrollView.svelte:22-42`.)
+  `export let`. (Example: `Gantt.svelte:39-54`, `ScrollView.svelte:22-42`.)
 - Children and named slots → **snippets**: `children: Snippet`, rendered with
   `{@render children()}`. (Examples: `ScrollView.svelte:16,23,232`;
   `IoBlock.svelte:33`; `SummaryLine.svelte:30`; optional child
   `GanttChart.svelte:64`.)
 - Events → **callback props** (`onSelect?: (id: string) => void`), never
-  `createEventDispatcher`. (Examples: `NodeDetailPanel.svelte:44`;
-  `Gantt.svelte:544-546`.)
+  `createEventDispatcher`. (Examples: `NodeDetailPanel.svelte:45`;
+  `Gantt.svelte:545-547`.)
 - Two-way values → `$bindable()`. (Examples: `ScrollView.svelte:40-41`;
   `GanttLabels.svelte:34`.)
 - State: `$state` / `$derived` / `$derived.by` / `$effect` (with a cleanup
   return). `$derived.by` is used for row/view-model derivations
-  (`Gantt.svelte:333,468`; `NodeDetailPanel.svelte:141`;
-  `SessionSidebar.svelte:93`).
+  (`Gantt.svelte:334,469`; `NodeDetailPanel.svelte:142`;
+  `SessionSidebar.svelte:94`).
 - `$state.raw` is the prescribed idiom for large immutable view-model arrays
   (`RowView[]`, `NodeRow[]`) to avoid deep-proxy cost. **Not yet used in the
   landed tree** (no `$state.raw` under `src/`); adopt it in new extractions
   where the whole array is replaced, not mutated.
 - `$effect` is client-only, so SSR renders the same static markup — this is what
-  keeps the SSR suites green.
+  keeps the SSR suites green and makes the timestamp zone swap
+  ([§11](#11-timestamp-rendering)) hydration-safe.
 - No `{@html}` anywhere, and no `$lib/server` / `bun:sqlite` import in any
-  client component (guarded globally; see [§11](#11-verification-map)).
+  client component (guarded globally; see [§12](#12-verification-map)).
 
 ---
 
-## 11. Verification map
+## 11. Timestamp rendering
+
+Timestamps are formatted for the visitor, but server-rendered as UTC so the
+hydrated DOM matches the server markup (task #371).
+
+- **Formatted for the visitor's zone.** Timestamps render in the browser's IANA
+  zone as `YYYY-MM-DD HH:MM:SS`; the Gantt axis/cursor use `HH:MM:SS`
+  (`formatClock`) and dates use `Mon D, YYYY` (`formatDate`). A non-finite value
+  renders `—`.
+- **SSR renders UTC; the client swaps after hydration.** The server and the
+  first client render both use the `'UTC'` default, so there is no hydration
+  mismatch. The swap happens once after mount and is tracked by Svelte, so every
+  timestamp call site re-renders.
+- **Reactive source:** `src/lib/model/clock.svelte.ts` — `clock` is
+  `$state({ tz: 'UTC' })` (`clock.svelte.ts:12`); `initBrowserTimeZone()`
+  resolves `Intl.DateTimeFormat().resolvedOptions().timeZone` into `clock.tz`
+  (`clock.svelte.ts:19-26`) and never throws — an unsupported/empty zone leaves
+  UTC in place.
+- **Initialisation:** `+layout.svelte:16` imports it and `+layout.svelte:25`
+  calls it from `onMount`, so the swap is client-only.
+- **The formatters stay pure and take the zone as data.** `format.ts` is
+  runes-free and every helper takes an explicit IANA `timeZone` defaulting to
+  `'UTC'`: `formatDateTime` (`format.ts:84`), `formatIsoDateTime`
+  (`format.ts:91`), `formatClock` (`format.ts:98`), `formatDate`
+  (`format.ts:120`). `Intl.DateTimeFormat` is memoised per zone
+  (`format.ts:18`), and an unknown zone falls back to UTC instead of throwing
+  (`format.ts:31-44`).
+- **Call sites pass `clock.tz`.** Components read it at every format call (e.g.
+  `GanttHeader.svelte:51`, `SubRow.svelte:97,162`,
+  `TaskDetailView.svelte:23-25,67`); `formatToolCallText(call, tz = 'UTC')`
+  (`node.ts:334`) forwards the zone to `formatDateTime`
+  (`node.ts:341-342`). A source guard fails the suite when a `.svelte` call
+  site omits `clock.tz` (`format.test.ts:140-176`).
+
+---
+
+## 12. Verification map
 
 The contract is executable: each rule is guarded by a suite. Source-text
 assertions are **move-targeted, not deletable** — when markup moves, re-home the
@@ -481,17 +532,20 @@ assertion to the file that now owns the string.
 | Suite | Guards |
 |---|---|
 | `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch |
-| `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
+| `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, `TaskDetailView` camelCase-payload regression (real Created/Updated/completedAt, `maxAttempts`, epic id), Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
-| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted) |
+| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
 source/paths), `src/lib/components/scroll-view.test.ts`,
 `src/routes/pages.test.ts`, `src/routes/m3c-drilldown.test.ts`,
 `src/routes/m4a-tracker.test.ts` (isolated-child-process runners), and the unit
-tests under `src/lib/model/*.test.ts` (e.g. `gantt.test.ts` pins the exact
-`MODEL_PALETTE` colors).
+tests under `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware
+formatter cases (Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and
+guards that every `.svelte` format call passes `clock.tz`; `node.test.ts` pins
+`formatToolCallText`'s tz shift; `gantt.test.ts` pins the exact `MODEL_PALETTE`
+colors.
 
 **Characterization convention.** `characterization.suite.ts` freezes the SSR
 structure of the two feature roots so every behaviour-preserving extraction is

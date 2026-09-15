@@ -655,12 +655,35 @@ describe('formatToolCallText() (task #230)', () => {
 		expect(formatToolCallText(call)).toBe(formatToolCallText(call));
 	});
 
-	test('null and empty strings in input/output render as empty lines', () => {
-		const withEmpty = makeTool({ id: 't1', nodeId: 'n', name: 'cmd', input: '', output: '' });
-		const lines = formatToolCallText(withEmpty).split('\n');
-		const inputIdx = lines.indexOf('input:');
-		expect(lines[inputIdx + 1]).toBe('');
-		const outputIdx = lines.indexOf('output:');
-		expect(lines[outputIdx + 1]).toBe('');
+		test('null and empty strings in input/output render as empty lines', () => {
+			const withEmpty = makeTool({ id: 't1', nodeId: 'n', name: 'cmd', input: '', output: '' });
+			const lines = formatToolCallText(withEmpty).split('\n');
+			const inputIdx = lines.indexOf('input:');
+			expect(lines[inputIdx + 1]).toBe('');
+			const outputIdx = lines.indexOf('output:');
+			expect(lines[outputIdx + 1]).toBe('');
+		});
+
+		test('shifts start:/end: to the given tz (default stays UTC)', () => {
+			const call = makeTool({
+				id: 't1',
+				nodeId: 'n',
+				name: 'bash',
+				status: 'completed',
+				startedAt: 1_700_000_000_000,
+				endedAt: 1_700_000_001_000
+			});
+			// Default (UTC): 2023-11-14 22:13:20 / 22:13:21
+			const utc = formatToolCallText(call);
+			expect(utc).toContain('start: 2023-11-14 22:13:20');
+			expect(utc).toContain('end: 2023-11-14 22:13:21');
+			// Asia/Kolkata (UTC+5:30) rolls the date forward: 2023-11-15 03:43:20 / 03:43:21
+			const kolkata = formatToolCallText(call, 'Asia/Kolkata');
+			expect(kolkata).toContain('start: 2023-11-15 03:43:20');
+			expect(kolkata).toContain('end: 2023-11-15 03:43:21');
+			// America/New_York in EST (UTC-5, post-DST Nov 14 2023): 2023-11-14 17:13:20
+			const ny = formatToolCallText(call, 'America/New_York');
+			expect(ny).toContain('start: 2023-11-14 17:13:20');
+			expect(ny).toContain('end: 2023-11-14 17:13:21');
+		});
 	});
-});

@@ -9,6 +9,7 @@
 	 */
 	import type { Usage } from '$lib/model/types';
 	import type { TurnExtent } from '$lib/model/gantt';
+	import { clock } from '$lib/model/clock.svelte';
 	import {
 		formatClock,
 		formatCost,
@@ -47,7 +48,7 @@
 	</div>
 	<div class="timing">
 		<span class="time-range">
-			{formatClock(extent.start)} → {formatClock(extent.end)}
+			{formatClock(extent.start, clock.tz)} → {formatClock(extent.end, clock.tz)}
 		</span>
 		<span class="duration">{formatDuration(extent.start, extent.end)}</span>
 	</div>

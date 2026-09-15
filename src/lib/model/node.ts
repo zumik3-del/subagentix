@@ -325,20 +325,21 @@ export function summarizeStepTools(calls: ToolCall[]): StepToolSummary {
 
 /**
  * Human-readable, **untruncated** dump of one tool/MCP call for the copy button
- * (task #230). Pure and deterministic: fixed field order, UTC timestamps
- * ({@link formatDateTime}) and the display duration ({@link formatDuration});
- * the exact same text is produced in tests and at click time. Missing
- * input/output become an empty section; a missing start/end is spelled out.
+ * (task #230). Pure and deterministic: fixed field order, timestamps in the
+ * given `tz` (default UTC; {@link formatDateTime}) and the display duration
+ * ({@link formatDuration}); the exact same text is produced in tests and at
+ * click time. Missing input/output become an empty section; a missing
+ * start/end is spelled out.
  */
-export function formatToolCallText(call: ToolCall): string {
+export function formatToolCallText(call: ToolCall, tz = 'UTC'): string {
 	const lines: string[] = [call.name];
 	const markers: string[] = [];
 	if (call.isMcp) markers.push('MCP');
 	if (call.isDelegation) markers.push('delegation');
 	if (markers.length > 0) lines.push(`kind: ${markers.join(', ')}`);
 	lines.push(`status: ${call.status}`);
-	lines.push(`start: ${call.startedAt === null ? 'unknown' : formatDateTime(call.startedAt)}`);
-	lines.push(`end: ${call.endedAt === null ? 'running' : formatDateTime(call.endedAt)}`);
+	lines.push(`start: ${call.startedAt === null ? 'unknown' : formatDateTime(call.startedAt, tz)}`);
+	lines.push(`end: ${call.endedAt === null ? 'running' : formatDateTime(call.endedAt, tz)}`);
 	lines.push(
 		`duration: ${call.startedAt === null ? 'unknown' : formatDuration(call.startedAt, call.endedAt)}`
 	);

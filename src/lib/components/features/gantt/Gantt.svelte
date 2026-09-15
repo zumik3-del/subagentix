@@ -12,6 +12,7 @@
 	 * Imports only `$lib/model/**`, so it is safe in the client bundle.
 	 */
 	import type { Edge, GanttModel, Marker, Node } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock, formatCost, formatDuration } from '$lib/model/format';
 	import { selectNodeDetail } from '$lib/model/node';
 	import GanttChart from './GanttChart.svelte';
@@ -114,7 +115,7 @@
 	// --- Time cursor -----------------------------------------------------------
 	let cursorX = $state<number | null>(null);
 	let cursorT = $state<number | null>(null);
-	const cursorLabel = $derived(cursorT === null ? '' : formatClock(cursorT));
+	const cursorLabel = $derived(cursorT === null ? '' : formatClock(cursorT, clock.tz));
 	// Cursor slice for `GanttCursor`: null exactly while the pointer is outside
 	// the chart band (both states clear together).
 	const cursorView = $derived(
@@ -189,7 +190,7 @@
 	// Precomputed axis-tick slice for the SVG shell: the root owns `x()` and
 	// `tickAnchor()`, so `GanttChart` only renders the mapped positions.
 	const tickViews = $derived(
-		ticks.map((t) => ({ t, x: x(t), anchor: tickAnchor(x(t)), label: formatClock(t) }))
+		ticks.map((t) => ({ t, x: x(t), anchor: tickAnchor(x(t)), label: formatClock(t, clock.tz) }))
 	);
 
 	// --- Inferred tracker links (M4) -------------------------------------------

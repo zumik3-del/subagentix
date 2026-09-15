@@ -8,15 +8,21 @@
 	 * by the button in the content area, so the main content stays usable.
 	 */
 	import '../app.css';
+	import { onMount } from 'svelte';
 	import SessionSidebar from '$lib/components/features/sidebar/SessionSidebar.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import SettingsModal from '$lib/components/features/settings/SettingsModal.svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
+	import { initBrowserTimeZone } from '$lib/model/clock.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
 	let sidebarOpen = $state(false);
 	let settingsOpen = $state(false);
+
+	// Swap timestamps to the visitor's zone after hydration; SSR keeps the UTC
+	// default, so the first client render still matches the server DOM.
+	onMount(() => initBrowserTimeZone());
 
 	// Off-canvas focus management (U2 review): on narrow viewports the closed
 	// panel is hidden via CSS (`visibility: hidden`), which removes it from the
