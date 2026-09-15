@@ -21,10 +21,16 @@
 		signal: unknown;
 		/** Whether the snippet renders overflow items (so the counter is present). */
 		overflow?: boolean;
+		/**
+		 * Whether the line clips its content to one line (default). A column
+		 * hosting an escaping popover (the tracker refs dropdown) opts out so
+		 * the popover is not clipped.
+		 */
+		clip?: boolean;
 		children: Snippet;
 	}
 
-	let { signal, overflow = false, children }: Props = $props();
+	let { signal, overflow = false, clip = true, children }: Props = $props();
 
 	/**
 	 * Keep a summary row exactly one line tall: items that no longer fit are
@@ -88,7 +94,7 @@
 	}
 </script>
 
-<div class="line" use:clampLine={signal}>{@render children()}{#if overflow}{' '}<span
+<div class="line" class:line--unclipped={!clip} use:clampLine={signal}>{@render children()}{#if overflow}{' '}<span
 			class="line-more"
 			data-overflow-counter
 			hidden
@@ -106,6 +112,10 @@
 		gap: var(--space-2);
 		overflow: hidden;
 		min-height: var(--space-6);
+	}
+
+	.line--unclipped {
+		overflow: visible;
 	}
 
 	.line-more {

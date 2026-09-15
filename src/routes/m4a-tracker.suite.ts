@@ -10,11 +10,11 @@
  *
  * The chips are now modal triggers, not external links: this covers the
  * turn-header and node-row buttons (`type="button"`, `ui-chip--link`), the
- * `inferred` title/aria-label, the `>=4` collapse into an `N tasks` expander,
- * the no-link / not-configured states and HTML escaping of a hostile ref.
- * The modal itself is client-only (it opens on click), so its wiring is
- * asserted at the source level; the detail layout is covered by the M3c suite
- * and the proxy contract by the tracker API test.
+ * `inferred` title/aria-label, the `>=2` unified collapse into an `N tasks`
+ * button + slide-down list, the no-link / not-configured states and HTML
+ * escaping of a hostile ref. The modal itself is client-only (it opens on
+ * click), so its wiring is asserted at the source level; the detail layout is
+ * covered by the M3c suite and the proxy contract by the tracker API test.
  *
  * No DB and no `$lib/server` import: the live opencode DB is never touched.
  */
@@ -187,7 +187,7 @@ describe('Gantt SSR — inferred task chips open the detail modal', () => {
 		expect(html).not.toContain('/task/');
 	});
 
-	test('renders one chip per node row when refs come from tool calls / edges', () => {
+	test('renders an "N tasks" toggle when refs come from tool calls / edges (>=2)', () => {
 		const html = renderGantt(
 			makeModel({
 				nodes: [
@@ -205,10 +205,12 @@ describe('Gantt SSR — inferred task chips open the detail modal', () => {
 			}),
 			'https://zt.example'
 		);
-		// root1 falls back to its tool-call + edge refs (2).
-		expect(html).toContain('>#77</button>');
-		expect(html).toContain('>#88</button>');
-		expect(countOf(html, 'ui-chip--link')).toBe(2);
+		// root1 falls back to its tool-call + edge refs (2) → toggle button.
+		expect(html).toContain('2 tasks');
+		expect(html).toContain('ui-chip--toggle');
+		// Individual #N chips are NOT rendered at SSR (they live inside the dropdown).
+		expect(html).not.toContain('>#77</button>');
+		expect(html).not.toContain('>#88</button>');
 	});
 
 	test('a hostile id is escaped in the label and never becomes a URL', () => {
@@ -241,40 +243,85 @@ describe('Gantt SSR — ziptask feature toggle', () => {
 	});
 });
 
-// --- Collapse ---------------------------------------------------------------
+// --- Unified >=2 collapse ---------------------------------------------------
 
-describe('Gantt SSR — >=4 distinct refs collapse behind an "N tasks" expander', () => {
-	test('3 refs stay fully visible', () => {
+describe('Gantt SSR — >=2 distinct refs show "N tasks" toggle + list', () => {
+	test('1 ref stays a single #N chip, no toggle', () => {
 		const html = renderGantt(
-			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2', '3'] })] }),
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1'] })] }),
 			'https://zt.example'
 		);
-		expect(countOf(html, 'ui-chip--link')).toBe(3); // node row only
+		expect(countOf(html, 'ui-chip--link')).toBe(1);
 		expect(html).not.toContain('ui-chip--toggle');
+		expect(html).not.toContain('1 tasks');
 	});
 
-	test('exactly 4 refs show 3 chips plus a "4 tasks" expander under the node row', () => {
+	test('2 refs show a "2 tasks" toggle; no individual chips at SSR', () => {
 		const html = renderGantt(
-			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2', '3', '4'] })] }),
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2'] })] }),
 			'https://zt.example'
 		);
-		expect(countOf(html, '4 tasks')).toBe(1);
+		expect(html).toContain('2 tasks');
 		expect(countOf(html, 'ui-chip--toggle')).toBe(1);
-		expect(countOf(html, 'ui-chip--link')).toBe(3);
-		expect(html).toContain('>#3</button>');
-		expect(html).not.toContain('>#4</button>'); // hidden until expanded
-		expect(html).not.toContain('Show fewer');
+		// The dropdown is client-side ($state), so SSR emits only the toggle.
+		expect(countOf(html, 'ui-chip--link')).toBe(0);
+		expect(html).not.toContain('>#1</button>');
+		expect(html).not.toContain('>#2</button>');
 	});
 
-	test('a large set labels the expander with the total and hides the tail', () => {
+	test('a large set labels the toggle with the total; no chips at SSR', () => {
 		const refs = ['1', '2', '3', '4', '5', '6', '7'];
 		const html = renderGantt(
 			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: refs })] }),
 			'https://zt.example'
 		);
-		expect(countOf(html, '7 tasks')).toBe(1);
-		expect(countOf(html, 'ui-chip--link')).toBe(3);
-		expect(html).not.toContain('>#4</button>');
+		expect(html).toContain('7 tasks');
+		expect(countOf(html, 'ui-chip--toggle')).toBe(1);
+		expect(countOf(html, 'ui-chip--link')).toBe(0);
+	});
+});
+
+// --- List interaction (SSR-visible markup) -----------------------------------
+
+describe('Gantt SSR — list interaction markup', () => {
+	test('the toggle carries aria-expanded="false" at SSR', () => {
+		const html = renderGantt(
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2'] })] }),
+			'https://zt.example'
+		);
+		expect(html).toContain('aria-expanded="false"');
+	});
+
+	test('the toggle carries data-refs-toggle for client selectors', () => {
+		const html = renderGantt(
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2'] })] }),
+			'https://zt.example'
+		);
+		expect(html).toContain('data-refs-toggle');
+	});
+
+	test('the refs-menu wrapper class is absent at SSR (dropdown is client-only)', () => {
+		const html = renderGantt(
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2'] })] }),
+			'https://zt.example'
+		);
+		// SSR does not run $state, so the dropdown is not emitted.
+		expect(html).not.toContain('class="refs-menu');
+	});
+
+	test('node-refs has pointer-events:none in CSS; ref buttons re-enable it', () => {
+		// Source-level check: the CSS rule that lets clicks pass through to the
+		// full-bleed selection layer is present in GanttLabelRow.
+		expect(labelRowSource).toContain('.node-refs {');
+		expect(labelRowSource).toContain('pointer-events: none');
+		expect(labelRowSource).toContain(':global(button) {');
+		expect(labelRowSource).toContain('pointer-events: auto');
+	});
+
+	test('.label-btn has a full-bleed ::after hit layer', () => {
+		expect(labelRowSource).toContain('.label-btn::after {');
+		expect(labelRowSource).toContain("content: ''");
+		expect(labelRowSource).toContain('inset: 0');
 	});
 });
 
@@ -328,14 +375,16 @@ describe('Gantt SSR — escaping and raw-HTML hygiene', () => {
 		expect(ganttSource).toContain('let activeTaskId = $state<string | null>(null);');
 		// Task #278: the chip markup moved to TrackerChipList, which calls the
 		// `onOpen` callback the Gantt root still owns.
-		expect(chipListSource).toContain('onclick={() => onOpen?.(ref)}');
+		expect(chipListSource).toContain('onclick={() => onOpen?.(refs[0])}');
 		expect(labelRowSource).toContain('onOpen={refBase !== null ? onOpenTask : undefined}');
 		expect(ganttSource).toContain('onOpenTask={openTask}');
 		expect(ganttSource).toContain('<TaskModal id={activeTaskId} onClose={closeTask} />');
 		// The panel forwards the callback to the summary strip, which delegates
 		// to the same owner instead of linking out.
 		expect(panelSource).toContain('{onOpenTask}');
-		expect(summaryStripSource).toContain('onOpenTask?.(ref)');
+		// The summary strip forwards the callback to TrackerChipList via the
+		// `onOpen` prop; the list itself invokes `onOpenTask?.(ref)` per item.
+		expect(summaryStripSource).toContain('onOpen={onOpenTask}');
 	});
 
 	test('the modal fetches subagentix\'s own proxy and uses no raw HTML', () => {
@@ -379,13 +428,17 @@ describe('Gantt SSR — #251 node-column contract', () => {
 		expect(html).toContain('aria-label="Task #99 (inferred tracker link)"');
 	});
 
-	test('every chip is a modal button, never an anchor', () => {
+	test('two refs render as a toggle, not individual chips, at SSR', () => {
 		const html = renderGantt(
 			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['10', '20'] })] }),
 			'https://zt.example'
 		);
-		expect(html).toContain('>#10</button>');
-		expect(html).toContain('>#20</button>');
+		// >=2 refs: single toggle, no individual #N chips in SSR output.
+		expect(html).toContain('2 tasks');
+		expect(html).toContain('ui-chip--toggle');
+		expect(html).not.toContain('>#10</button>');
+		expect(html).not.toContain('>#20</button>');
+		// Still no anchors anywhere.
 		expect(html).not.toMatch(/<a[^>]*ui-chip--link/);
 	});
 
@@ -402,7 +455,7 @@ describe('Gantt SSR — #251 node-column contract', () => {
 		expect(html).not.toMatch(/>\s*root1\s*</);
 	});
 
-	test('the collapse expander renders as a <button>, not an <a>', () => {
+	test('the toggle renders as a <button>, not an <a>', () => {
 		const html = renderGantt(
 			makeModel({
 				nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2', '3', '4', '5'] })]
@@ -414,5 +467,19 @@ describe('Gantt SSR — #251 node-column contract', () => {
 		expect(html).toMatch(/class="[^"]*ui-chip--toggle[^"]*"/);
 		// It must NOT be an anchor.
 		expect(html).not.toMatch(/<a[^>]*class="[^"]*ui-chip--toggle[^"]*"[^>]*>/);
+	});
+
+	test('clicking the non-tracker part of the node cell selects the node (source)', () => {
+		// The full-bleed ::after on .label-btn makes the entire row clickable
+		// while the tracker controls sit in a sibling with pointer-events:none
+		// and re-enable events on their own buttons. Source-level proof:
+		expect(labelRowSource).toContain('.label-btn::after {');
+		expect(labelRowSource).toContain('inset: 0');
+		expect(labelRowSource).toContain('.node-refs {');
+		expect(labelRowSource).toContain('pointer-events: none');
+		expect(labelRowSource).toContain(':global(button) {');
+		expect(labelRowSource).toContain('pointer-events: auto');
+		// The button itself owns the onSelect callback.
+		expect(labelRowSource).toContain('onclick={() => onSelect(row.node.sessionId)}');
 	});
 });

@@ -19,13 +19,10 @@
 		axisHeight: number;
 		/** Tracker base URL, or null when no tracker UI is configured. */
 		refBase: string | null;
-		/** Per-node ref-list expander state, keyed by node session id. */
-		expandedRefs: Record<string, boolean>;
 		/** Measured column width in px; bound from `clientWidth`. */
 		labelWidth?: number;
 		onSelect: (nodeId: string) => void;
 		onHover: (nodeId: string | null) => void;
-		onToggleRefs: (key: string) => void;
 		onOpenTask: (ref: string) => void;
 	}
 
@@ -34,11 +31,9 @@
 		rowHeight,
 		axisHeight,
 		refBase,
-		expandedRefs,
 		labelWidth = $bindable(0),
 		onSelect,
 		onHover,
-		onToggleRefs,
 		onOpenTask
 	}: Props = $props();
 
@@ -63,11 +58,9 @@
 	{#each rows as row (row.node.sessionId)}
 		<GanttLabelRow
 			{row}
-			expanded={expandedRefs[row.node.sessionId] ?? false}
 			{refBase}
 			{onSelect}
 			{onHover}
-			{onToggleRefs}
 			{onOpenTask}
 		/>
 	{/each}

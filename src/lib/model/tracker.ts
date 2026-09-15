@@ -21,45 +21,6 @@ export function mergeTrackerRefs(...lists: ReadonlyArray<readonly string[]>): st
 	return [...seen];
 }
 
-/** The number of chips a collapsed view shows before offering an expander. */
-export const REF_COLLAPSE_LIMIT = 3;
-
-/** A display view of a ref list: up to `max` chips plus a `N tasks` expander. */
-export interface CollapsedTrackerRefs {
-	/** Refs rendered while collapsed. */
-	visible: string[];
-	/** Refs hidden behind the expander while collapsed. */
-	hidden: string[];
-	/** `hidden.length`, exposed for convenience. */
-	hiddenCount: number;
-	/** Distinct refs in the list. */
-	total: number;
-	/** Expander label (`"4 tasks"`), or `null` when nothing is hidden. */
-	expanderLabel: string | null;
-}
-
-/**
- * Collapse a ref list for display: at most `max` chips are shown; with four or
- * more distinct refs the remainder hides behind an `N tasks` expander
- * (spec §6). Deduplicates and keeps first-seen order.
- */
-export function collapseTrackerRefs(
-	refs: readonly string[],
-	max = REF_COLLAPSE_LIMIT
-): CollapsedTrackerRefs {
-	const unique = mergeTrackerRefs(refs);
-	const limit = Number.isFinite(max) && max > 0 ? Math.floor(max) : 0;
-	const visible = unique.slice(0, limit);
-	const hidden = unique.slice(limit);
-	return {
-		visible,
-		hidden,
-		hiddenCount: hidden.length,
-		total: unique.length,
-		expanderLabel: hidden.length > 0 ? `${unique.length} tasks` : null
-	};
-}
-
 /**
  * The inferred refs of one node: its tool calls plus any `task` delegation edge
  * parented to it, deduplicated in first-seen order. A populated

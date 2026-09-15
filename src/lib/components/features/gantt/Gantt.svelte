@@ -33,11 +33,7 @@
 		type ToolTone
 	} from '$lib/model/gantt';
 	import { AGENT_FALLBACK_COLOR } from '$lib/model/agent';
-	import {
-		collapseTrackerRefs,
-		nodeTrackerRefs,
-		type CollapsedTrackerRefs
-	} from '$lib/model/tracker';
+	import { nodeTrackerRefs } from '$lib/model/tracker';
 
 	let {
 		model,
@@ -57,10 +53,10 @@
 	} = $props();
 
 	// --- Layout constants (px) -------------------------------------------------
-	// `ROW_H` leaves room for the label's `who` line, one flag line and up to
-	// two wrapped tracker-chip lines, so a row with >=4 chips is never clipped
-	// (U1 review finding). The SVG rows share the same constant, so labels and
-	// bars stay aligned.
+	// `ROW_H` leaves room for the label's `who` line, one flag line and the
+	// single-row tracker control (a `#N` chip, or an `N tasks` toggle whose
+	// dropdown floats above the rows), so no label content is clipped. The SVG
+	// rows share the same constant, so labels and bars stay aligned.
 	const AXIS_H = 44;
 	const ROW_H = 72;
 	const BAR_TOP = 18;
@@ -203,11 +199,6 @@
 	const refBase = $derived(
 		ziptaskEnabled && ziptaskBaseUrl ? ziptaskBaseUrl.replace(/\/+$/, '') : null
 	);
-	/** Per-node ref-list expander state, keyed by the node session id. */
-	let expandedRefs = $state<Record<string, boolean>>({});
-	function toggleRefs(key: string) {
-		expandedRefs[key] = !expandedRefs[key];
-	}
 	/** Task ref whose detail modal is open, or null. */
 	let activeTaskId = $state<string | null>(null);
 	function openTask(ref: string) {
@@ -337,8 +328,6 @@
 		markers: MarkerView[];
 		/** Inferred tracker refs of this node (deduped). */
 		trackerRefs: string[];
-		/** Collapsed display view of {@link RowView.trackerRefs}. */
-		trackerChips: CollapsedTrackerRefs;
 	}
 
 	const rowViews = $derived.by((): RowView[] => {
@@ -431,7 +420,6 @@
 			}));
 
 			const trackerRefs = nodeTrackerRefs(node, model.toolCalls, model.edges);
-			const trackerChips = collapseTrackerRefs(trackerRefs);
 
 			return {
 				node,
@@ -447,8 +435,7 @@
 				steps,
 				tools,
 				markers,
-				trackerRefs,
-				trackerChips
+				trackerRefs
 			};
 		});
 	});
@@ -553,11 +540,9 @@
 				rowHeight={ROW_H}
 				axisHeight={AXIS_H}
 				{refBase}
-				{expandedRefs}
 				bind:labelWidth
 				onSelect={selectNode}
 				onHover={(nodeId) => (hoveredNodeId = nodeId)}
-				onToggleRefs={toggleRefs}
 				onOpenTask={openTask}
 			/>
 

@@ -124,15 +124,22 @@ export function countRecentRootSessions(directory?: string, query?: string): num
  * Whether the live DB links sessions to projects (`project` table plus a
  * `session.project_id` column). opencode's schema is not guaranteed, so the
  * join is skipped when either is absent and `projectName` stays `null`. The
- * probe is cached for the process (both objects are schema-static) and uses
- * only read-only metadata queries (`sqlite_master`, `PRAGMA table_info`).
+ * probe uses only read-only metadata queries (`sqlite_master`, `PRAGMA
+ * table_info`).
+ *
+ * Cached per connection, not per process: a stable `dbPath` keeps returning the
+ * same `Database` from `getDb()` and is probed exactly once, while a settings
+ * `dbPath` change makes `getDb()` drop and reopen the handle, so the next query
+ * re-probes the new schema instead of trusting a stale result.
  */
 let projectLink: boolean | null = null;
+let projectLinkDb: ReturnType<typeof getDb> | null = null;
 
 function hasProjectLink(): boolean {
-	if (projectLink !== null) return projectLink;
 	try {
 		const db = getDb();
+		if (db === projectLinkDb && projectLink !== null) return projectLink;
+		projectLinkDb = db;
 		const table = db
 			.query("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'project'")
 			.get() as Row | null;

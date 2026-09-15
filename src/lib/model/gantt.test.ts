@@ -819,7 +819,7 @@ describe('Gantt #251 — node-column regression', () => {
 		expect(labelRule).toContain('flex-direction: row');
 		expect(labelRule).toContain('align-items: stretch');
 		expect(labelRule).toContain('height: var(--row-h)');
-		expect(labelRule).toContain('overflow: hidden');
+		expect(labelRule).toContain('overflow: visible');
 	});
 
 	test('.label-btn flex-fills remaining row space; .node-refs is a sibling, not nested', () => {
