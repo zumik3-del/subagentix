@@ -142,38 +142,52 @@ export function listPermissions(): PermissionInfo[] {
 	ensureLoaded();
 	return [...requests.entries()]
 		.sort((a, b) => a[1].askedAt - b[1].askedAt)
-		.map(([requestId, request]) => ({
-			requestId,
-			permission: request.permission,
-			patterns: request.patterns,
-			reply: request.reply,
-			askedAt: request.askedAt,
-			repliedAt: request.repliedAt
-		}));
+		.map(([requestId, request]) => toPermissionInfo(requestId, request));
+}
+
+/** Shared join key; `'\0'` cannot occur in session or call ids, so it cannot collide. */
+export function permissionKey(sessionId: string, callId: string): string {
+	return `${sessionId}\0${callId}`;
+}
+
+function toPermissionInfo(requestId: string, request: StoredRequest): PermissionInfo {
+	return {
+		requestId,
+		permission: request.permission,
+		patterns: request.patterns,
+		reply: request.reply,
+		askedAt: request.askedAt,
+		repliedAt: request.repliedAt
+	};
+}
+
+/**
+ * The winning prompt per `(sessionId, callId)`, keyed by {@link permissionKey},
+ * built in one `O(requests)` pass; `callId === null` gets no entry. Earliest
+ * `askedAt` wins; ties keep the first inserted request (skip when `askedAt` is
+ * not strictly earlier), matching {@link lookupPermission}.
+ */
+export function buildPermissionIndex(): Map<string, PermissionInfo> {
+	ensureLoaded();
+	const index = new Map<string, PermissionInfo>();
+	for (const [requestId, request] of requests) {
+		if (request.callId === null) continue;
+		const key = permissionKey(request.sessionId, request.callId);
+		const current = index.get(key);
+		if (current !== undefined && current.askedAt <= request.askedAt) continue;
+		index.set(key, toPermissionInfo(requestId, request));
+	}
+	return index;
 }
 
 /**
  * The prompt that a tool call triggered, matched by `(sessionId, callId)`.
- * When several asks share a call id (rare), the earliest one wins so the badge
- * points at the first prompt the user saw.
+ * When several asks share a call id (rare), the earliest one wins. Implemented
+ * on top of {@link buildPermissionIndex} so the paths cannot drift.
  */
 export function lookupPermission(sessionId: string, callId: string | null): PermissionInfo | null {
 	if (callId === null) return null;
-	ensureLoaded();
-	let best: { requestId: string; request: StoredRequest } | null = null;
-	for (const [requestId, request] of requests) {
-		if (request.sessionId !== sessionId || request.callId !== callId) continue;
-		if (best === null || request.askedAt < best.request.askedAt) best = { requestId, request };
-	}
-	if (best === null) return null;
-	return {
-		requestId: best.requestId,
-		permission: best.request.permission,
-		patterns: best.request.patterns,
-		reply: best.request.reply,
-		askedAt: best.request.askedAt,
-		repliedAt: best.request.repliedAt
-	};
+	return buildPermissionIndex().get(permissionKey(sessionId, callId)) ?? null;
 }
 
 /** Test-only: drop the in-memory index so a fresh file is replayed. */
