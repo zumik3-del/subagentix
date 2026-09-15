@@ -1321,7 +1321,7 @@ describe('UI #210 — Gantt selection vs hover', () => {
 	test('no <h3>Turn Gantt</h3> and summary has no count prefixes (source)', () => {
 		expect(ganttHeader).not.toContain('<h3>');
 		expect(ganttHeader).not.toContain('Turn Gantt');
-		expect(ganttHeader).toContain('{formatClock(extent.start)} → {formatClock(extent.end)}');
+		expect(ganttHeader).toContain('{formatClock(extent.start, clock.tz)} → {formatClock(extent.end, clock.tz)}');
 		expect(ganttHeader).not.toMatch(/node.*count|delegation.*edge.*count/i);
 	});
 

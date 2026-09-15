@@ -10,6 +10,7 @@
 	import type { NodeRow, StepToolSummary } from '$lib/model/node';
 	import { summarizeStepTools } from '$lib/model/node';
 	import type { Step } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock, formatCost, formatDuration, formatNumber, tokenBreakdown } from '$lib/model/format';
 	import TreeIcon from '$lib/components/primitives/TreeIcon.svelte';
 	import SubRow from './SubRow.svelte';
@@ -81,9 +82,9 @@
 				{/if}
 			</span>
 		</td>
-		<td class="mono col-time">{formatClock(step.startedAt)}</td>
+		<td class="mono col-time">{formatClock(step.startedAt, clock.tz)}</td>
 		<td class="mono col-time">
-			{step.endedAt === null ? 'running' : formatClock(step.endedAt)}
+			{step.endedAt === null ? 'running' : formatClock(step.endedAt, clock.tz)}
 		</td>
 		<td class="col-time">{formatDuration(step.startedAt, step.endedAt)}</td>
 		{#each cells as cell (cell.label)}

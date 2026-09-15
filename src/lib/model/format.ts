@@ -2,11 +2,72 @@
  * Pure display helpers for the session/turn pages. No I/O and no server
  * imports, so they are safe in the browser bundle and in unit tests.
  *
- * Dates are rendered in UTC (`YYYY-MM-DD HH:MM:SS`) so SSR and hydration agree
- * regardless of the host/browser locale.
+ * Timestamps format for an explicit IANA `timeZone` (default `'UTC'`), so SSR
+ * and hydration agree regardless of the host/browser locale: the server and the
+ * first client render both use the default, and the app swaps to the visitor's
+ * zone after mount (`initBrowserTimeZone` in `clock.svelte.ts`, called from
+ * `+layout.svelte`). The helpers stay runes-free so plain `bun test` can import
+ * them.
  */
 import { TOKEN_LABELS } from './token';
 import type { Usage } from './types';
+
+/**
+ * Per-zone `Intl.DateTimeFormat` memo. Pure memoization keyed only by the zone,
+ * so it is safe to share across concurrent SSR requests.
+ */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+const FIELD_OPTIONS: Intl.DateTimeFormatOptions = {
+	hourCycle: 'h23',
+	numberingSystem: 'latn',
+	year: 'numeric',
+	month: '2-digit',
+	day: '2-digit',
+	hour: '2-digit',
+	minute: '2-digit',
+	second: '2-digit'
+};
+
+/** Cached formatter for `timeZone`; an invalid zone falls back to UTC. */
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+	const cached = formatters.get(timeZone);
+	if (cached) return cached;
+	let formatter: Intl.DateTimeFormat;
+	try {
+		formatter = new Intl.DateTimeFormat('en-US', { ...FIELD_OPTIONS, timeZone });
+	} catch {
+		// Unknown/empty zone: rendering must never throw — use UTC.
+		formatter = new Intl.DateTimeFormat('en-US', { ...FIELD_OPTIONS, timeZone: 'UTC' });
+	}
+	formatters.set(timeZone, formatter);
+	return formatter;
+}
+
+interface DateTimeParts {
+	year: string;
+	month: string;
+	day: string;
+	hour: string;
+	minute: string;
+	second: string;
+}
+
+/** Zero-padded `Y/M/D H:M:S` field map for `epochMs` in `timeZone`. */
+function dateTimeParts(epochMs: number, timeZone: string): DateTimeParts {
+	const parts: DateTimeParts = {
+		year: '0000',
+		month: '00',
+		day: '00',
+		hour: '00',
+		minute: '00',
+		second: '00'
+	};
+	for (const part of formatterFor(timeZone).formatToParts(new Date(epochMs))) {
+		if (part.type in parts) parts[part.type as keyof DateTimeParts] = part.value;
+	}
+	return parts;
+}
 
 /** Labelled per-category token counts (order follows the spec's semantics). */
 export function tokenBreakdown(usage: Usage): Array<{ label: string; value: number }> {
@@ -20,23 +81,25 @@ export function tokenBreakdown(usage: Usage): Array<{ label: string; value: numb
 	];
 }
 
-/** Deterministic UTC timestamp; `—` for a non-finite value. */
-export function formatDateTime(epochMs: number): string {
+/** Deterministic `YYYY-MM-DD HH:MM:SS` in `timeZone`; `—` for a non-finite value. */
+export function formatDateTime(epochMs: number, timeZone = 'UTC'): string {
 	if (!Number.isFinite(epochMs)) return '—';
-	return new Date(epochMs).toISOString().replace('T', ' ').slice(0, 19);
+	const { year, month, day, hour, minute, second } = dateTimeParts(epochMs, timeZone);
+	return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
 }
 
-/** Deterministic UTC timestamp for an ISO-8601 string; `—` when absent/invalid. */
-export function formatIsoDateTime(value: string | null | undefined): string {
+/** `YYYY-MM-DD HH:MM:SS` for an ISO-8601 string in `timeZone`; `—` when absent/invalid. */
+export function formatIsoDateTime(value: string | null | undefined, timeZone = 'UTC'): string {
 	if (!value) return '—';
 	const ms = Date.parse(value);
-	return Number.isFinite(ms) ? formatDateTime(ms) : '—';
+	return Number.isFinite(ms) ? formatDateTime(ms, timeZone) : '—';
 }
 
-/** Deterministic UTC time-of-day `HH:MM:SS` for axis ticks and the time cursor. */
-export function formatClock(epochMs: number): string {
+/** Deterministic `HH:MM:SS` in `timeZone` for axis ticks and the time cursor. */
+export function formatClock(epochMs: number, timeZone = 'UTC'): string {
 	if (!Number.isFinite(epochMs)) return '—';
-	return new Date(epochMs).toISOString().slice(11, 19);
+	const { hour, minute, second } = dateTimeParts(epochMs, timeZone);
+	return `${hour}:${minute}:${second}`;
 }
 
 const MONTHS = [
@@ -54,11 +117,11 @@ const MONTHS = [
 	'Dec'
 ] as const;
 
-/** Human-friendly, locale-independent UTC date `Mon D, YYYY`; `—` when invalid. */
-export function formatDate(epochMs: number): string {
+/** Human-friendly, locale-independent `Mon D, YYYY` in `timeZone`; `—` when invalid. */
+export function formatDate(epochMs: number, timeZone = 'UTC'): string {
 	if (!Number.isFinite(epochMs)) return '—';
-	const d = new Date(epochMs);
-	return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+	const { year, month, day } = dateTimeParts(epochMs, timeZone);
+	return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
 }
 
 /** Human wall-clock duration; a `null` end means the span is still running. */

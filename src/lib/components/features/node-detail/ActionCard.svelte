@@ -10,6 +10,7 @@
 	 * resolving.
 	 */
 	import type { Action } from '$lib/model/types';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock } from '$lib/model/format';
 	import { truncateText } from '$lib/model/node';
 	import IoBlock from '$lib/components/composites/IoBlock.svelte';
@@ -44,8 +45,8 @@
 			<span class="name mono">{action.label}</span>
 		{/if}
 		<span class="muted">
-			{formatClock(action.at)}{action.endedAt !== null
-				? ` → ${formatClock(action.endedAt)}`
+			{formatClock(action.at, clock.tz)}{action.endedAt !== null
+				? ` → ${formatClock(action.endedAt, clock.tz)}`
 				: ''}
 		</span>
 	</div>

@@ -13,6 +13,7 @@
 	 */
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
+	import { clock } from '$lib/model/clock.svelte';
 	import { formatDateTime } from '$lib/model/format';
 	import { displayAgent } from '$lib/model/agent';
 	import type { DirectorySummary, TurnSummary } from '$lib/model/types';
@@ -294,7 +295,7 @@
 				>
 					<span class="chevron-spacer" aria-hidden="true"></span>
 					<span class="row-label">Turn {turn.index}</span>
-					<span class="row-meta">{formatDateTime(turn.startedAt)}</span>
+					<span class="row-meta">{formatDateTime(turn.startedAt, clock.tz)}</span>
 				</a>
 			</li>
 		{/each}

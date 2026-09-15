@@ -978,7 +978,7 @@ describe('NodeDetailPanel source — row/call click wiring and copy + clipboard 
 	test('copyCall writes via clipboard API, sets copiedCallId, and resets after 1.5s', () => {
 		// copyCall stays in the panel root (state + timer ownership); only the
 		// button markup moved into ToolCallCard.
-		expect(panel).toContain('navigator.clipboard.writeText(formatToolCallText(call))');
+		expect(panel).toContain('navigator.clipboard.writeText(formatToolCallText(call, clock.tz))');
 		expect(panel).toContain('copiedCallId = call.id');
 		expect(panel).toContain('setTimeout(() => {'),
 		expect(panel).toContain('copiedCallId = null');

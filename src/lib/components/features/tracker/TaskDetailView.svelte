@@ -7,6 +7,7 @@
 	 * Every dynamic value is escaped by Svelte; no raw-HTML injection is used.
 	 */
 	import { formatIsoDateTime } from '$lib/model/format';
+	import { clock } from '$lib/model/clock.svelte';
 	import type { TrackerTaskDetail } from '$lib/model/tracker';
 
 	let { detail }: { detail: TrackerTaskDetail } = $props();
@@ -19,9 +20,9 @@
 			{ label: 'Assignee', value: task.assignee ?? '—' },
 			{ label: 'Reporter', value: task.reporter || '—' },
 			{ label: 'Attempts', value: `${task.attempts}/${task.maxAttempts}` },
-			{ label: 'Created', value: formatIsoDateTime(task.createdAt) },
-			{ label: 'Updated', value: formatIsoDateTime(task.updatedAt) },
-			...(task.completedAt ? [{ label: 'Completed', value: formatIsoDateTime(task.completedAt) }] : []),
+			{ label: 'Created', value: formatIsoDateTime(task.createdAt, clock.tz) },
+			{ label: 'Updated', value: formatIsoDateTime(task.updatedAt, clock.tz) },
+			...(task.completedAt ? [{ label: 'Completed', value: formatIsoDateTime(task.completedAt, clock.tz) }] : []),
 			...(task.epicId !== null ? [{ label: 'Epic', value: `#${task.epicId}` }] : [])
 		].filter((entry) => entry.value !== '')
 	);
@@ -63,7 +64,7 @@
 						{#if comment.type && comment.type !== 'comment'}
 							<span class="ui-badge type">{comment.type}</span>
 						{/if}
-						<time>{formatIsoDateTime(comment.createdAt)}</time>
+						<time>{formatIsoDateTime(comment.createdAt, clock.tz)}</time>
 					</header>
 					<div class="content">{comment.content}</div>
 				</article>
