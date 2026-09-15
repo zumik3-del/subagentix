@@ -1,6 +1,5 @@
 <script module lang="ts">
 	import type { Node } from '$lib/model/types';
-	import type { CollapsedTrackerRefs } from '$lib/model/tracker';
 
 	/**
 	 * Minimal per-row view model rendered by the label column: a structural
@@ -20,8 +19,6 @@
 		flags: Array<{ key: string; label: string; description: string }>;
 		/** Inferred tracker refs of this node (deduped). */
 		trackerRefs: string[];
-		/** Collapsed display view of {@link LabelRow.trackerRefs}. */
-		trackerChips: CollapsedTrackerRefs;
 	}
 </script>
 
@@ -32,8 +29,9 @@
 	 *
 	 * Renders the full-row selection button (agent swatch + name, model, flag
 	 * badges) plus the inferred tracker chips pinned to the row's top-right.
-	 * Pure presentation: the `GanttLabels` parent owns the tracker-expander
-	 * callbacks, and the `Gantt` root owns the selection/hover state and the
+	 * Pure presentation: `TrackerChipList` owns the ref control and its
+	 * open/close dropdown state, `refBase` gates whether the refs are
+	 * interactive, and the `Gantt` root owns the selection/hover state and the
 	 * measured column width.
 	 */
 	import { displayAgent } from '$lib/model/agent';
@@ -41,24 +39,14 @@
 
 	interface Props {
 		row: LabelRow;
-		/** Whether this row's tracker-chip list is expanded. */
-		expanded: boolean;
 		/** Tracker base URL, or null when no tracker UI is configured. */
 		refBase: string | null;
 		onSelect: (nodeId: string) => void;
 		onHover: (nodeId: string | null) => void;
-		onToggleRefs: (key: string) => void;
 		onOpenTask: (ref: string) => void;
 	}
 
-	let { row, expanded, refBase, onSelect, onHover, onToggleRefs, onOpenTask }: Props = $props();
-
-	/** Refs to render for the current collapsed/expanded state. */
-	const nodeRefs = $derived(
-		expanded
-			? [...row.trackerChips.visible, ...row.trackerChips.hidden]
-			: row.trackerChips.visible
-	);
+	let { row, refBase, onSelect, onHover, onOpenTask }: Props = $props();
 
 	/** ui-badge tone for a node flag key (docs/ui-standards.md §6). */
 	function flagTone(key: string): 'warning' | 'danger' {
@@ -73,14 +61,20 @@
 	}
 </script>
 
-<div class="label" class:active={row.active} class:dimmed={row.dimmed}>
+<div
+	class="label"
+	role="row"
+	tabindex="-1"
+	class:active={row.active}
+	class:dimmed={row.dimmed}
+	onmouseenter={() => onHover(row.node.sessionId)}
+	onmouseleave={() => onHover(null)}
+>
 	<button
 		type="button"
 		class="label-btn"
 		aria-pressed={row.active}
 		onclick={() => onSelect(row.node.sessionId)}
-		onmouseenter={() => onHover(row.node.sessionId)}
-		onmouseleave={() => onHover(null)}
 		title={`${displayAgent(row.node.agent)} · ${row.node.sessionId} · ${row.node.status}`}
 	>
 		<span class="who">
@@ -101,10 +95,7 @@
 	{#if row.trackerRefs.length}
 		<span class="refs node-refs">
 			<TrackerChipList
-				refs={nodeRefs}
-				chips={row.trackerChips}
-				{expanded}
-				onToggle={() => onToggleRefs(row.node.sessionId)}
+				refs={row.trackerRefs}
 				onOpen={refBase !== null ? onOpenTask : undefined}
 			/>
 		</span>
@@ -125,7 +116,13 @@
 		width: 100%;
 		height: var(--row-h);
 		border-bottom: 1px solid var(--border-weaker-base);
-		overflow: hidden;
+		/*
+		 * The refs dropdown must escape the row, so the cell itself cannot
+		 * clip; `.label-btn` does the clipping instead (below). `position`
+		 * anchors the full-bleed selection hit layer.
+		 */
+		position: relative;
+		overflow: visible;
 	}
 
 	/* No zebra (issue #8): hover is a subtle band, selection a stronger one. */
@@ -167,6 +164,21 @@
 		font-size: var(--font-size-small);
 		text-align: left;
 		cursor: pointer;
+		/* Clip the row text; the `::after` hit layer below is absolutely
+		   positioned against `.label`, so it is not clipped by this rule. */
+		overflow: hidden;
+	}
+
+	/*
+	 * Full-bleed selection hit layer: the button itself only claims the space
+	 * left after the refs, so this invisible `::after` (positioned against the
+	 * `.label` cell) covers the remaining pixels. Clicks on the tracker
+	 * controls above never reach it; every other pixel selects the node.
+	 */
+	.label-btn::after {
+		content: '';
+		position: absolute;
+		inset: 0;
 	}
 
 	.label-btn:focus-visible {
@@ -210,9 +222,22 @@
 
 	.node-refs {
 		/* Sibling of the row button, pinned to the top-right: `align-self`
-		   overrides `.label`'s stretch so the chip block hugs the row top. */
+		   overrides `.label`'s stretch so the chip block hugs the row top.
+		   `position` keeps it a positioned sibling so it paints above the
+		   button's full-bleed hit layer; it deliberately has no `z-index` (which
+		   would create a stacking context and trap the dropdown), so the
+		   dropdown's own `z-index` lifts it above neighbouring rows.
+		   `pointer-events: none` lets clicks on the padding fall through to the
+		   selection button; the ref controls re-enable events themselves. */
+		position: relative;
 		flex: 0 0 auto;
 		align-self: flex-start;
 		padding: var(--space-1) var(--space-2) 0;
+		pointer-events: none;
+	}
+
+	/* The ref controls stay interactive inside the pass-through overlay. */
+	.node-refs :global(button) {
+		pointer-events: auto;
 	}
 </style>

@@ -151,8 +151,8 @@ function makeDetail(overrides: Partial<NodeDetail> = {}): NodeDetail {
 	return { node: makeNode(), steps: [], toolCalls: [], markers: [], ...overrides };
 }
 
-function renderPanel(detail: NodeDetail, ziptaskBaseUrl: string | null = null): string {
-	return render(Panel, { props: { detail, ziptaskBaseUrl } }).body;
+function renderPanel(detail: NodeDetail, ziptaskBaseUrl: string | null = null, onOpenTask?: (ref: string) => void): string {
+	return render(Panel, { props: { detail, ziptaskBaseUrl, onOpenTask } }).body;
 }
 
 function renderGantt(model: GanttModel, ziptaskBaseUrl: string | null = null): string {
@@ -499,7 +499,7 @@ describe('NodeDetailPanel SSR — retries and markers', () => {
 });
 
 describe('NodeDetailPanel SSR — inferred ziptask chips', () => {
-	test('dedupes refs and renders each as a modal-opening button', () => {
+	test('dedupes refs and renders an "N tasks" toggle when onOpenTask is supplied', () => {
 		const html = renderPanel(
 			makeDetail({
 				toolCalls: [
@@ -507,12 +507,16 @@ describe('NodeDetailPanel SSR — inferred ziptask chips', () => {
 					makeTool({ id: 't2', trackerRefs: ['185'] })
 				]
 			}),
-			'https://zt.example/'
+			'https://zt.example/',
+			() => undefined
 		);
-		expect(html).toContain('Task #185');
-		expect(html).toContain('Task #42');
-		expect(html).toContain('<button type="button" class="ui-chip ui-chip--link');
-		expect(html.split('Task #185').length - 1).toBe(1);
+		// Deduplication: '185' appears twice in tool calls but only once in refs.
+		expect(html).toContain('2 tasks');
+		expect(html).toContain('ui-chip--toggle');
+		expect(html).toContain('data-refs-toggle');
+		// The dropdown with individual #N chips is client-only; SSR emits only the toggle.
+		expect(html).not.toContain('>#185</button>');
+		expect(html).not.toContain('>#42</button>');
 	});
 
 	test('does not build an external href from the configured base', () => {

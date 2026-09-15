@@ -96,7 +96,7 @@ reviewable.
   ids (`NodeIdentity.svelte:97`), raw JSON (`RawJsonBlock.svelte:58`), IO values
   (`IoBlock.svelte:100`), tool/action text (`ToolCallCard.svelte:194`,
   `ActionCard.svelte:97`, `StepRow.svelte:111`, `SubRow.svelte:183`),
-  summary ids (`NodeSummaryStrip.svelte:223`).
+  summary ids (`NodeSummaryStrip.svelte:212`).
 
 ---
 
@@ -119,7 +119,7 @@ success/warning/danger/info/accent:
   `AGENT_COLOR_VARS` (`src/lib/model/agent.ts:16-24`); an unknown/absent token
   falls back to the neutral `--icon-base` (`AGENT_FALLBACK_COLOR`,
   `src/lib/model/agent.ts:31`). Agent swatches use `.ui-swatch` and set the
-  background as data (e.g. `GanttLabelRow.svelte:87`, `SettingsModal.svelte:433`).
+  background as data (e.g. `GanttLabelRow.svelte:79`, `SettingsModal.svelte:433`).
 - **Chart / model colors:** `MODEL_PALETTE` is the sole accepted raw-color
   exception (see [§2](#2-color--tokens)); assigned first-seen order by
   `assignModelColors` (`src/lib/model/gantt.ts:52-61`).
@@ -145,16 +145,24 @@ success/warning/danger/info/accent:
 - **Keyboard conventions:**
   - Gantt node rows are focusable buttons (`role="button"`, `tabindex="0"`) and
     select on **Enter or Space**, with `preventDefault`
-    (`Gantt.svelte:106-111`; row wiring `GanttNodeRow.svelte`).
+    (`Gantt.svelte:102-107`; row wiring `GanttNodeRow.svelte`).
   - Off-canvas sidebar focus management runs only on the narrow breakpoint:
     opening focuses the first focusable element, closing restores focus to the
     toggle (`+layout.svelte:33-47`). The closed panel is `visibility: hidden`, so
     it leaves the tab order.
+- **Node-label cell click target.** Every pixel of a Gantt label cell selects
+  the node: `.label-btn` spans the row and a full-bleed `.label-btn::after`
+  (`position: absolute; inset: 0`) covers the pixels after the tracker strip,
+  while the pinned `.node-refs` strip is `pointer-events: none` and re-enables
+  events only on its own buttons — so the tracker controls stay interactive and
+  never select the row (`GanttLabelRow.svelte:176-180,221-240`). The label cell
+  itself does not clip (`overflow: visible`) so the refs dropdown can escape it
+  (`GanttLabelRow.svelte:104-124`).
 - **Reduced motion:** programmatic scrolls use `behavior: 'auto'` when
   `window.matchMedia('(prefers-reduced-motion: reduce)').matches`, otherwise
   `'smooth'` (`NodeDetailPanel.svelte:197`, `NodeActionsTable.svelte:95`).
 - **ARIA:** selection is exposed with `aria-pressed={row.active}` and is
-  **selection-only** — hover must never set it (`Gantt.svelte:101,106-111`;
+  **selection-only** — hover must never set it (`Gantt.svelte:97,102-107`;
   guarded by `pages.suite.ts`, "aria-pressed/selected derives from
   selectedNodeId only, never hover"). Dialogs are labelled; see
   [§9](#9-modal--dialog-contract).
@@ -224,9 +232,11 @@ adopt (do not delete).
 - `.ui-input` — full-width text input; `::placeholder` uses `--text-weak`.
 
 **Chips and badges** (pills; no wrapper components by the rule above)
-- `.ui-chip` — pill container for tracker refs / filters.
-- `.ui-chip--link` — clickable chip that behaves as a link.
-- `.ui-chip--toggle` — pressable filter/toggle chip.
+- `.ui-chip` — pill container for tracker refs / filters; the inert ref text
+  when no tracker base is configured.
+- `.ui-chip--link` — clickable `#N` chip that opens the task modal.
+- `.ui-chip--toggle` — pressable toggle/filter chip: the node-column `N tasks`
+  disclosure trigger and the detail filter.
 - `.ui-badge` — small status pill, neutral by default.
 - `.ui-badge--success` — generic success tone. **unused.**
 - `.ui-badge--warning` — generic warning tone (`flagTone`: running / `end=null` /
@@ -244,6 +254,19 @@ adopt (do not delete).
 - `.ui-badge--perm` — permission-request tone.
 - `.ui-badge--removed` — removed/rejected marker and rejected permission.
 - `.ui-badge--compaction` — compaction marker / action kind.
+
+**Tracker-ref display (L2 `TrackerChipList`).** Every surface that renders
+inferred refs (the Gantt node column, the node summary strip) uses the one
+`TrackerChipList` mechanism: 0 refs render nothing, 1 ref renders a single `#N`
+`.ui-chip--link` button, and `>=2` refs collapse into an `N tasks`
+`.ui-chip--toggle` whose disclosure list holds one `#N` button per ref
+(`TrackerChipList.svelte:109-155`). The toggle exposes `aria-expanded` and
+`data-refs-toggle`; the list closes on Escape or an outside pointer press and
+flips up when the nearest clipping ancestor leaves no room below
+(`TrackerChipList.svelte:73-106`). With `onOpen` omitted (no tracker base) the
+refs stay inert `.ui-chip` text (`TrackerChipList.svelte:147-155`). This
+replaces the former `>=4` collapse / `Show fewer` expander — there is no
+separate expand state or `Show fewer` label.
 
 Some tones reach markup only through dynamic composition —
 `ui-badge--${flagTone(key)}` → warning|danger,
@@ -424,19 +447,19 @@ src/
 ### Svelte 5 idioms (mandatory for new / extracted components)
 
 - Props via `let { … }: Props = $props();` with a local `interface Props` — no
-  `export let`. (Example: `Gantt.svelte:42-57`, `ScrollView.svelte:22-42`.)
+  `export let`. (Example: `Gantt.svelte:38-53`, `ScrollView.svelte:22-42`.)
 - Children and named slots → **snippets**: `children: Snippet`, rendered with
   `{@render children()}`. (Examples: `ScrollView.svelte:16,23,232`;
-  `IoBlock.svelte:33`; `SummaryLine.svelte:24`; optional child
+  `IoBlock.svelte:33`; `SummaryLine.svelte:30`; optional child
   `GanttChart.svelte:64`.)
 - Events → **callback props** (`onSelect?: (id: string) => void`), never
   `createEventDispatcher`. (Examples: `NodeDetailPanel.svelte:44`;
-  `Gantt.svelte:558-561`.)
+  `Gantt.svelte:544-546`.)
 - Two-way values → `$bindable()`. (Examples: `ScrollView.svelte:40-41`;
-  `GanttLabels.svelte:38`.)
+  `GanttLabels.svelte:34`.)
 - State: `$state` / `$derived` / `$derived.by` / `$effect` (with a cleanup
   return). `$derived.by` is used for row/view-model derivations
-  (`Gantt.svelte:344,481`; `NodeDetailPanel.svelte:141`;
+  (`Gantt.svelte:333,468`; `NodeDetailPanel.svelte:141`;
   `SessionSidebar.svelte:93`).
 - `$state.raw` is the prescribed idiom for large immutable view-model arrays
   (`RowView[]`, `NodeRow[]`) to avoid deep-proxy cost. **Not yet used in the
@@ -460,7 +483,7 @@ assertion to the file that now owns the string.
 | `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch |
 | `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
-| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task chips: open the modal, feature toggle, `>=4` refs collapse, no-link/unconfigured bases, escaping / raw-HTML hygiene, node-column contract |
+| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal

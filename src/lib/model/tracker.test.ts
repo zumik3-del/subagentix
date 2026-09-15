@@ -1,11 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-	collapseTrackerRefs,
 	mergeTrackerRefs,
 	nodeTrackerRefs,
 	normaliseTaskDetail,
-	REF_COLLAPSE_LIMIT,
 	turnTrackerRefs
 } from './tracker';
 import type { Edge, GanttModel, Node, ToolCall, Usage } from './types';
@@ -130,93 +128,6 @@ describe('mergeTrackerRefs()', () => {
 		mergeTrackerRefs(first, second);
 		expect(first).toEqual(['x', 'y']);
 		expect(second).toEqual(['y', 'z']);
-	});
-});
-
-describe('collapseTrackerRefs()', () => {
-	test('exposes the documented collapse limit', () => {
-		expect(REF_COLLAPSE_LIMIT).toBe(3);
-	});
-
-	test('an empty list has nothing visible and no expander', () => {
-		expect(collapseTrackerRefs([])).toEqual({
-			visible: [],
-			hidden: [],
-			hiddenCount: 0,
-			total: 0,
-			expanderLabel: null
-		});
-	});
-
-	test('1 and 3 refs all fit without an expander', () => {
-		expect(collapseTrackerRefs(['1'])).toEqual({
-			visible: ['1'],
-			hidden: [],
-			hiddenCount: 0,
-			total: 1,
-			expanderLabel: null
-		});
-		expect(collapseTrackerRefs(['1', '2', '3'])).toEqual({
-			visible: ['1', '2', '3'],
-			hidden: [],
-			hiddenCount: 0,
-			total: 3,
-			expanderLabel: null
-		});
-	});
-
-	test('exactly 4 refs hide the fourth behind a "4 tasks" expander', () => {
-		expect(collapseTrackerRefs(['1', '2', '3', '4'])).toEqual({
-			visible: ['1', '2', '3'],
-			hidden: ['4'],
-			hiddenCount: 1,
-			total: 4,
-			expanderLabel: '4 tasks'
-		});
-	});
-
-	test('a large set keeps the first 3 visible and labels the total', () => {
-		const refs = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'];
-		const collapsed = collapseTrackerRefs(refs);
-		expect(collapsed.visible).toEqual(['1', '2', '3']);
-		expect(collapsed.hidden).toEqual(['4', '5', '6', '7', '8', '9', '10']);
-		expect(collapsed.hiddenCount).toBe(7);
-		expect(collapsed.total).toBe(10);
-		expect(collapsed.expanderLabel).toBe('10 tasks');
-	});
-
-	test('deduplicates before collapsing', () => {
-		expect(collapseTrackerRefs(['a', 'a', 'b']).total).toBe(2);
-		expect(collapseTrackerRefs(['a', 'a', 'b']).visible).toEqual(['a', 'b']);
-		expect(collapseTrackerRefs(['a', 'a', 'b']).expanderLabel).toBeNull();
-	});
-
-	test('honours a custom max, flooring a fractional one', () => {
-		expect(collapseTrackerRefs(['a', 'b', 'c'], 2)).toEqual({
-			visible: ['a', 'b'],
-			hidden: ['c'],
-			hiddenCount: 1,
-			total: 3,
-			expanderLabel: '3 tasks'
-		});
-		expect(collapseTrackerRefs(['a', 'b', 'c'], 2.9).visible).toEqual(['a', 'b']);
-	});
-
-	test('a max >= total hides nothing', () => {
-		expect(collapseTrackerRefs(['a', 'b'], 2).expanderLabel).toBeNull();
-		expect(collapseTrackerRefs(['a', 'b'], 5).expanderLabel).toBeNull();
-	});
-
-	test('a non-positive / non-finite max clamps to zero visible chips', () => {
-		for (const max of [0, -1, -400, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
-			const collapsed = collapseTrackerRefs(['a', 'b', 'c'], max);
-			expect(collapsed.visible).toEqual([]);
-			expect(collapsed.hidden).toEqual(['a', 'b', 'c']);
-			expect(collapsed.hiddenCount).toBe(3);
-			expect(collapsed.expanderLabel).toBe('3 tasks');
-			// Empty input stays fully empty even at max 0.
-			expect(collapseTrackerRefs([], max).expanderLabel).toBeNull();
-		}
 	});
 });
 

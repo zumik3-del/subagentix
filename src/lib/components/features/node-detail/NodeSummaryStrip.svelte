@@ -15,6 +15,7 @@
 	import type { ToolRetryGroup } from '$lib/model/node';
 	import NodeIdentity from './NodeIdentity.svelte';
 	import SummaryLine from '$lib/components/composites/SummaryLine.svelte';
+	import TrackerChipList from '$lib/components/composites/TrackerChipList.svelte';
 
 	interface Props {
 		detail: NodeDetail;
@@ -90,7 +91,7 @@
 			</section>
 			{#if ziptaskEnabled}
 				<section class="summary-col">
-					<SummaryLine signal={detail} overflow={trackerRefs.length > 0 && refBase !== null}>
+					<SummaryLine signal={detail} clip={false}>
 						<h4 class="line-label">
 							Tracker links <span class="muted">(inferred)</span>
 						</h4>
@@ -99,19 +100,7 @@
 						{:else if refBase === null}
 							<span class="empty">ZIPTASK_BASE_URL is not configured.</span>
 						{:else}
-							<ul class="line-list">
-								{#each trackerRefs as ref (ref)}
-									<li class="line-item" data-overflow-item>
-										<button
-											type="button"
-											class="ui-chip ui-chip--link"
-											onclick={() => onOpenTask?.(ref)}
-										>
-											Task #{ref}
-										</button>
-									</li>
-								{/each}
-							</ul>
+							<TrackerChipList refs={trackerRefs} onOpen={onOpenTask} />
 						{/if}
 					</SummaryLine>
 				</section>
