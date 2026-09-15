@@ -542,70 +542,126 @@ describe('NodeDetailPanel SSR — inferred ziptask chips', () => {
 
 // --- Task detail modal (feature #263) ----------------------------------------
 
-describe('TaskDetailView SSR — meta, description and comments', () => {
-	const taskDetail = (overrides: Record<string, unknown> = {}, comments: unknown[] = []) => ({
-		task: {
-			id: 185,
-			title: 'Ship the modal',
-			description: 'Body text\nsecond line',
-			status: 'done',
-			priority: 'p1',
-			assignee: 'developer',
-			reporter: 'orchestrator',
-			attempts: 1,
-			maxAttempts: 3,
-			createdAt: '2026-09-13T05:36:28.320Z',
-			updatedAt: '2026-09-13T06:14:23.159Z',
-			completedAt: '2026-09-13T06:14:23.159Z',
-			isEpic: false,
-			epicId: null,
-			...overrides
-		},
-		comments
+	describe('TaskDetailView SSR — meta, description and comments', () => {
+		const taskDetail = (overrides: Record<string, unknown> = {}, comments: unknown[] = []) => ({
+			task: {
+				id: 185,
+				title: 'Ship the modal',
+				description: 'Body text\nsecond line',
+				status: 'done',
+				priority: 'p1',
+				assignee: 'developer',
+				reporter: 'orchestrator',
+				attempts: 1,
+				maxAttempts: 3,
+				createdAt: '2026-09-13T05:36:28.320Z',
+				updatedAt: '2026-09-13T06:14:23.159Z',
+				completedAt: '2026-09-13T06:14:23.159Z',
+				isEpic: false,
+				epicId: null,
+				...overrides
+			},
+			comments
+		});
+
+		test('renders the title, meta fields and the description', () => {
+			const html = renderDetail(taskDetail());
+			expect(html).toContain('Ship the modal');
+			expect(html).toContain('Status');
+			expect(html).toContain('done');
+			expect(html).toContain('Priority');
+			expect(html).toContain('p1');
+			expect(html).toContain('developer');
+			expect(html).toContain('2026-09-13 05:36:28'); // created_at in UTC
+			expect(html).toContain('Body text\nsecond line');
+		});
+
+		test('renders comments as blocks with agent, type and content', () => {
+			const html = renderDetail(
+				taskDetail({}, [
+					{ id: 1, agent: 'system', content: 'the spec', type: 'comment', createdAt: '2026-09-13T05:36:28.326Z' },
+					{ id: 2, agent: 'orchestrator', content: 'done', type: 'resolution', createdAt: '2026-09-13T06:14:23.164Z' }
+				])
+			);
+			expect(html).toContain('Comments (2)');
+			expect(html).toContain('system');
+			expect(html).toContain('the spec');
+			expect(html).toContain('resolution');
+			expect(html).toContain('orchestrator');
+			expect(html).toContain('done');
+			// The default `comment` type is not shown as a badge.
+			expect(html).not.toMatch(/<span class="type">comment<\/span>/);
+		});
+
+		test('shows empty states for a task without a description or comments', () => {
+			const html = renderDetail(taskDetail({ description: null }));
+			expect(html).toContain('No description.');
+			expect(html).toContain('Comments (0)');
+			expect(html).toContain('No comments.');
+		});
+
+		test('marks an epic and shows its epic id', () => {
+			const html = renderDetail(taskDetail({ isEpic: true, epicId: 42 }));
+			expect(html).toContain('epic');
+			expect(html).toContain('#42');
+		});
 	});
 
-	test('renders the title, meta fields and the description', () => {
-		const html = renderDetail(taskDetail());
-		expect(html).toContain('Ship the modal');
-		expect(html).toContain('Status');
-		expect(html).toContain('done');
-		expect(html).toContain('Priority');
-		expect(html).toContain('p1');
-		expect(html).toContain('developer');
-		expect(html).toContain('2026-09-13 05:36:28'); // created_at in UTC
-		expect(html).toContain('Body text\nsecond line');
-	});
+	// --- Task #365 regression: camelCase proxy payload must NOT collapse to defaults --
 
-	test('renders comments as blocks with agent, type and content', () => {
-		const html = renderDetail(
-			taskDetail({}, [
-				{ id: 1, agent: 'system', content: 'the spec', type: 'comment', createdAt: '2026-09-13T05:36:28.326Z' },
-				{ id: 2, agent: 'orchestrator', content: 'done', type: 'resolution', createdAt: '2026-09-13T06:14:23.164Z' }
-			])
-		);
-		expect(html).toContain('Comments (2)');
-		expect(html).toContain('system');
-		expect(html).toContain('the spec');
-		expect(html).toContain('resolution');
-		expect(html).toContain('orchestrator');
-		expect(html).toContain('done');
-		// The default `comment` type is not shown as a badge.
-		expect(html).not.toMatch(/<span class="type">comment<\/span>/);
-	});
+	describe('TaskDetailView SSR — camelCase payload preserves real timestamps (regression #365)', () => {
+		const taskDetail = (overrides: Record<string, unknown> = {}) => ({
+			task: {
+				id: 185,
+				title: 'Ship the modal',
+				description: 'Body',
+				status: 'done',
+				priority: 'p1',
+				assignee: 'developer',
+				reporter: 'orchestrator',
+				attempts: 1,
+				maxAttempts: 5,
+				createdAt: '2026-09-13T05:36:28.320Z',
+				updatedAt: '2026-09-13T06:14:23.159Z',
+				completedAt: '2026-09-13T06:14:23.159Z',
+				isEpic: true,
+				epicId: 42,
+				...overrides
+			},
+			comments: []
+		});
 
-	test('shows empty states for a task without a description or comments', () => {
-		const html = renderDetail(taskDetail({ description: null }));
-		expect(html).toContain('No description.');
-		expect(html).toContain('Comments (0)');
-		expect(html).toContain('No comments.');
-	});
+		test('renders real UTC timestamps for Created and Updated (not em-dash)', () => {
+			const html = renderDetail(taskDetail());
+			// The proxy returns these as ISO strings; the detail view must format them,
+			// never fall back to "—" (which formatIsoDateTime returns for empty/invalid).
+			expect(html).toContain('2026-09-13 05:36:28'); // Created
+			expect(html).toContain('2026-09-13 06:14:23'); // Updated
+			expect(html).not.toContain('<dd>—</dd>'); // no em-dash for any meta value
+		});
 
-	test('marks an epic and shows its epic id', () => {
-		const html = renderDetail(taskDetail({ isEpic: true, epicId: 42 }));
-		expect(html).toContain('epic');
-		expect(html).toContain('#42');
+		test('renders Completed when completedAt is present', () => {
+			const html = renderDetail(taskDetail({ completedAt: '2026-09-13T06:14:23.159Z' }));
+			expect(html).toContain('Completed');
+			expect(html).toContain('2026-09-13 06:14:23');
+		});
+
+		test('does not render Completed when completedAt is null', () => {
+			const html = renderDetail(taskDetail({ completedAt: null }));
+			expect(html).not.toContain('Completed');
+		});
+
+		test('renders maxAttempts from the camelCase payload (regression: old double-normalise defaulted to 3)', () => {
+			const html = renderDetail(taskDetail({ maxAttempts: 5 }));
+			expect(html).toContain('1/5'); // attempts/maxAttempts
+		});
+
+		test('renders epic badge and epic id from camelCase payload (regression: epicId defaulted to null)', () => {
+			const html = renderDetail(taskDetail({ isEpic: true, epicId: 42 }));
+			expect(html).toContain('epic');
+			expect(html).toContain('#42');
+		});
 	});
-});
 
 describe('TaskModal SSR — dialog shell and loading state', () => {
 	test('renders an accessible dialog in the loading state before the fetch runs', () => {

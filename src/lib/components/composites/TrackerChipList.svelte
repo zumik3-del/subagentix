@@ -10,9 +10,9 @@
 	 *
 	 * When `refBase`/`onOpenTask` is absent (`onOpen` omitted) the refs stay
 	 * inert text. The dropdown opens downward by default, flips up when the
-	 * nearest clipping ancestor leaves no room below, and closes on Escape or
-	 * an outside click. Pure presentation: callers own the refs and the
-	 * open-task callback.
+	 * nearest clipping ancestor leaves no room below, and closes on Escape, an
+	 * outside click, or when the pointer leaves the whole control. Pure
+	 * presentation: callers own the refs and the open-task callback.
 	 */
 	interface Props {
 		/** Deduplicated inferred refs to render. */
@@ -34,6 +34,13 @@
 	let dropUp = $state(false);
 	let root: HTMLSpanElement | undefined = $state();
 	let panel: HTMLDivElement | undefined = $state();
+	/**
+	 * Grace period before a pointer leaving the control closes the menu; long
+	 * enough to cross the trigger→panel gap, short enough to feel immediate.
+	 */
+	const LEAVE_CLOSE_DELAY_MS = 150;
+	/** Pending pointer-leave close, cleared when the pointer re-enters. */
+	let leaveTimer: ReturnType<typeof setTimeout> | undefined;
 
 	function toggle(): void {
 		open = !open;
@@ -42,6 +49,31 @@
 	function choose(ref: string): void {
 		open = false;
 		onOpen?.(ref);
+	}
+
+	/** Cancel a pending pointer-leave close (the pointer came back). */
+	function cancelLeave(): void {
+		if (leaveTimer === undefined) return;
+		clearTimeout(leaveTimer);
+		leaveTimer = undefined;
+	}
+
+	/**
+	 * Close shortly after the pointer leaves the whole control. The panel is a
+	 * DOM child but is absolutely positioned one `--space-1` below the trigger,
+	 * so the pointer crosses a small gap that is outside the trigger's box —
+	 * the delay lets it reach the panel (which re-enters and cancels) instead
+	 * of firing a false close on leaving the trigger. Keyboard users never
+	 * emit pointer events, so `mouseleave` cannot close the menu out from
+	 * under them.
+	 */
+	function scheduleLeave(): void {
+		if (!open) return;
+		cancelLeave();
+		leaveTimer = setTimeout(() => {
+			leaveTimer = undefined;
+			open = false;
+		}, LEAVE_CLOSE_DELAY_MS);
 	}
 
 	/**
@@ -86,6 +118,7 @@
 		document.addEventListener('keydown', onKey);
 		document.addEventListener('pointerdown', onPointerDown);
 		return () => {
+			cancelLeave();
 			document.removeEventListener('keydown', onKey);
 			document.removeEventListener('pointerdown', onPointerDown);
 		};
@@ -121,7 +154,15 @@
 			onclick={() => onOpen?.(refs[0])}>{`#${refs[0]}`}</button
 		>
 	{:else if refs.length > 1}
-		<span class="tracker-refs" bind:this={root}>
+		<!-- `role="group"` marks the wrapper that groups the toggle and its
+		     menu, so the pointer-leave handlers are not a bare static interaction. -->
+		<span
+			class="tracker-refs"
+			role="group"
+			bind:this={root}
+			onmouseenter={cancelLeave}
+			onmouseleave={scheduleLeave}
+		>
 			<button
 				type="button"
 				class="ui-chip ui-chip--toggle"

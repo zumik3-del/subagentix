@@ -147,3 +147,30 @@ export function normaliseTaskDetail(raw: unknown): TrackerTaskDetail | null {
 
 	return { task, comments };
 }
+
+/**
+ * Type guard for an already-normalised {@link TrackerTaskDetail} (camelCase) —
+ * the shape our own `/api/tracker/task/:id` proxy returns.
+ *
+ * The modal fetches that proxy, so it must NOT run {@link normaliseTaskDetail}
+ * again: the normaliser maps ziptask's snake_case fields and would silently
+ * collapse a camelCase reply to defaults (empty timestamps, `maxAttempts` 3,
+ * `epicId` null). This guard validates the camelCase contract instead, so a
+ * malformed body still becomes a clean "unexpected response" error.
+ */
+export function isTaskDetail(value: unknown): value is TrackerTaskDetail {
+	if (!isRecord(value) || !isRecord(value.task) || !Array.isArray(value.comments)) return false;
+	const t = value.task;
+	return (
+		typeof t.id === 'number' &&
+		typeof t.title === 'string' &&
+		typeof t.status === 'string' &&
+		typeof t.attempts === 'number' &&
+		typeof t.maxAttempts === 'number' &&
+		typeof t.createdAt === 'string' &&
+		typeof t.updatedAt === 'string' &&
+		(t.completedAt === null || typeof t.completedAt === 'string') &&
+		typeof t.isEpic === 'boolean' &&
+		(t.epicId === null || typeof t.epicId === 'number')
+	);
+}

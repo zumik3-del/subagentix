@@ -260,13 +260,18 @@ inferred refs (the Gantt node column, the node summary strip) uses the one
 `TrackerChipList` mechanism: 0 refs render nothing, 1 ref renders a single `#N`
 `.ui-chip--link` button, and `>=2` refs collapse into an `N tasks`
 `.ui-chip--toggle` whose disclosure list holds one `#N` button per ref
-(`TrackerChipList.svelte:109-155`). The toggle exposes `aria-expanded` and
-`data-refs-toggle`; the list closes on Escape or an outside pointer press and
-flips up when the nearest clipping ancestor leaves no room below
-(`TrackerChipList.svelte:73-106`). With `onOpen` omitted (no tracker base) the
-refs stay inert `.ui-chip` text (`TrackerChipList.svelte:147-155`). This
-replaces the former `>=4` collapse / `Show fewer` expander — there is no
-separate expand state or `Show fewer` label.
+(`TrackerChipList.svelte:147-201`). The toggle exposes `aria-expanded` and
+`data-refs-toggle` (`TrackerChipList.svelte:166-175`); the list closes on
+Escape, an outside pointer press, choosing a ref, or the pointer leaving the
+whole control, and flips up when the nearest clipping ancestor leaves no room
+below. A `150ms` grace delay bridges the trigger→panel gap — the panel is
+absolutely positioned one `--space-1` below the trigger, so leaving the trigger
+alone must not close it before the pointer reaches the panel, and `mouseenter`
+on the wrapper cancels the pending close
+(`TrackerChipList.svelte:37-77,105-125,159-165`). With `onOpen` omitted (no
+tracker base) the refs stay inert `.ui-chip` text
+(`TrackerChipList.svelte:193-201`). This replaces the former `>=4` collapse /
+`Show fewer` expander — there is no separate expand state or `Show fewer` label.
 
 Some tones reach markup only through dynamic composition —
 `ui-badge--${flagTone(key)}` → warning|danger,
@@ -352,23 +357,31 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **Structure is the `.ui-modal*` classes** in `src/app.css` (see
   [§6](#6-shared-primitives-ui-)); a component adds sizing only
-  (`TaskModal.svelte:141-148`, `SettingsModal.svelte:623`).
+  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`).
 - **Dialog semantics:** `role="dialog"`, `aria-modal="true"`, `tabindex="-1"`,
   and a label (`aria-label` or `aria-labelledby`), on the
-  `.ui-modal__dialog` element (`TaskModal.svelte:109-117`;
+  `.ui-modal__dialog` element (`TaskModal.svelte:110-118`;
   `SettingsModal.svelte:467-475`). The backdrop is a button with a close
-  `aria-label` (`TaskModal.svelte:103-108`, `SettingsModal.svelte:460-465`).
+  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`).
 - **Behaviour owned by the component** (a `ModalShell` composite is **not**
   landed):
-  - **Escape** closes (`TaskModal.svelte:76-81`;
+  - **Escape** closes (`TaskModal.svelte:77-82`;
     `SettingsModal.svelte:205`).
   - **Focus trap:** Tab/Shift+Tab cycle within the dialog
-    (`TaskModal.svelte:82-98`; `SettingsModal.svelte:211-225`).
+    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`).
   - **Initial focus and focus return:** the dialog is focused on mount and the
     previously focused element is restored on unmount
-    (`TaskModal.svelte:71-74`; `SettingsModal.svelte:163-176`).
+    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`).
 - The panel body hosts a `ScrollView` (`.ui-modal__body` + `.ui-modal__content`,
-  e.g. `TaskModal.svelte:124-136`).
+  e.g. `TaskModal.svelte:125-137`).
+- **Detail payload is validated, not re-normalised.** The modal fetches
+  subagentix's own `/api/tracker/task/:id` proxy, whose server layer already
+  mapped ziptask's snake_case fields to the camelCase `TrackerTaskDetail`; the
+  client therefore validates that contract with `isTaskDetail` instead of
+  re-running `normaliseTaskDetail`, so real `createdAt`/`updatedAt`
+  (Created/Updated) render instead of the normaliser's empty-string defaults
+  (`TaskModal.svelte:49-55`; `src/routes/api/tracker/task/[id]/+server.ts:53`;
+  `src/lib/model/tracker.ts:116-149,151-176`).
 - **SSR:** a closed modal renders no dialog markup (guarded by `pages.suite.ts`,
   "SSR closed-modal: settings button present, no dialog markup"); an open
   `TaskModal` renders the accessible loading dialog
@@ -481,9 +494,9 @@ assertion to the file that now owns the string.
 | Suite | Guards |
 |---|---|
 | `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch |
-| `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
+| `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, `TaskDetailView` camelCase-payload regression (real Created/Updated/completedAt, `maxAttempts`, epic id), Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
-| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted) |
+| `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal

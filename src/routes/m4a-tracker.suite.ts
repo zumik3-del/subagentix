@@ -483,3 +483,53 @@ describe('Gantt SSR — #251 node-column contract', () => {
 		expect(labelRowSource).toContain('onclick={() => onSelect(row.node.sessionId)}');
 	});
 });
+
+// --- Task #367 / #368: TrackerChipList mouseleave close behavior --------------
+
+describe('Gantt SSR — TrackerChipList mouseleave/mouseenter wiring (task #367, guard #368)', () => {
+	test('the .tracker-refs wrapper carries onmouseleave={scheduleLeave}', () => {
+		expect(chipListSource).toContain('class="tracker-refs"');
+		expect(chipListSource).toContain('onmouseleave={scheduleLeave}');
+	});
+
+	test('the .tracker-refs wrapper carries onmouseenter={cancelLeave} to bridge the gap', () => {
+		expect(chipListSource).toContain('onmouseenter={cancelLeave}');
+	});
+
+	test('scheduleLeave uses a 150ms grace timer to avoid false-closing across the trigger→panel gap', () => {
+		expect(chipListSource).toContain('LEAVE_CLOSE_DELAY_MS = 150');
+		expect(chipListSource).toContain('scheduleLeave');
+		expect(chipListSource).toContain('setTimeout');
+	});
+
+	test('cancelLeave clears the pending close timer', () => {
+		expect(chipListSource).toContain('cancelLeave');
+		expect(chipListSource).toContain('clearTimeout(leaveTimer)');
+	});
+
+	test('the refs-menu is not rendered at SSR (dropdown is client-only) — no regression', () => {
+		const html = renderGantt(
+			makeModel({ nodes: [makeNode({ sessionId: 'root1', trackerRefs: ['1', '2'] })] }),
+			'https://zt.example'
+		);
+		expect(html).not.toContain('class="refs-menu');
+		expect(html).not.toContain('refs-menu--up');
+		// The toggle and wrapper are still present.
+		expect(html).toContain('ui-chip--toggle');
+		expect(html).toContain('tracker-refs');
+	});
+
+	test('the mouseleave/mouseenter handlers live on the wrapper, not the toggle alone', () => {
+		// The handlers must be on the <span class="tracker-refs"> so that entering
+		// the panel (which sits outside the toggle's box) cancels the close timer.
+		const wrapperLineIdx = chipListSource.indexOf('class="tracker-refs"');
+		const mouseleaveIdx = chipListSource.indexOf('onmouseleave={scheduleLeave}');
+		const mouseenterIdx = chipListSource.indexOf('onmouseenter={cancelLeave}');
+		expect(wrapperLineIdx).toBeGreaterThan(-1);
+		expect(mouseleaveIdx).toBeGreaterThan(-1);
+		expect(mouseenterIdx).toBeGreaterThan(-1);
+		// Handlers appear after the wrapper opening tag (same or subsequent lines).
+		expect(mouseleaveIdx).toBeGreaterThanOrEqual(wrapperLineIdx);
+		expect(mouseenterIdx).toBeGreaterThanOrEqual(wrapperLineIdx);
+	});
+});

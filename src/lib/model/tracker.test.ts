@@ -4,6 +4,7 @@ import {
 	mergeTrackerRefs,
 	nodeTrackerRefs,
 	normaliseTaskDetail,
+	isTaskDetail,
 	turnTrackerRefs
 } from './tracker';
 import type { Edge, GanttModel, Node, ToolCall, Usage } from './types';
@@ -300,6 +301,163 @@ describe('normaliseTaskDetail()', () => {
 		});
 		expect(detail?.comments).toHaveLength(1);
 		expect(detail?.comments[0].content).toBe('ok');
+	});
+});
+
+describe('isTaskDetail() — camelCase guard for the proxy\'s already-normalised payload', () => {
+	const fullCamelCase = {
+		task: {
+			id: 185,
+			title: 'Ship the modal',
+			status: 'done',
+			priority: 'p1',
+			assignee: 'developer',
+			reporter: 'orchestrator',
+			attempts: 1,
+			maxAttempts: 5,
+			createdAt: '2026-09-13T05:36:28.320Z',
+			updatedAt: '2026-09-13T06:14:23.159Z',
+			completedAt: '2026-09-13T06:14:23.159Z',
+			isEpic: true,
+			epicId: 42
+		},
+		comments: [
+			{ id: 1, agent: 'system', content: 'hi', type: 'comment', createdAt: 't' }
+		]
+	};
+
+	test('accepts a full camelCase TrackerTaskDetail', () => {
+		expect(isTaskDetail(fullCamelCase)).toBe(true);
+	});
+
+	test('accepts a minimal camelCase with null optional fields', () => {
+		const minimal = {
+			task: {
+				id: 7,
+				title: 'bare',
+				status: 'queued',
+				attempts: 0,
+				maxAttempts: 3,
+				createdAt: '',
+				updatedAt: '',
+				completedAt: null,
+				isEpic: false,
+				epicId: null
+			},
+			comments: []
+		};
+		expect(isTaskDetail(minimal)).toBe(true);
+	});
+
+	test('preserves maxAttempts, epicId and isEpic from camelCase (regression #365)', () => {
+		// Before #365 the modal re-normalised the proxy output with normaliseTaskDetail,
+		// which mapped snake_case fields and silently collapsed camelCase values:
+		// max_attempts → undefined → fallback 3, epic_id → undefined → null.
+		// isTaskDetail lets the proxy's already-correct values through unchanged.
+		expect(isTaskDetail(fullCamelCase)).toBe(true);
+		expect(fullCamelCase.task.maxAttempts).toBe(5);
+		expect(fullCamelCase.task.epicId).toBe(42);
+		expect(fullCamelCase.task.isEpic).toBe(true);
+	});
+
+	test('rejects null', () => {
+		expect(isTaskDetail(null)).toBe(false);
+	});
+
+	test('rejects a non-record string', () => {
+		expect(isTaskDetail('nope')).toBe(false);
+	});
+
+	test('rejects an array', () => {
+		expect(isTaskDetail([])).toBe(false);
+	});
+
+	test('rejects { error: "x" } (upstream API error body)', () => {
+		expect(isTaskDetail({ error: 'x' })).toBe(false);
+	});
+
+	test('rejects { task: { id: 1 } } (missing title)', () => {
+		expect(isTaskDetail({ task: { id: 1 }, comments: [] })).toBe(false);
+	});
+
+	test('rejects a snake_case ziptask payload (must use normaliseTaskDetail instead)', () => {
+		// isTaskDetail is the guard for the ALREADY-normalised proxy output only.
+		// A raw snake_case response from ziptask must NOT pass, or the old
+		// double-normalise bug returns to life.
+		const snake = {
+			task: {
+				id: 185,
+				title: 'Ship the modal',
+				status: 'done',
+				attempts: 1,
+				max_attempts: 3,
+				created_at: '2026-09-13T05:36:28.320Z',
+				updated_at: '2026-09-13T06:14:23.159Z',
+				completed_at: null,
+				is_epic: 0,
+				epic_id: null
+			},
+			comments: []
+		};
+		expect(isTaskDetail(snake)).toBe(false);
+	});
+
+	test('rejects a camelCase payload missing required fields', () => {
+		const base = {
+			task: {
+				id: 1,
+				title: 'x',
+				status: 'x',
+				attempts: 0,
+				maxAttempts: 3,
+				createdAt: '',
+				updatedAt: '',
+				isEpic: false,
+				epicId: null
+			},
+			comments: []
+		};
+
+		// Missing each required scalar one at a time.
+		const taskBase = {
+			id: 1,
+			title: 'x',
+			status: 'x',
+			attempts: 0,
+			maxAttempts: 3,
+			createdAt: '',
+			updatedAt: '',
+			isEpic: false,
+			epicId: null
+		};
+		for (const field of ['id', 'title', 'status', 'attempts', 'maxAttempts', 'createdAt', 'updatedAt'] as const) {
+			const payload = {
+				task: Object.fromEntries(
+					Object.entries(taskBase).filter(([k]) => k !== field)
+				),
+				comments: []
+			};
+			expect(isTaskDetail(payload), `missing ${field}`).toBe(false);
+		}
+
+		// Wrong types.
+		expect(
+			isTaskDetail({ ...base, task: { ...base.task, id: 'x' as unknown as number } })
+		).toBe(false);
+		expect(
+			isTaskDetail({ ...base, task: { ...base.task, title: 42 as unknown as string } })
+		).toBe(false);
+		expect(
+			isTaskDetail({ ...base, task: { ...base.task, isEpic: 1 as unknown as boolean } })
+		).toBe(false);
+		expect(
+			isTaskDetail({ ...base, task: { ...base.task, epicId: 'x' as unknown as number } })
+		).toBe(false);
+
+		// Missing the comments array.
+		expect(
+			isTaskDetail({ task: base.task })
+		).toBe(false);
 	});
 });
 

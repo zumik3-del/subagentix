@@ -7,7 +7,7 @@
 	 * Mounted only on the client (a chip click sets the id), so the load runs
 	 * from an `$effect`; SSR renders the loading state.
 	 */
-	import { normaliseTaskDetail, type TrackerTaskDetail } from '$lib/model/tracker';
+	import { isTaskDetail, type TrackerTaskDetail } from '$lib/model/tracker';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import TaskDetailView from './TaskDetailView.svelte';
 
@@ -46,12 +46,13 @@
 				error = errorMessage(body, response.status);
 				return;
 			}
-			const parsed = normaliseTaskDetail(body);
-			if (parsed === null) {
+			// The proxy already normalised the upstream snake_case payload, so the
+			// modal validates that camelCase contract instead of re-normalising it.
+			if (!isTaskDetail(body)) {
 				error = 'Unexpected response from the server.';
 				return;
 			}
-			detail = parsed;
+			detail = body;
 		} catch (cause) {
 			if (signal.aborted) return;
 			error = cause instanceof Error ? cause.message : String(cause);
