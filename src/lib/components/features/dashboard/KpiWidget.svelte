@@ -38,7 +38,7 @@
 		cacheWrite: 0
 	};
 
-	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
+	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
 	const widgetData = useWidgetData<KpiData>({
 		source: () => widget.source,
@@ -123,6 +123,7 @@
 	error={widgetData.error ?? undefined}
 	refreshing={widgetData.refreshing}
 	onRefresh={widgetData.refresh}
+	{onSettings}
 >
 	<div class="kpi" bind:this={root}>
 		<dl class="kpi__tiles">

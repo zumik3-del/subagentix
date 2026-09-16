@@ -1,26 +1,21 @@
 <script lang="ts">
 	/**
-	 * Widget picker dialog (dashboard Phase 5, task #414; resizable in #438).
+	 * Widget picker dialog (dashboard Phase 5, task #414; show/hide only in #449).
 	 *
-	 * Lists every registry widget in registry order with a toggle, and for each
-	 * checked widget a width (1–4 quarter-width blocks) and height control
-	 * (`def.minHeight`–8 rows). Drafts the selection + sizes locally and persists them through
-	 * `PUT /api/settings` on Apply. Cancel (and Escape / backdrop click)
-	 * discards the draft; the parent owns `open` and applies the saved
-	 * selection. Focus handling follows docs/ui-standards.md §9: dialog
+	 * Lists every registry widget in registry order with a visibility toggle and
+	 * a `Restore defaults` action. Drafts the selection locally and persists it
+	 * through the shared `saveDashboardWidgets` helper on Apply; per-widget sizes
+	 * live in the gear-opened `WidgetSettings` dialog. Cancel (and Escape /
+	 * backdrop click) discards the draft; the parent owns `open` and applies the
+	 * saved selection. Focus handling follows docs/ui-standards.md §9: dialog
 	 * semantics, Escape close, a Tab trap and focus return to the opener.
 	 */
 	import { tick } from 'svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
-	import {
-		DEFAULT_WIDGETS,
-		WIDGET_DEFS,
-		WIDGET_MAX_HEIGHT,
-		findWidgetDef,
-		resolvePlacements
-	} from '$lib/widgets/registry';
+	import { DEFAULT_WIDGETS, WIDGET_DEFS, resolvePlacements } from '$lib/widgets/registry';
 	import type { WidgetId, WidgetPlacement } from '$lib/widgets/registry';
-	import { samePlacements, toggleWidgetSelection, updatePlacement } from './picker';
+	import { samePlacements, toggleWidgetSelection } from './picker';
+	import { saveDashboardWidgets } from './save';
 
 	interface Props {
 		open: boolean;
@@ -68,15 +63,6 @@
 		draft = toggleWidgetSelection(draft, id);
 	}
 
-	function setWidth(id: WidgetId, value: string): void {
-		draft = updatePlacement(draft, id, { width: Number(value) });
-	}
-
-	function stepHeight(id: WidgetId, delta: number): void {
-		const current = draftById.get(id)?.height ?? findWidgetDef(id).minHeight;
-		draft = updatePlacement(draft, id, { height: current + delta });
-	}
-
 	function restoreDefaults(): void {
 		draft = resolvePlacements(DEFAULT_WIDGETS);
 	}
@@ -111,19 +97,7 @@
 		saving = true;
 		error = null;
 		try {
-			const response = await fetch('/api/settings', {
-				method: 'PUT',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ dashboardWidgets: draft })
-			});
-			if (!response.ok) {
-				const data = (await response.json().catch(() => ({}))) as { error?: string };
-				throw new Error(data.error ?? `Could not save widgets (${response.status}).`);
-			}
-			const data = (await response.json()) as { dashboardWidgets?: unknown };
-			const saved = Array.isArray(data.dashboardWidgets)
-				? resolvePlacements(data.dashboardWidgets)
-				: draft;
+			const saved = await saveDashboardWidgets(draft);
 			onApply(saved);
 		} catch (cause) {
 			error = cause instanceof Error ? cause.message : String(cause);
@@ -175,57 +149,6 @@
 											<span class="widget-meta">tier {def.tier}</span>
 										</span>
 									</label>
-
-									{#if placement}
-										<div class="widget-size">
-											<span class="widget-field">
-												<label class="widget-field__label" for={`width-${def.id}`}>Width</label>
-												<select
-													id={`width-${def.id}`}
-													class="widget-select"
-													value={String(placement.width)}
-													disabled={saving}
-													onchange={(event) => setWidth(def.id, event.currentTarget.value)}
-												>
-													<option value="1">1 block</option>
-													<option value="2">2 blocks</option>
-													<option value="3">3 blocks</option>
-													<option value="4">4 blocks (full)</option>
-												</select>
-											</span>
-
-											<span class="widget-field">
-												<span class="widget-field__label" id={`height-${def.id}`}>Height</span>
-												<span
-													class="widget-stepper"
-													role="group"
-													aria-labelledby={`height-${def.id}`}
-												>
-													<button
-														type="button"
-														class="widget-step"
-														aria-label={`Decrease ${def.title} height`}
-													disabled={saving || placement.height <= def.minHeight}
-													onclick={() => stepHeight(def.id, -1)}
-													>
-														−
-													</button>
-													<span class="widget-step__value" aria-live="polite">
-														{placement.height}
-													</span>
-													<button
-														type="button"
-														class="widget-step"
-														aria-label={`Increase ${def.title} height`}
-														disabled={saving || placement.height >= WIDGET_MAX_HEIGHT}
-														onclick={() => stepHeight(def.id, 1)}
-													>
-														+
-													</button>
-												</span>
-											</span>
-										</div>
-									{/if}
 								</li>
 							{/each}
 						</ul>
@@ -304,73 +227,6 @@
 	.widget-meta {
 		font-size: var(--font-size-small);
 		color: var(--text-faint);
-	}
-
-	.widget-size {
-		display: flex;
-		align-items: center;
-		gap: var(--space-4);
-		padding-inline-start: calc(var(--space-6) + var(--space-3));
-	}
-
-	.widget-field {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.widget-field__label {
-		font-size: var(--font-size-small);
-		color: var(--text-weak);
-	}
-
-	.widget-select {
-		padding: var(--space-1) var(--space-2);
-		background: var(--surface-base);
-		color: var(--text-strong);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		font-size: var(--font-size-small);
-	}
-
-	.widget-stepper {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-
-	.widget-step {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: var(--space-5);
-		height: var(--space-5);
-		padding: 0;
-		background: var(--surface-raised-base);
-		color: var(--text-base);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		line-height: 1;
-		cursor: pointer;
-	}
-
-	.widget-step:hover:not(:disabled) {
-		background: var(--surface-raised-base-hover);
-		color: var(--text-strong);
-	}
-
-	.widget-step:disabled {
-		cursor: default;
-		color: var(--text-weaker);
-	}
-
-	.widget-step__value {
-		min-width: 1.5ch;
-		text-align: center;
-		font-size: var(--font-size-small);
-		font-variant-numeric: tabular-nums;
 	}
 
 	.restore {

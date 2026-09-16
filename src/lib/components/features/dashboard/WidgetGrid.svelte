@@ -13,7 +13,7 @@
 	 * client mounts the widget body lazily once it is visible.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
-	import { findWidgetDef, type WidgetPlacement } from '$lib/widgets/registry';
+	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
 	import type { WidgetLoaders } from './widget';
 	import WidgetHost from './WidgetHost.svelte';
 
@@ -30,6 +30,8 @@
 		filter?: DashboardFilter;
 		/** Global refresh counter, forwarded to every mounted widget body. */
 		refreshToken?: number;
+		/** Opens the size-settings modal for a widget id (task #449). */
+		onWidgetSettings?: (id: WidgetId) => void;
 	}
 
 	const DEFAULT_FILTER: DashboardFilter = { period: '30d', scope: null };
@@ -38,15 +40,30 @@
 		placements,
 		loaders = {},
 		filter = DEFAULT_FILTER,
-		refreshToken = 0
+		refreshToken = 0,
+		onWidgetSettings
 	}: Props = $props();
+
+	/**
+	 * A per-widget gear callback bound to the shell's settings hook (task #449).
+	 * The closure is recreated each render, but it is not part of the widget fetch
+	 * key (source/period/scope), so opening or changing a size never re-fetches.
+	 */
+	function settingsFor(id: WidgetId): (() => void) | undefined {
+		if (!onWidgetSettings) return undefined;
+		return () => onWidgetSettings(id);
+	}
 </script>
 
 <ul class="widget-grid">
 	{#each placements as placement (placement.id)}
 		{@const def = findWidgetDef(placement.id)}
 		<li class="widget-grid__item" data-w={placement.width} data-h={placement.height}>
-			<WidgetHost {def} load={loaders[def.id]} widgetProps={{ widget: def, filter, refreshToken }} />
+			<WidgetHost
+				{def}
+				load={loaders[def.id]}
+				widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id) }}
+			/>
 		</li>
 	{/each}
 </ul>

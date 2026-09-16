@@ -10,15 +10,28 @@
 	 * selector change through `onFilterChange` (no persistence here). Each
 	 * selected widget mounts lazily and fetches its own data through the grid's
 	 * loaders, re-fetching whenever the filter prop changes (tasks #410/#415).
+	 *
+	 * Since #449 the shell also owns the per-widget size-settings target: a gear
+	 * on a card opens one `WidgetSettings` dialog whose changes apply
+	 * optimistically and persist through the shared coalescing writer.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
-	import { resolvePlacements, type WidgetPlacement } from '$lib/widgets/registry';
+	import {
+		findWidgetDef,
+		resolvePlacements,
+		type WidgetId,
+		type WidgetPlacement
+	} from '$lib/widgets/registry';
 	import DashboardHeader from './DashboardHeader.svelte';
 	import FilterSelector from './FilterSelector.svelte';
 	import WidgetGrid from './WidgetGrid.svelte';
+	import WidgetSettings from './WidgetSettings.svelte';
 	import WidgetsModal from './WidgetsModal.svelte';
 	import { DEFAULT_PERIOD, type FilterOption } from './filter';
 	import { WIDGET_LOADERS } from './loaders';
+	import { updatePlacement } from './picker';
+	import { createCoalescingWriter, saveDashboardWidgets } from './save';
+	import type { WidgetSizePatch } from './widget';
 
 	const DEFAULT_FILTER: DashboardFilter = { period: DEFAULT_PERIOD, scope: null };
 
@@ -43,19 +56,66 @@
 		onFilterChange
 	}: Props = $props();
 
-	// Applied selection: starts from the loader, and an Apply replaces it with
+	// Applied selection: starts from the loader, and a save replaces it with
 	// the normalised placements the settings API returned, so the grid
-	// re-renders without a full reload (task #414). A later loader refresh still
-	// wins until the next Apply.
+	// re-renders without a full reload (tasks #414/#449). A later loader refresh
+	// still wins until the next save.
 	let applied = $state<WidgetPlacement[] | null>(null);
+	/** Last server-confirmed placements; `null` means the loader baseline. */
+	let lastSaved = $state<WidgetPlacement[] | null>(null);
 	let pickerOpen = $state(false);
+	/** Widget whose size settings are open, or `null` while closed. */
+	let settingsId = $state<WidgetId | null>(null);
+	let settingsError = $state<string | null>(null);
+	let settingsSaving = $state(false);
 
 	// Registry order + dedupe + clamp, so the grid always matches the picker.
 	let placements = $derived(resolvePlacements(applied ?? widgets));
+	let settingsWidget = $derived(settingsId === null ? undefined : findWidgetDef(settingsId));
+	let settingsPlacement = $derived(
+		settingsId === null ? undefined : placements.find((placement) => placement.id === settingsId)
+	);
+
+	// One shared writer for the gear path: rapid size changes collapse into the
+	// last one, and a failure restores the last server-confirmed placements.
+	const writer = createCoalescingWriter(async (next) => {
+		try {
+			const saved = await saveDashboardWidgets(next);
+			lastSaved = saved;
+			applied = saved;
+			settingsError = null;
+		} catch (cause) {
+			applied = lastSaved;
+			settingsError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			settingsSaving = false;
+		}
+	});
 
 	function onApply(next: readonly WidgetPlacement[]): void {
 		applied = [...next];
+		lastSaved = [...next];
 		pickerOpen = false;
+	}
+
+	function onWidgetSettings(id: WidgetId): void {
+		settingsId = id;
+		settingsError = null;
+	}
+
+	function onSettingsChange(patch: WidgetSizePatch): void {
+		const id = settingsId;
+		if (id === null) return;
+		const next = updatePlacement(placements, id, patch);
+		applied = next;
+		settingsError = null;
+		settingsSaving = true;
+		writer.push(next);
+	}
+
+	function closeSettings(): void {
+		settingsId = null;
+		settingsError = null;
 	}
 </script>
 
@@ -72,7 +132,13 @@
 			No widgets selected. Use the Widgets button to add widgets to your dashboard.
 		</p>
 	{:else}
-		<WidgetGrid {placements} loaders={WIDGET_LOADERS} {filter} {refreshToken} />
+		<WidgetGrid
+			{placements}
+			loaders={WIDGET_LOADERS}
+			{filter}
+			{refreshToken}
+			onWidgetSettings={onWidgetSettings}
+		/>
 	{/if}
 </main>
 
@@ -81,6 +147,16 @@
 	selected={placements}
 	onApply={onApply}
 	onClose={() => (pickerOpen = false)}
+/>
+
+<WidgetSettings
+	open={settingsId !== null}
+	widget={settingsWidget}
+	placement={settingsPlacement}
+	saving={settingsSaving}
+	error={settingsError}
+	onChange={onSettingsChange}
+	onClose={closeSettings}
 />
 
 <style>

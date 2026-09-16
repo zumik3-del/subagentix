@@ -21,7 +21,7 @@
 	import WidgetCard from './WidgetCard.svelte';
 	import BarChart from './BarChart.svelte';
 
-	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
+	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
 	const state = useWidgetData<ToolUsage>({
 		source: () => widget.source,
@@ -43,6 +43,7 @@
 	error={state.error ?? undefined}
 	refreshing={state.refreshing}
 	onRefresh={state.refresh}
+	{onSettings}
 >
 	{#if state.data}
 		{#if note}

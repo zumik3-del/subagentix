@@ -14,7 +14,7 @@
 	import WidgetCard from './WidgetCard.svelte';
 	import BarChart from './BarChart.svelte';
 
-	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
+	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
 	const state = useWidgetData<TopDirectoryEntry[]>({
 		source: () => widget.source,
@@ -46,6 +46,7 @@
 	error={state.error ?? undefined}
 	refreshing={state.refreshing}
 	onRefresh={state.refresh}
+	{onSettings}
 >
 	{#if state.data}
 		<BarChart {bars} label="Top projects" colorVar="--chart-1" />

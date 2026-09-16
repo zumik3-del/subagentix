@@ -23,6 +23,8 @@
 		refreshing?: boolean;
 		/** Refresh callback; when omitted no refresh control renders. */
 		onRefresh?: () => void;
+		/** Gear callback; when omitted no settings control renders (task #449). */
+		onSettings?: () => void;
 		/** Widget body, rendered when `status === 'ready'`. */
 		children?: Snippet;
 	}
@@ -33,6 +35,7 @@
 		error,
 		refreshing = false,
 		onRefresh,
+		onSettings,
 		children
 	}: Props = $props();
 </script>
@@ -40,18 +43,34 @@
 <article class="ui-card widget-card" aria-busy={status === 'loading' || refreshing}>
 	<header class="widget-card__head">
 		<h2 class="widget-card__title">{title}</h2>
-		{#if onRefresh}
-			<button
-				class="ui-icon-btn widget-card__refresh"
-				class:is-spinning={refreshing || status === 'loading'}
-				type="button"
-				onclick={onRefresh}
-				disabled={refreshing || status === 'loading'}
-				aria-label="Refresh {title}"
-				title="Refresh"
-			>
-				<Icon name="refresh" />
-			</button>
+		{#if onRefresh || onSettings}
+			<div class="widget-card__controls">
+				{#if onRefresh}
+					<button
+						class="ui-icon-btn widget-card__refresh"
+						class:is-spinning={refreshing || status === 'loading'}
+						type="button"
+						onclick={onRefresh}
+						disabled={refreshing || status === 'loading'}
+						aria-label="Refresh {title}"
+						title="Refresh"
+					>
+						<Icon name="refresh" />
+					</button>
+				{/if}
+				{#if onSettings}
+					<button
+						class="ui-icon-btn widget-card__settings"
+						type="button"
+						onclick={onSettings}
+						aria-label="Settings for {title}"
+						title="Widget settings"
+						aria-haspopup="dialog"
+					>
+						<Icon name="gear" />
+					</button>
+				{/if}
+			</div>
 		{/if}
 	</header>
 
@@ -95,6 +114,13 @@
 		justify-content: space-between;
 		gap: var(--space-2);
 		min-height: var(--space-6);
+	}
+
+	.widget-card__controls {
+		display: flex;
+		align-items: center;
+		flex: none;
+		gap: var(--space-1);
 	}
 
 	.widget-card__title {

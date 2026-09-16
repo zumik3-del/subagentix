@@ -305,9 +305,9 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 		});
 	});
 
-	describe('WidgetsModal source: width select stringifies value', () => {
+	describe('WidgetSettings source: width select stringifies value', () => {
 		const source = readFileSync(
-			new URL('./WidgetsModal.svelte', import.meta.url),
+			new URL('./WidgetSettings.svelte', import.meta.url),
 			'utf8'
 		);
 
@@ -333,6 +333,22 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			// failure mode is obvious on a diff.  Svelte strict `is()` compares
 			// option.__value (string) against the binding (number) → no match.
 			expect(source).not.toMatch(/value=\{placement\.width\}/);
+		});
+	});
+
+	describe('WidgetsModal source: no width select (size moved to WidgetSettings)', () => {
+		const source = readFileSync(
+			new URL('./WidgetsModal.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('no longer owns a width <select>', () => {
+			// Task #449 moved the Width/Height controls out into the per-widget
+			// gear-opened WidgetSettings dialog. The picker modal now only lists
+			// widgets with visibility toggles and a Restore defaults action.
+			expect(source).not.toMatch(/value=\{String\(placement\.width\)\}/);
+			expect(source).not.toMatch(/<option value="1">1 block<\/option>/);
+			expect(source).not.toMatch(/<option value="4">4 blocks \(full\)<\/option>/);
 		});
 	});
 

@@ -13,7 +13,7 @@
 	import WidgetCard from './WidgetCard.svelte';
 	import DonutChart from './DonutChart.svelte';
 
-	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
+	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
 	const state = useWidgetData<DistributionEntry[]>({
 		source: () => widget.source,
@@ -33,6 +33,7 @@
 	error={state.error ?? undefined}
 	refreshing={state.refreshing}
 	onRefresh={state.refresh}
+	{onSettings}
 >
 	{#if state.data}
 		<DonutChart {slices} label="Agent distribution" unit="sessions" />

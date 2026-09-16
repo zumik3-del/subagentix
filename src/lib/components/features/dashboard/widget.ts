@@ -9,7 +9,7 @@
  */
 import type { Component } from 'svelte';
 import type { DashboardFilter } from '$lib/model/dashboard';
-import type { WidgetDef, WidgetId } from '$lib/widgets/registry';
+import type { WidgetDef, WidgetId, WidgetPlacement } from '$lib/widgets/registry';
 
 /**
  * Props every widget body receives from its `WidgetHost` (task #410). The host
@@ -25,7 +25,15 @@ export interface WidgetBodyProps {
 	filter: DashboardFilter;
 	/** Global refresh counter; a change refetches this widget with `refresh=1`. */
 	refreshToken: number;
+	/**
+	 * Opens this widget's size-settings modal (task #449). The grid supplies it
+	 * for every body; omitted only when the shell has no settings hook.
+	 */
+	onSettings?: () => void;
 }
+
+/** A width/height patch applied to one placement (task #449). */
+export type WidgetSizePatch = Partial<Pick<WidgetPlacement, 'width' | 'height'>>;
 
 /** A widget body component; every body shares the {@link WidgetBodyProps} surface. */
 export type WidgetComponent = Component<WidgetBodyProps>;

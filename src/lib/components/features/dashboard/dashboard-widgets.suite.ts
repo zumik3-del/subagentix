@@ -16,16 +16,17 @@ type RenderFn = (
 	options: { props: Record<string, unknown> }
 ) => { body: string };
 
-let vite: ViteDevServer;
-let render: RenderFn;
+	let vite: ViteDevServer;
+	let render: RenderFn;
 
-// Widget components
-let WidgetCard: unknown;
-let SkeletonWidget: unknown;
-let BarChart: unknown;
-let DonutChart: unknown;
-let TimeSeriesChart: unknown;
-let WidgetGrid: unknown;
+	// Widget components
+	let WidgetCard: unknown;
+	let SkeletonWidget: unknown;
+	let BarChart: unknown;
+	let DonutChart: unknown;
+	let TimeSeriesChart: unknown;
+	let WidgetGrid: unknown;
+	let WidgetSettings: unknown;
 
 beforeAll(async () => {
 	vite = await createServer({
@@ -64,6 +65,11 @@ beforeAll(async () => {
 	WidgetGrid = (
 		(await vite.ssrLoadModule(
 			'/src/lib/components/features/dashboard/WidgetGrid.svelte'
+		)) as { default: unknown }
+	).default;
+	WidgetSettings = (
+		(await vite.ssrLoadModule(
+			'/src/lib/components/features/dashboard/WidgetSettings.svelte'
 		)) as { default: unknown }
 	).default;
 }, 60_000);
@@ -555,5 +561,65 @@ describe('WidgetGrid SSR', () => {
 		expect(raw).toMatch(/data-w='4']/);
 		// The 40rem query makes every widget full-width.
 		expect(raw).toMatch(/data-w\]/);
+	});
+});
+
+// --- WidgetSettings SSR -------------------------------------------------------
+
+describe('WidgetSettings SSR', () => {
+	test('closed dialog (open=false) emits no dialog markup at all', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: false,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).not.toContain('role="dialog"');
+		expect(html).not.toContain('aria-modal');
+		expect(html).not.toContain('widget-settings-dialog');
+		expect(html).not.toContain('widget-settings__');
+	});
+
+	test('opened dialog carries role=dialog, aria-modal and labelled-by', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: true,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).toContain('role="dialog"');
+		expect(html).toContain('aria-modal="true"');
+		expect(html).toContain('aria-labelledby="widget-settings-title"');
+		expect(html).toContain('>Cost &amp; tokens<');
+		expect(html).toContain('Widget settings');
+	});
+});
+
+// --- WidgetCard gear control --------------------------------------------------
+
+describe('WidgetCard gear control SSR (task #449)', () => {
+	test('gear button is rendered with accessible name when onSettings is supplied', () => {
+		const html = renderWidgetCard({
+			title: 'Test Widget',
+			onSettings: () => {}
+		});
+		expect(html).toContain('widget-card__settings');
+		expect(html).toContain('aria-label="Settings for Test Widget"');
+		expect(html).toContain('aria-haspopup="dialog"');
+		expect(html).toContain('title="Widget settings"');
+	});
+
+	test('no gear button is rendered when onSettings is omitted', () => {
+		const html = renderWidgetCard({
+			title: 'Test Widget'
+		});
+		expect(html).not.toContain('widget-card__settings');
+		expect(html).not.toContain('aria-haspopup="dialog"');
 	});
 });
