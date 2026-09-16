@@ -549,17 +549,88 @@ describe('WidgetGrid SSR', () => {
 		expect(countClass(html, 'widget-grid__item')).toBe(3);
 	});
 
-	test('renders the 4-column grid rules in source', async () => {
-		const source = (await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/WidgetGrid.svelte'
-		)) as { default: unknown };
-		// Source-level guard: verify the CSS includes the 4-col desktop rule and row dense.
+	test('emits grid-stack-item class on each li in SSR', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		// Every item must carry the gridstack contract class so the enhancement path
+		// can adopt the DOM without a rewrite.
+		expect(countClass(html, 'grid-stack-item')).toBe(3);
+	});
+
+	test('emits gs-x/gs-y/gs-w/gs-h attributes on each li in SSR', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		// width/height always render as gs-w/gs-h attributes.
+		expect(html).toContain('gs-w="4"');
+		expect(html).toContain('gs-h="2"');
+		expect(html).toContain('gs-w="2"');
+		expect(html).toContain('gs-h="3"');
+		expect(html).toContain('gs-w="1"');
+		// x/y are undefined in the test fixture, so gs-x/gs-y attributes are omitted
+		// (the spread drops undefined values); the inline --gs-* style still carries 0.
+		expect(html).not.toContain('gs-x=');
+		expect(html).not.toContain('gs-y=');
+		expect(html).toContain('--gs-x:0');
+		expect(html).toContain('--gs-y:0');
+		expect(html).toContain('--gs-w:4');
+		expect(html).toContain('--gs-h:2');
+	});
+
+	test('emits --gs-* custom properties on each li in SSR', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		expect(html).toContain('--gs-x:0');
+		expect(html).toContain('--gs-y:0');
+		expect(html).toContain('--gs-w:4');
+		expect(html).toContain('--gs-h:2');
+		expect(html).toContain('--gs-w:2');
+		expect(html).toContain('--gs-h:3');
+		expect(html).toContain('--gs-w:1');
+	});
+
+	test('wraps WidgetHost in grid-stack-item-content in SSR', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		expect(countClass(html, 'grid-stack-item-content')).toBe(3);
+		// Structural guarantee: the wrapper sits between <li> and the widget host div.
+		// Svelte SSR appends a svelte hash to every class, so we match loosely.
+		expect(html).toMatch(/grid-stack-item-content[^>]*>[\s\S]*?widget-host/);
+	});
+
+	test('container never carries grid-stack class in SSR', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		// Progressive-enhancement invariant: the <ul> is .widget-grid only in SSR.
+		// The <li> elements legitimately carry grid-stack-item; check the <ul> specifically.
+		const ulMatch = html.match(/<ul[^>]*>/);
+		expect(ulMatch).not.toBeNull();
+		expect(ulMatch![0]).not.toMatch(/\bgrid-stack\b/);
+	});
+
+	test('renders the grid-stack contract in source', async () => {
 		const raw = await Bun.file(
 			new URL('./WidgetGrid.svelte', import.meta.url)
 		).text();
-		expect(raw).toMatch(/grid-template-columns:\s*repeat\(4/);
+		// Desktop columns are driven by the --grid-columns custom prop (layout.ts source of truth).
+		expect(raw).toMatch(/grid-template-columns:\s*repeat\(var\(--grid-columns\)/);
+		expect(raw).toMatch(/\-\-grid-columns:\$\{GRID_COLUMNS\}/);
+		// Row height is driven by the --grid-row-height custom prop.
+		expect(raw).toMatch(/grid-auto-rows:\s*var\(--grid-row-height\)/);
+		expect(raw).toMatch(/\-\-grid-row-height:\$\{GRID_ROW_HEIGHT_REM\}rem/);
+		// The gridstack contract attributes and wrapper must be present at the source level.
+		expect(raw).toMatch(/class="widget-grid__item grid-stack-item"/);
+		expect(raw).toMatch(/'gs-x': placement\.x/);
+		expect(raw).toMatch(/class="grid-stack-item-content"/);
+		// The container must never carry grid-stack in SSR (progressive enhancement).
+		expect(raw).not.toMatch(/<ul[^>]*\bgrid-stack\b/);
+		// WidgetGrid.svelte imports the client-only wrapper, not gridstack directly.
+		expect(raw).not.toMatch(/from ['"]gridstack['"]/);
 		expect(raw).toMatch(/grid-auto-flow:\s*row\s+dense/);
-		expect(raw).toMatch(/grid-auto-rows:\s*6rem/);
 	});
 
 	test('source contains clamp media queries for <=64rem and <=40rem', async () => {

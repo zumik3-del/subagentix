@@ -238,16 +238,73 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			'utf8'
 		);
 
-		test('has 4-column desktop grid', () => {
-			expect(source).toMatch(/grid-template-columns:\s*repeat\(4/);
+		test('emits desktop columns via var(--grid-columns) with --grid-columns:4 inline', () => {
+			// Epic #462 stage 2 replaced the literal `repeat(4, …)` with a custom
+			// property so layout.ts geometry is the single source of truth.  The
+			// template literal still pins the value to 4 at the source level.
+			expect(source).toMatch(/grid-template-columns:\s*repeat\(var\(--grid-columns\)/);
+			expect(source).toMatch(/\-\-grid-columns:\$\{GRID_COLUMNS\}/);
 		});
 
-		test('has row-dense auto-flow', () => {
+		test('emits row height via var(--grid-row-height) with --grid-row-height:6rem inline', () => {
+			// Same source-of-truth principle: `grid-auto-rows` reads the custom prop.
+			expect(source).toMatch(/grid-auto-rows:\s*var\(--grid-row-height\)/);
+			expect(source).toMatch(/\-\-grid-row-height:\$\{GRID_ROW_HEIGHT_REM\}rem/);
+		});
+
+		test('preserves row-dense auto-flow', () => {
 			expect(source).toMatch(/grid-auto-flow:\s*row\s+dense/);
 		});
 
-		test('has 6rem auto-rows', () => {
-			expect(source).toMatch(/grid-auto-rows:\s*6rem/);
+		test('emits grid-stack-item class on each li', () => {
+			// The enhancement seam: every item carries the gridstack contract class
+			// so the future client-side upgrade can adopt the DOM without a rewrite.
+			expect(source).toMatch(/class="widget-grid__item grid-stack-item"/);
+		});
+
+		test('emits gs-x/gs-y/gs-w/gs-h placement attributes on each li', () => {
+			expect(source).toMatch(/'gs-x': placement\.x/);
+			expect(source).toMatch(/'gs-y': placement\.y/);
+			expect(source).toMatch(/'gs-w': placement\.width/);
+			expect(source).toMatch(/'gs-h': placement\.height/);
+		});
+
+		test('emits --gs-* custom properties on each li inline style', () => {
+			expect(source).toMatch(/\-\-gs-x:/);
+			expect(source).toMatch(/\-\-gs-y:/);
+			expect(source).toMatch(/\-\-gs-w:/);
+			expect(source).toMatch(/\-\-gs-h:/);
+		});
+
+		test('wraps WidgetHost in a grid-stack-item-content div', () => {
+			// The fit-measurement chain depends on this wrapper:
+			// li → .grid-stack-item-content → .widget-host → .widget-card (all height:100%).
+			// The chain itself is CSS reasoning only here — no ResizeObserver is runnable
+			// in the test environment; the structural presence is what this asserts.
+			expect(source).toMatch(/class="grid-stack-item-content"/);
+			// The wrapper must sit between <li> and <WidgetHost>, not above or below.
+			const match = source.match(
+				/<li[\s\S]*?class="grid-stack-item-content"[\s\S]*?<WidgetHost/
+			);
+			expect(match).not.toBeNull();
+		});
+
+		test('container never carries the grid-stack class', () => {
+			// Progressive-enhancement guarantee: the <ul> is purely .widget-grid in SSR.
+			// grid-stack is added only on the client after the enhancement chunk loads.
+			expect(source).not.toMatch(/<ul[^>]*\bgrid-stack\b/);
+		});
+
+		test('gridstack library is never statically or type-only imported — wrapper owns the dynamic import', () => {
+			// Stage-2 invariant ("enhancement arrives next stage") is superseded by stage 3.
+			// WidgetGrid.svelte must not pull gridstack into the SSR bundle; the only
+			// allowed reference to the library is the local wrapper which dynamic-imports
+			// it at enhancement time. A static or type-only `from 'gridstack'` would
+			// defeat tree-shaking and break SSR.
+			expect(source).not.toMatch(/from ['"]gridstack['"]/);
+			expect(source).not.toMatch(/import\s+type\s+.*from\s+['"]gridstack['"]/);
+			// Importing the local wrapper is expected and required.
+			expect(source).toMatch(/from ['"]\.\/gridstack['"]/);
 		});
 
 		test('emits data-w and data-h on grid items', () => {
@@ -411,4 +468,78 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			expect(source).not.toMatch(/\bwindow\./);
 		});
 	}
+});
+
+describe('gridstack.ts source: dynamic-import-only contract', () => {
+	const source = readFileSync(
+		new URL('./gridstack.ts', import.meta.url),
+		'utf8'
+	);
+
+	test('dynamic-imports the gridstack library', () => {
+		// The wrapper must never statically load gridstack; it is loaded on
+		// demand when the desktop breakpoint is matched.
+		expect(source).toMatch(/import\s*\(\s*['"]gridstack['"]\s*\)/);
+	});
+
+	test('dynamic-imports the gridstack stylesheet in the same Promise.all', () => {
+		expect(source).toMatch(/import\s*\(\s*['"]gridstack\/dist\/gridstack\.min\.css['"]\s*\)/);
+	});
+
+	test('does not statically import from the gridstack library', () => {
+		// A bare `from 'gridstack'` (non-type) would pull the library into the SSR bundle.
+		// A type-only import (`import type { ... } from 'gridstack'`) is erased at compile
+		// time and does not affect the bundle; it is tolerated here as a TypeScript aid.
+		expect(source).not.toMatch(/import\s+(?!\s*type\b)[^;\n]*from\s+['"]gridstack['"]/);
+	});
+
+	test('desktop breakpoint gate reads layout.ts constant, not a hardcoded literal', () => {
+		// The DESKTOP_QUERY must be constructed from GRID_DESKTOP_MIN_WIDTH_REM
+		// so both the CSS fallback and the JS gate share one source of truth.
+		expect(source).toMatch(/GRID_DESKTOP_MIN_WIDTH_REM/);
+		expect(source).not.toMatch(/\(min-width:\s*64\s*rem\)/);
+	});
+
+	test('adds the grid-stack class to the container at enhancement time', () => {
+		// The class signals that the fallback CSS rules (scoped to :not(.grid-stack))
+		// should stop applying; gridstack takes over positioning.
+		expect(source).toMatch(/classList\.add\(['"]grid-stack['"]\)/);
+	});
+
+	test('removes the grid-stack class on teardown', () => {
+		// Crossing back below the breakpoint or unmounting must restore the
+		// fallback CSS by removing the class the enhancement added.
+		expect(source).toMatch(/classList\.remove\(['"]grid-stack['"]/);
+	});
+
+	test('failure path is wrapped in try/catch and calls teardown', () => {
+		// Any import or init failure must leave the grid in its static fallback
+		// state; unhandled rejections are not acceptable.
+		expect(source).toMatch(/try\s*\{/);
+		expect(source).toMatch(/catch\s*\{/);
+		// The catch must reach teardown (not rethrow).
+		const catchBody = source.match(/catch\s*\{([^}]*)\}/s);
+		expect(catchBody).not.toBeNull();
+		expect(catchBody![1]).toMatch(/#teardown/);
+	});
+
+	test('onActiveChange(false) is called on teardown', () => {
+		// Teardown must tell the component to unfreeze so the reactive path
+		// resumes and the grid re-renders from the static CSS fallback.
+		expect(source).toMatch(/onActiveChange\(false\)/);
+	});
+
+	test('persistence calls onLayoutChange with the full placement list', () => {
+		// After a settled gesture, the whole layout (including x/y) is read
+		// back via grid.save(false) and forwarded — not just ids/sizes.
+		expect(source).toMatch(/onLayoutChange\(this\.#readLayout\(\)\)/);
+		expect(source).toMatch(/grid\.save\(false\)/);
+	});
+
+	test('override layout.ts constants are used for grid config, not fresh literals', () => {
+		// The init config must consume the shared geometry constants.
+		expect(source).toMatch(/GRID_COLUMNS/);
+		expect(source).toMatch(/GRID_ROW_HEIGHT_REM/);
+		expect(source).toMatch(/GRID_GAP_REM/);
+	});
 });

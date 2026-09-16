@@ -95,8 +95,8 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
 		expect(body.dashboardWidgets).toEqual([
-			{ id: 'kpi', width: 4, height: 2 },
-			{ id: 'top-tools', width: 2, height: 3 }
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
 		]); // registry order
 	});
 
@@ -111,7 +111,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		});
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
-		expect(body.dashboardWidgets).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+		expect(body.dashboardWidgets).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('input reordered → output re-ordered to registry order', async () => {
@@ -126,10 +126,12 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
 		// Registry order: kpi, sessions-per-day, cost-per-day, top-tools, agent-distribution, top-projects.
+		// Only sessions-per-day, top-tools, agent-distribution are requested.
+		// sessions-per-day(2x3) at (0,0); top-tools(2x3) at (2,0); agent-distribution(1x3) auto-fills below → (0,3).
 		expect(body.dashboardWidgets).toEqual([
-			{ id: 'sessions-per-day', width: 2, height: 3 },
-			{ id: 'top-tools', width: 2, height: 3 },
-			{ id: 'agent-distribution', width: 1, height: 3 }
+			{ id: 'sessions-per-day', width: 2, height: 3, x: 0, y: 0 },
+			{ id: 'top-tools', width: 2, height: 3, x: 2, y: 0 },
+			{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 3 }
 		]);
 	});
 
@@ -244,8 +246,8 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
 		expect(disk.version).toBe(2);
 		expect(disk.dashboardWidgets).toEqual([
-			{ id: 'kpi', width: 4, height: 2 },
-			{ id: 'top-tools', width: 2, height: 3 }
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
 		]);
 	});
 

@@ -6,7 +6,26 @@
  * and client code (and by the settings store for ordering), so it must stay
  * free of `$lib/server` / DB imports and of any DOM/Svelte dependency. Pure and
  * deterministic; no I/O.
+ *
+ * Geometry (column count, row/gap px, size bounds) comes from the pure
+ * `layout.ts` module so the model, the CSS fallback and the future gridstack
+ * config share one source; the bounds are re-exported here for existing
+ * consumers.
  */
+import {
+	GRID_COLUMNS,
+	WIDGET_MAX_HEIGHT,
+	WIDGET_MAX_WIDTH,
+	WIDGET_MIN_HEIGHT,
+	WIDGET_MIN_WIDTH
+} from '$lib/components/features/dashboard/layout';
+
+/**
+ * Size bounds re-exported from `layout.ts` (the shared geometry source): width
+ * counts quarter-width blocks (4 = full row), height counts 6rem rows. Kept as
+ * named exports so existing importers are unaffected by the move.
+ */
+export { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH, WIDGET_MIN_HEIGHT, WIDGET_MIN_WIDTH };
 
 /** The v1 dashboard widgets. Registry order is picker order. */
 export type WidgetId =
@@ -22,13 +41,6 @@ export type WidgetId =
  * `M` = `message` day buckets (medium), `P` = `part` tool frequency (heavy).
  */
 export type WidgetTier = 'S' | 'M' | 'P';
-
-/** Width is a count of equal quarter-width grid blocks (4 = full row). */
-export const WIDGET_MIN_WIDTH = 1;
-export const WIDGET_MAX_WIDTH = 4;
-/** Height is a count of 6rem grid rows. */
-export const WIDGET_MIN_HEIGHT = 1;
-export const WIDGET_MAX_HEIGHT = 8;
 
 /** Clamp a width to the supported block range (non-finite -> minimum). */
 export function clampWidth(value: number): number {
@@ -51,13 +63,25 @@ export function clampWidgetHeight(id: WidgetId, value: number): number {
 	return Math.max(findWidgetDef(id).minHeight, clampHeight(value));
 }
 
-/** One persisted/grid placement for a widget: id plus its size. */
+/**
+ * One persisted/grid placement for a widget: id, size and (for the free-form
+ * desktop layout, epic #462) an optional grid position.
+ *
+ * `x`/`y` are 0-based column/row indices. Like the sizes they are an optional
+ * override: a placement without a usable pair is auto-positioned by
+ * {@link resolvePlacements}, while an explicit pair is honoured (clamped) so a
+ * legacy `{id,width,height}` entry stays valid and just gets a slot.
+ */
 export interface WidgetPlacement {
 	id: WidgetId;
 	/** Width in quarter-width blocks (1–4). */
 	width: number;
 	/** Height in 6rem rows (1–8). */
 	height: number;
+	/** Optional 0-based column index; both `x` and `y` must be present to take effect. */
+	x?: number;
+	/** Optional 0-based row index; both `x` and `y` must be present to take effect. */
+	y?: number;
 }
 
 /** One registrable dashboard widget. */
@@ -160,15 +184,6 @@ export function findWidgetDef(id: WidgetId): WidgetDef {
 	return def;
 }
 
-/**
- * The first-visit default placements, in registry order. Derived from
- * {@link WIDGET_DEFS} so `defaultOn`/default sizes stay the single source of
- * truth.
- */
-export const DEFAULT_WIDGETS: readonly WidgetPlacement[] = WIDGET_DEFS.filter(
-	(def) => def.defaultOn
-).map((def) => ({ id: def.id, width: def.width, height: def.height }));
-
 /** Every registered id, in registry order. */
 export const WIDGET_IDS: readonly WidgetId[] = WIDGET_DEFS.map((def) => def.id);
 
@@ -179,8 +194,25 @@ export function isWidgetId(value: unknown): value is WidgetId {
 	return typeof value === 'string' && WIDGET_ID_SET.has(value);
 }
 
-/** Parse one raw entry into an id plus optional size overrides; unknown -> null. */
-function parsePlacement(entry: unknown): { id: WidgetId; width?: number; height?: number } | null {
+/**
+ * The first-visit default placements, in registry order. Derived from
+ * {@link WIDGET_DEFS} so `defaultOn`/default sizes stay the single source of
+ * truth; the grid positions are resolved through {@link resolvePlacements} so
+ * every default widget is positioned with no overlap (first visit renders a
+ * packed grid, never a stack of unplaced widgets).
+ */
+export const DEFAULT_WIDGETS: readonly WidgetPlacement[] = resolvePlacements(
+	WIDGET_DEFS.filter((def) => def.defaultOn).map((def) => ({
+		id: def.id,
+		width: def.width,
+		height: def.height
+	}))
+);
+
+/** Parse one raw entry into an id plus optional size/position overrides; unknown -> null. */
+function parsePlacement(
+	entry: unknown
+): { id: WidgetId; width?: number; height?: number; x?: number; y?: number } | null {
 	if (typeof entry === 'string') {
 		return isWidgetId(entry) ? { id: entry } : null;
 	}
@@ -190,35 +222,143 @@ function parsePlacement(entry: unknown): { id: WidgetId; width?: number; height?
 		return {
 			id: record.id,
 			width: typeof record.width === 'number' ? record.width : undefined,
-			height: typeof record.height === 'number' ? record.height : undefined
+			height: typeof record.height === 'number' ? record.height : undefined,
+			x: typeof record.x === 'number' ? record.x : undefined,
+			y: typeof record.y === 'number' ? record.y : undefined
 		};
 	}
 	return null;
 }
 
+/** Clamp an explicit column index so `x + width` stays inside the grid. */
+function clampPositionX(value: number, width: number): number {
+	return Math.min(GRID_COLUMNS - width, Math.max(0, Math.round(value)));
+}
+
+/** Clamp an explicit row index to the grid (rows only grow downward). */
+function clampPositionY(value: number): number {
+	return Math.max(0, Math.round(value));
+}
+
+/**
+ * Clamp an explicit `{x,y}` pair into the grid, or `null` when either value is
+ * missing/non-finite (a partial pair is treated as unpositioned, never guessed).
+ */
+function resolveExplicitPosition(
+	override: { x?: number; y?: number } | undefined,
+	width: number
+): { x: number; y: number } | null {
+	if (
+		override?.x === undefined ||
+		override?.y === undefined ||
+		!Number.isFinite(override.x) ||
+		!Number.isFinite(override.y)
+	) {
+		return null;
+	}
+	return { x: clampPositionX(override.x, width), y: clampPositionY(override.y) };
+}
+
+/** Cell key for the flat occupancy set. */
+function cellKey(x: number, y: number): number {
+	return y * GRID_COLUMNS + x;
+}
+
+/** Mark every cell of a rectangle as occupied. */
+function occupy(occupied: Set<number>, x: number, y: number, width: number, height: number): void {
+	for (let cy = y; cy < y + height; cy++) {
+		for (let cx = x; cx < x + width; cx++) {
+			occupied.add(cellKey(cx, cy));
+		}
+	}
+}
+
+/**
+ * First free slot in row-major order whose `width × height` rectangle is fully
+ * unoccupied. `width` never exceeds {@link GRID_COLUMNS}, so the scan always
+ * finds a slot (below the last occupied row every cell is free) and terminates.
+ */
+function firstFreeSlot(
+	occupied: ReadonlySet<number>,
+	width: number,
+	height: number
+): { x: number; y: number } {
+	for (let y = 0; ; y++) {
+		for (let x = 0; x + width <= GRID_COLUMNS; x++) {
+			let free = true;
+			for (let cy = y; cy < y + height && free; cy++) {
+				for (let cx = x; cx < x + width; cx++) {
+					if (occupied.has(cellKey(cx, cy))) {
+						free = false;
+						break;
+					}
+				}
+			}
+			if (free) return { x, y };
+		}
+	}
+}
+
 /**
  * Resolve persisted/raw placements: accepts legacy `string[]` ids and
- * `{id,width,height}` objects, drops unknown ids, collapses duplicates (first
- * occurrence wins) and returns registry order regardless of input order. A
- * missing or non-numeric size falls back to the registry default; numeric sizes
- * are clamped into the bound range (height against the per-widget minimum).
- * Never throws.
+ * `{id,width,height,x,y}` objects, drops unknown ids, collapses duplicates
+ * (first occurrence wins) and returns registry order regardless of input order.
+ * A missing or non-numeric size falls back to the registry default; numeric
+ * sizes are clamped into the bound range (height against the per-widget
+ * minimum). An entry with a finite `x`/`y` pair is honoured (clamped so
+ * `x + width <= columns` and `y >= 0`); every other entry is auto-positioned.
+ *
+ * Auto-position rule (deterministic): explicit positions are reserved first,
+ * then unpositioned entries are placed in registry order at the first free slot
+ * found scanning row-major from the top-left, so a widget never overlaps one
+ * already placed and the same input always yields the same layout. The returned
+ * order stays registry order. Never throws.
  */
 export function resolvePlacements(raw: unknown): WidgetPlacement[] {
 	if (!Array.isArray(raw)) return [];
-	const requested = new Map<WidgetId, { width?: number; height?: number }>();
+	const requested = new Map<
+		WidgetId,
+		{ width?: number; height?: number; x?: number; y?: number }
+	>();
 	for (const entry of raw) {
 		const parsed = parsePlacement(entry);
 		if (parsed && !requested.has(parsed.id)) {
-			requested.set(parsed.id, { width: parsed.width, height: parsed.height });
+			requested.set(parsed.id, {
+				width: parsed.width,
+				height: parsed.height,
+				x: parsed.x,
+				y: parsed.y
+			});
 		}
 	}
-	return WIDGET_DEFS.filter((def) => requested.has(def.id)).map((def) => {
-		const override = requested.get(def.id);
-		return {
-			id: def.id,
-			width: override?.width === undefined ? def.width : clampWidth(override.width),
-			height: override?.height === undefined ? def.height : clampWidgetHeight(def.id, override.height)
-		};
-	});
+
+	// Resolve sizes (and any explicit position) in registry order.
+	const resolved: WidgetPlacement[] = WIDGET_DEFS.filter((def) => requested.has(def.id)).map(
+		(def) => {
+			const override = requested.get(def.id);
+			const width = override?.width === undefined ? def.width : clampWidth(override.width);
+			const height =
+				override?.height === undefined
+					? def.height
+					: clampWidgetHeight(def.id, override.height);
+			const position = resolveExplicitPosition(override, width);
+			return { id: def.id, width, height, x: position?.x, y: position?.y };
+		}
+	);
+
+	// Reserve honoured positions, then auto-place the rest.
+	const occupied = new Set<number>();
+	for (const placement of resolved) {
+		if (placement.x !== undefined && placement.y !== undefined) {
+			occupy(occupied, placement.x, placement.y, placement.width, placement.height);
+		}
+	}
+	for (const placement of resolved) {
+		if (placement.x !== undefined && placement.y !== undefined) continue;
+		const slot = firstFreeSlot(occupied, placement.width, placement.height);
+		placement.x = slot.x;
+		placement.y = slot.y;
+		occupy(occupied, slot.x, slot.y, placement.width, placement.height);
+	}
+	return resolved;
 }

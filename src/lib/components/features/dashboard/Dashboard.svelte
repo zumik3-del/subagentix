@@ -91,6 +91,24 @@
 		}
 	});
 
+	// Drag/resize path (epic #462, stage 3): one PUT per settled gesture, coalesced
+	// across rapid ones. The response is only kept for the next save — it is never
+	// fed back as `applied`, so it cannot re-render the grid; a rejected PUT leaves
+	// `applied` and the live gridstack layout untouched. `applied` is advanced from
+	// the reported layout (not the response) so the picker and the next save see it.
+	const layoutWriter = createCoalescingWriter<readonly WidgetPlacement[]>(async (next) => {
+		try {
+			lastSaved = await saveDashboardWidgets(next);
+		} catch {
+			// Silent by design: the on-screen layout must survive a failed write.
+		}
+	});
+
+	function onLayoutChange(next: readonly WidgetPlacement[]): void {
+		applied = [...next];
+		layoutWriter.push(next);
+	}
+
 	function onApply(next: readonly WidgetPlacement[]): void {
 		applied = [...next];
 		lastSaved = [...next];
@@ -137,6 +155,7 @@
 			{filter}
 			{refreshToken}
 			onWidgetSettings={onWidgetSettings}
+			{onLayoutChange}
 		/>
 	{/if}
 </main>

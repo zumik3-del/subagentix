@@ -139,13 +139,16 @@ export function normaliseAgentsPath(value: unknown): string {
 /**
  * Validate/normalise a `dashboardWidgets` value; throws `SettingsValidationError`.
  *
- * Accepts the current shape (`{id,width,height}` objects) and the legacy
+ * Accepts the current shape (`{id,width,height,x,y}` objects) and the legacy
  * `string[]` ids; unknown ids are dropped, duplicates collapsed and the
  * survivors returned in widget-registry order (the same order the picker and
- * grid rely on). A missing size falls back to the registry default and an
- * out-of-range size is clamped. A non-array, a non-string/non-object entry, a
- * non-finite size or an oversized list is rejected so a malformed payload never
- * reaches disk.
+ * grid rely on). A missing size/position falls back to the registry default /
+ * auto-position and an out-of-range size/position is clamped (`resolvePlacements`
+ * does both). A non-array, a non-string/non-object entry, a non-finite
+ * width/height/x/y or an oversized list is rejected so a malformed payload never
+ * reaches disk. Note `x`/`y` follow the size policy exactly: a non-finite value
+ * is a 400, an out-of-range one is clamped, and a lone `x` or `y` is accepted
+ * and treated as unpositioned downstream.
  */
 export function normaliseDashboardWidgets(value: unknown): WidgetPlacement[] {
 	if (!Array.isArray(value)) {
@@ -176,10 +179,22 @@ export function normaliseDashboardWidgets(value: unknown): WidgetPlacement[] {
 					'dashboardWidgets'
 				);
 			}
+			if (record.x !== undefined && !Number.isFinite(record.x)) {
+				throw new SettingsValidationError(
+					'dashboardWidgets x must be a finite number.',
+					'dashboardWidgets'
+				);
+			}
+			if (record.y !== undefined && !Number.isFinite(record.y)) {
+				throw new SettingsValidationError(
+					'dashboardWidgets y must be a finite number.',
+					'dashboardWidgets'
+				);
+			}
 			continue;
 		}
 		throw new SettingsValidationError(
-			'dashboardWidgets must contain only ids or {id,width,height} objects.',
+			'dashboardWidgets must contain only ids or {id,width,height,x,y} objects.',
 			'dashboardWidgets'
 		);
 	}

@@ -39,9 +39,11 @@ export function updatePlacement(
 }
 
 /**
- * Whether two placement selections contain the same widgets at the same sizes
- * (input order/duplicates aside). Drives the modal's dirty state, so a
- * size-only change counts as dirty.
+ * Whether two placement selections contain the same widgets at the same size
+ * and position (input order/duplicates aside). Drives the modal's dirty state:
+ * a size-only change counts as dirty, and since the free-form layout (epic #462)
+ * a pure `x`/`y` move does too — a settled drag must not be swallowed as
+ * "unchanged" when the picker is reopened.
  */
 export function samePlacements(
 	a: readonly WidgetPlacement[],
@@ -51,7 +53,13 @@ export function samePlacements(
 	const byId = new Map(a.map((placement) => [placement.id, placement] as const));
 	for (const placement of b) {
 		const other = byId.get(placement.id);
-		if (!other || other.width !== placement.width || other.height !== placement.height) {
+		if (
+			!other ||
+			other.width !== placement.width ||
+			other.height !== placement.height ||
+			other.x !== placement.x ||
+			other.y !== placement.y
+		) {
 			return false;
 		}
 	}

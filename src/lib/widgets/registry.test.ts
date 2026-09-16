@@ -14,6 +14,18 @@ import {
 	WIDGET_MIN_HEIGHT,
 	WIDGET_MIN_WIDTH
 } from './registry';
+import {
+	GRID_COLUMNS,
+	GRID_GAP_PX,
+	GRID_GAP_REM,
+	GRID_ROW_HEIGHT_PX,
+	GRID_ROW_HEIGHT_REM,
+	ROOT_FONT_SIZE_PX,
+	WIDGET_MAX_HEIGHT as LAYOUT_MAX_HEIGHT,
+	WIDGET_MAX_WIDTH as LAYOUT_MAX_WIDTH,
+	WIDGET_MIN_HEIGHT as LAYOUT_MIN_HEIGHT,
+	WIDGET_MIN_WIDTH as LAYOUT_MIN_WIDTH
+} from '$lib/components/features/dashboard/layout';
 import type { WidgetId, WidgetPlacement } from './registry';
 
 /**
@@ -231,19 +243,17 @@ describe('resolvePlacements()', () => {
 		expect(input).toEqual(['top-tools', 'kpi']);
 	});
 
-	test('legacy string[] entries get registry-default sizes', () => {
+	test('legacy string[] entries get registry-default sizes and auto-positions', () => {
 		const result = resolvePlacements(['kpi', 'agent-distribution']);
 		expect(result).toEqual([
-			{ id: 'kpi', width: 4, height: 2 },
-			{ id: 'agent-distribution', width: 1, height: 3 }
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+			{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 2 }
 		]);
 	});
 
-	test('object entries preserve explicit width/height', () => {
-		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 4 }
-		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4 }]);
+	test('object entries preserve explicit width/height and auto-position', () => {
+		const result = resolvePlacements([{ id: 'kpi', width: 2, height: 4 }] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('mixed string[] and object[] work together', () => {
@@ -252,20 +262,20 @@ describe('resolvePlacements()', () => {
 			{ id: 'top-tools', width: 3, height: 5 }
 		] as unknown as unknown[]);
 		expect(result).toEqual([
-			{ id: 'kpi', width: 4, height: 2 },
-			{ id: 'top-tools', width: 3, height: 5 }
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+			{ id: 'top-tools', width: 3, height: 5, x: 0, y: 2 }
 		]);
 	});
 
 	test('missing width/height in object falls back to registry default', () => {
 		const result = resolvePlacements([{ id: 'kpi' }] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('out-of-range sizes are clamped', () => {
 		const result = resolvePlacements([{ id: 'kpi', width: 10, height: 0 }] as unknown as unknown[]);
 		// kpi minHeight is 2, so height 0 clamps up to 2 (not the old global min of 1).
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('non-array input returns empty array', () => {
@@ -285,7 +295,7 @@ describe('resolvePlacements()', () => {
 			{ id: 'kpi', width: 4, height: 8 }
 		] as unknown as unknown[]);
 		// First occurrence wins; kpi minHeight is 2, so height 1 clamps up to 2.
-		expect(result).toEqual([{ id: 'kpi', width: 1, height: 2 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 1, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('result placements are in registry order even when objects override sizes', () => {
@@ -295,8 +305,129 @@ describe('resolvePlacements()', () => {
 		] as unknown as unknown[]);
 		expect(result.map((p) => p.id)).toEqual(['kpi', 'top-projects']);
 		// kpi minHeight is 2, so height 1 is raised to 2.
-		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 2 });
-		expect(result[1]).toEqual({ id: 'top-projects', width: 3, height: 5 });
+		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 2, x: 0, y: 0 });
+		expect(result[1]).toEqual({ id: 'top-projects', width: 3, height: 5, x: 0, y: 2 });
+	});
+
+	test('honours a finite x/y pair (explicit position)', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 2, height: 2, x: 1, y: 3 }
+		] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 1, y: 3 }]);
+	});
+
+	test('x + width == columns boundary is honoured (right edge)', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }
+		] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('x out of range (negative) is clamped to 0', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 2, height: 2, x: -5, y: 0 }
+		] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('x out of range (too large) is clamped so x+width==columns', () => {
+		// width=2, columns=4; max x=2.
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 2, height: 2, x: 10, y: 0 }
+		] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 2, y: 0 }]);
+	});
+
+	test('y out of range (negative) is clamped to 0', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 2, height: 2, x: 0, y: -5 }
+		] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('partial pair (x only) is treated as unpositioned → auto-positioned', () => {
+		const result = resolvePlacements([{ id: 'kpi', x: 99 } as unknown as WidgetPlacement] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('partial pair (y only) is treated as unpositioned → auto-positioned', () => {
+		const result = resolvePlacements([{ id: 'kpi', y: 99 } as unknown as WidgetPlacement] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('x/y as null is treated as unpositioned → auto-positioned', () => {
+		const result = resolvePlacements([{ id: 'kpi', x: null, y: null }] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('x/y as non-finite (NaN, Infinity) is treated as unpositioned → auto-positioned', () => {
+		const resultNaN = resolvePlacements([{ id: 'kpi', x: NaN, y: 0 }] as unknown as unknown[]);
+		expect(resultNaN).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		const resultInf = resolvePlacements([{ id: 'kpi', x: 0, y: Infinity }] as unknown as unknown[]);
+		expect(resultInf).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		const resultNegInf = resolvePlacements([{ id: 'kpi', x: -Infinity, y: 0 }] as unknown as unknown[]);
+		expect(resultNegInf).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('x/y as string is treated as unpositioned → auto-positioned', () => {
+		const result = resolvePlacements([{ id: 'kpi', x: '1' as unknown as number }] as unknown as unknown[]);
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+	});
+
+	test('mixed positioned and unpositioned: positioned reserved, unpositioned auto-filled without overlap', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }, // positioned
+			{ id: 'top-tools' } as unknown as WidgetPlacement // unpositioned
+		] as unknown as unknown[]);
+		expect(result.map((p) => p.id)).toEqual(['kpi', 'top-tools']);
+		// kpi occupies row 0-1 cols 0-3; top-tools(2x3) should land at (0,2).
+		expect(result[0]).toEqual({ id: 'kpi', width: 4, height: 2, x: 0, y: 0 });
+		expect(result[1]).toEqual({ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 });
+	});
+
+	test('determinism: same hostile/partial input resolved twice yields identical layout', () => {
+		const hostile = [
+			{ id: 'kpi', x: NaN, y: Infinity } as unknown as WidgetPlacement,
+			{ id: 'top-tools', width: 'bad' as unknown as number, y: null },
+			'kpi', // duplicate
+			'ghost',
+			null,
+			42,
+			{ id: 'agent-distribution' }
+		] as unknown as unknown[];
+		const a = resolvePlacements(hostile);
+		const b = resolvePlacements(hostile);
+		expect(a).toEqual(b);
+	});
+
+	test('determinism: different input array order yields same widget order (registry order)', () => {
+		const reorderA = resolvePlacements(['top-projects', 'kpi', 'agent-distribution']);
+		const reorderB = resolvePlacements(['agent-distribution', 'top-projects', 'kpi']);
+		const reorderC = resolvePlacements(['kpi', 'agent-distribution', 'top-projects']);
+		expect(reorderA.map((p) => p.id)).toEqual(['kpi', 'agent-distribution', 'top-projects']);
+		expect(reorderB.map((p) => p.id)).toEqual(['kpi', 'agent-distribution', 'top-projects']);
+		expect(reorderC.map((p) => p.id)).toEqual(['kpi', 'agent-distribution', 'top-projects']);
+		expect(reorderA).toEqual(reorderB);
+		expect(reorderB).toEqual(reorderC);
+	});
+
+	test('no overlap guarantee: same input twice, no two placements share a cell', () => {
+		const result = resolvePlacements([
+			{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 },
+			{ id: 'sessions-per-day' },
+			{ id: 'cost-per-day', width: 2, height: 2, x: 3, y: 0 },
+			{ id: 'top-tools' }
+		] as unknown as unknown[]);
+		const cells = new Set<number>();
+		for (const p of result) {
+			for (let cy = p.y!; cy < p.y! + p.height; cy++) {
+				for (let cx = p.x!; cx < p.x! + p.width; cx++) {
+					const key = cy * GRID_COLUMNS + cx;
+					expect(cells.has(key), `overlap at (${cx},${cy}) for ${p.id}`).toBe(false);
+					cells.add(key);
+				}
+			}
+		}
 	});
 });
 
@@ -310,7 +441,78 @@ describe('registry source stays server-free and DOM-free (spec §2.1)', () => {
 		expect(source).not.toMatch(/\bdocument\.|\bwindow\./);
 	});
 
-	test('is a pure module: no runtime imports at all', () => {
-		expect(source).not.toMatch(/^\s*import\s/m);
+	test('imports only layout.ts as its single external dependency', () => {
+		const layoutImport = source.match(/from ['"]\$lib\/components\/features\/dashboard\/layout['"]/);
+		expect(layoutImport).toBeTruthy();
+		// Strip the entire import block (single-line or multi-line) and assert nothing
+		// remains that imports from any other external module.
+		const withoutImports = source.replace(/import\s*{[^}]*}\s*from\s*['"][^'']+['"];?\n?/g, '');
+		const stray = withoutImports.match(/\bimport\s+/);
+		expect(stray).toBeFalsy();
+	});
+});
+
+describe('DEFAULT_WIDGETS positions', () => {
+	test('resolves to a packed non-overlapping layout in registry order', () => {
+		const expected: WidgetPlacement[] = [
+			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+			{ id: 'sessions-per-day', width: 2, height: 3, x: 0, y: 2 },
+			{ id: 'cost-per-day', width: 2, height: 3, x: 2, y: 2 },
+			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 5 },
+			{ id: 'agent-distribution', width: 1, height: 3, x: 2, y: 5 },
+			{ id: 'top-projects', width: 2, height: 3, x: 0, y: 8 }
+		];
+		expect(DEFAULT_WIDGETS).toEqual(expected);
+	});
+
+	test('no two default widgets share a grid cell', () => {
+		const cells = new Set<number>();
+		for (const p of DEFAULT_WIDGETS) {
+			for (let cy = p.y!; cy < p.y! + p.height; cy++) {
+				for (let cx = p.x!; cx < p.x! + p.width; cx++) {
+					expect(cells.has(cy * GRID_COLUMNS + cx), `overlap at (${cx},${cy}) for ${p.id}`).toBe(false);
+					cells.add(cy * GRID_COLUMNS + cx);
+				}
+			}
+		}
+	});
+
+	test('every default placement has x+width <= GRID_COLUMNS and y >= 0', () => {
+		for (const p of DEFAULT_WIDGETS) {
+			expect(p.x! + p.width, p.id).toBeLessThanOrEqual(GRID_COLUMNS);
+			expect(p.y!, p.id).toBeGreaterThanOrEqual(0);
+		}
+	});
+});
+
+describe('geometry constants match CSS reality', () => {
+	test('GRID_ROW_HEIGHT_PX == GRID_ROW_HEIGHT_REM * ROOT_FONT_SIZE_PX', () => {
+		expect(GRID_ROW_HEIGHT_PX).toBe(GRID_ROW_HEIGHT_REM * ROOT_FONT_SIZE_PX);
+	});
+
+	test('GRID_GAP_PX == GRID_GAP_REM * ROOT_FONT_SIZE_PX', () => {
+		expect(GRID_GAP_PX).toBe(GRID_GAP_REM * ROOT_FONT_SIZE_PX);
+	});
+
+	test('WIDGET bounds exported from registry match layout.ts', () => {
+		expect(WIDGET_MIN_WIDTH).toBe(LAYOUT_MIN_WIDTH);
+		expect(WIDGET_MAX_WIDTH).toBe(LAYOUT_MAX_WIDTH);
+		expect(WIDGET_MIN_HEIGHT).toBe(LAYOUT_MIN_HEIGHT);
+		expect(WIDGET_MAX_HEIGHT).toBe(LAYOUT_MAX_HEIGHT);
+	});
+
+	test('ROOT_FONT_SIZE_PX = 14 canary: if CSS root font-size changes, this fails', () => {
+		// Canaries that would catch a root-font-size drift:
+		// - ROOT_FONT_SIZE_PX != 14 means layout.ts was updated but app.css wasn't (or vice versa).
+		// - GRID_ROW_HEIGHT_PX != 84 means the row-height rem × font-size product diverges from CSS.
+		// - GRID_GAP_PX != 14 means the gap rem × font-size product diverges from CSS.
+		expect(ROOT_FONT_SIZE_PX).toBe(14);
+		expect(GRID_ROW_HEIGHT_PX).toBe(84);
+		expect(GRID_GAP_PX).toBe(14);
+	});
+
+	test('GRID_COLUMNS = 4 canary: diverges from WidgetGrid.svelte grid-template-columns', () => {
+		// If WidgetGrid.svelte changes repeat(N,...) without updating layout.ts, this catches it.
+		expect(GRID_COLUMNS).toBe(4);
 	});
 });

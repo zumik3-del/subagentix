@@ -34,7 +34,7 @@ function freshSettingsModule() {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
-			dashboardWidgets?: Array<{ id: string; width: number; height: number }> | null;
+			dashboardWidgets?: Array<{ id: string; width: number; height: number; x?: number; y?: number }> | null;
 			dashboardFilter?: { period: string; scope: string | null } | null;
 		};
 		updateStoredSettings: (patch: {
@@ -53,13 +53,13 @@ function freshSettingsModule() {
 		resolveDbPath: () => string;
 		resolveZiptaskBaseUrl: () => string | null;
 		resolveZiptaskEnabled: () => boolean;
-		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number }>;
+		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
 		resolveDashboardFilter: () => { period: string; scope: string | null };
 		onSettingsChange: (cb: (next: { dbPath?: string | null; ziptaskBaseUrl?: string | null }) => void) => () => void;
 		normaliseDbPath: (value: unknown) => string;
 		normaliseZiptaskBaseUrl: (value: unknown) => string;
 		normaliseZiptaskEnabled: (value: unknown) => boolean;
-		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number }>;
+		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
 		normaliseDashboardFilter: (value: unknown) => { period: string; scope: string | null };
 		SettingsValidationError: new (message: string, field: string) => { message: string; field: string };
 	}>;
@@ -496,6 +496,39 @@ test('normaliseDashboardWidgets rejects non-finite height', async () => {
 	);
 });
 
+test('normaliseDashboardWidgets rejects non-finite x or y', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: NaN }])).toThrow(
+		/x must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: Infinity }])).toThrow(
+		/x must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], y: -Infinity }])).toThrow(
+		/y must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets accepts a partial x/y pair (treated as unpositioned)', async () => {
+	const mod = await freshSettingsModule();
+	// x-only: accepted by the validator (x is finite), but resolvePlacements auto-positions
+	// because y is missing — the result gets x/y from the auto-position slot, not from input.
+	const withXOnly = mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: 1 }] as unknown as unknown[]);
+	expect(withXOnly[0].x).toBe(0);
+	expect(withXOnly[0].y).toBe(0);
+	// y-only: same behaviour.
+	const withYOnly = mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], y: 2 }] as unknown as unknown[]);
+	expect(withYOnly[0].x).toBe(0);
+	expect(withYOnly[0].y).toBe(0);
+});
+
+test('normaliseDashboardWidgets accepts a valid positioned object and round-trips it', async () => {
+	const mod = await freshSettingsModule();
+	const positioned = [{ id: 'kpi' as WidgetPlacement['id'], width: 2, height: 3, x: 1, y: 2 }];
+	const result = mod.normaliseDashboardWidgets(positioned);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 3, x: 1, y: 2 }]);
+});
+
 test('normaliseDashboardWidgets rejects non-object non-string entries', async () => {
 	const mod = await freshSettingsModule();
 	// Each entry in the array must be either a string id or a plain object.
@@ -511,8 +544,8 @@ test('normaliseDashboardWidgets accepts legacy string[] and resolves registry de
 	const mod = await freshSettingsModule();
 	const result = mod.normaliseDashboardWidgets(['kpi', 'agent-distribution']);
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2 },
-		{ id: 'agent-distribution', width: 1, height: 3 }
+		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+		{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 2 }
 	]);
 });
 
@@ -521,7 +554,7 @@ test('normaliseDashboardWidgets accepts object placements with explicit sizes', 
 	const result = mod.normaliseDashboardWidgets([
 		{ id: 'kpi', width: 2, height: 5 }
 	] as unknown as unknown[]);
-	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5 }]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5, x: 0, y: 0 }]);
 });
 
 test('normaliseDashboardWidgets drops objects without a known id', async () => {
@@ -531,7 +564,7 @@ test('normaliseDashboardWidgets drops objects without a known id', async () => {
 		{ id: 'nope', width: 2, height: 5 },
 		{ id: 'kpi', width: 2, height: 5 }
 	] as unknown as unknown[]);
-	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5 }]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5, x: 0, y: 0 }]);
 });
 
 test('dashboardWidgets round-trips through PUT → GET unchanged', async () => {
@@ -546,7 +579,11 @@ test('dashboardWidgets round-trips through PUT → GET unchanged', async () => {
 	];
 	mod.updateStoredSettings({ dashboardWidgets: original });
 	const readBack = mod.getStoredSettings().dashboardWidgets;
-	expect(readBack).toEqual(original);
+	// normaliseDashboardWidgets resolves auto-positions; read-back matches the resolved layout.
+	expect(readBack).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 3, height: 5, x: 0, y: 0 },
+		{ id: 'top-tools', width: 2, height: 2, x: 0, y: 5 }
+	]);
 });
 
 test('legacy string[] file degrades gracefully on read', async () => {
@@ -561,10 +598,10 @@ test('legacy string[] file degrades gracefully on read', async () => {
 	process.env.SETTINGS_FILE = file;
 	const mod = await freshSettingsModule();
 	const result = mod.getStoredSettings().dashboardWidgets;
-	// Legacy strings are resolved to placements with registry defaults.
+	// Legacy strings are resolved to placements with registry defaults and auto-positions.
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2 },
-		{ id: 'top-tools', width: 2, height: 3 }
+		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+		{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
 	]);
 });
 
@@ -631,8 +668,8 @@ test('a legacy string[] file resolves registry defaults (no minHeight issue)', a
 	const mod = await freshSettingsModule();
 	const result = mod.getStoredSettings().dashboardWidgets;
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2 },
-		{ id: 'top-projects', width: 2, height: 3 }
+		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
+		{ id: 'top-projects', width: 2, height: 3, x: 0, y: 2 }
 	]);
 });
 

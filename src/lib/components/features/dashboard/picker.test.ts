@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { toggleWidgetSelection, samePlacements, updatePlacement } from './picker';
 import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
-
 /**
  * Unit tests for the pure dashboard widget-picker selection logic
  * (dashboard Phase 5, task #414; resizable in #438).
@@ -13,7 +12,7 @@ import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/re
 describe('toggleWidgetSelection()', () => {
 	test('adds a widget placement to an empty selection', () => {
 		const next = toggleWidgetSelection([], 'kpi');
-		expect(next).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+		expect(next).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('removes a widget placement that is already selected', () => {
@@ -26,7 +25,8 @@ describe('toggleWidgetSelection()', () => {
 			[{ id: 'kpi', width: 4, height: 2 }, { id: 'top-tools', width: 2, height: 3 }],
 			'kpi'
 		);
-		expect(next).toEqual([{ id: 'top-tools', width: 2, height: 3 }]);
+		// kpi removed; top-tools re-resolved through resolvePlacements (auto-positioned).
+		expect(next).toEqual([{ id: 'top-tools', width: 2, height: 3, x: 0, y: 0 }]);
 	});
 
 	test('returns placements in registry order, not input order', () => {
@@ -53,10 +53,16 @@ describe('toggleWidgetSelection()', () => {
 	test('adding a known id restores the registry-default size', () => {
 		const before: WidgetPlacement[] = [{ id: 'top-tools', width: 3, height: 5 }];
 		const next = toggleWidgetSelection(before, 'kpi');
-		// kpi should get its registry default, not a stale size.
-		expect(next.find((p) => p.id === 'kpi')).toEqual({ id: 'kpi', width: 4, height: 2 });
-		// Existing custom size is preserved.
-		expect(next.find((p) => p.id === 'top-tools')).toEqual({ id: 'top-tools', width: 3, height: 5 });
+		// kpi gets its registry default plus auto-position.
+		expect(next.find((p) => p.id === 'kpi')).toEqual({ id: 'kpi', width: 4, height: 2, x: 0, y: 0 });
+		// Existing custom size is preserved; top-tools auto-positioned after kpi.
+		expect(next.find((p) => p.id === 'top-tools')).toEqual({
+			id: 'top-tools',
+			width: 3,
+			height: 5,
+			x: 0,
+			y: 2
+		});
 	});
 
 	test('toggling off then on restores the registry default size', () => {
@@ -64,7 +70,7 @@ describe('toggleWidgetSelection()', () => {
 		const toggledOff = toggleWidgetSelection(withCustom, 'kpi');
 		expect(toggledOff).toEqual([]);
 		const toggledOn = toggleWidgetSelection(toggledOff, 'kpi');
-		expect(toggledOn).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+		expect(toggledOn).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('unknown ids are dropped (not added)', () => {
@@ -128,25 +134,48 @@ describe('samePlacements()', () => {
 		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
 		expect(samePlacements(a, a)).toBe(true);
 	});
+
+	test('position-only change is NOT equal (required for drag-persist round-trip)', () => {
+		// Carry-over risk from #463: the old samePlacements compared only id/width/height,
+		// so a drag that changes x/y without changing size would be silently treated as
+		// "unchanged" and the persisted layout would never update. Stage 3 requires
+		// x/y equality so that settled gestures are always persisted.
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }];
+		const b: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2, x: 1, y: 0 }];
+		expect(samePlacements(a, b)).toBe(false);
+	});
+
+	test('y-only change is NOT equal', () => {
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }];
+		const b: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2, x: 0, y: 1 }];
+		expect(samePlacements(a, b)).toBe(false);
+	});
+
+	test('both position and size change is NOT equal', () => {
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }];
+		const b: WidgetPlacement[] = [{ id: 'kpi', width: 2, height: 3, x: 1, y: 1 }];
+		expect(samePlacements(a, b)).toBe(false);
+	});
 });
 
 describe('updatePlacement()', () => {
 	test('patches width while preserving other fields', () => {
 		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
 		const next = updatePlacement(input, 'kpi', { width: 2 });
-		expect(next).toEqual([{ id: 'kpi', width: 2, height: 2 }]);
+		// resolvePlacements re-resolves; kpi(2x2) auto-positions at (0,0).
+		expect(next).toEqual([{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 }]);
 	});
 
 	test('patches height while preserving other fields', () => {
 		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
 		const next = updatePlacement(input, 'kpi', { height: 5 });
-		expect(next).toEqual([{ id: 'kpi', width: 4, height: 5 }]);
+		expect(next).toEqual([{ id: 'kpi', width: 4, height: 5, x: 0, y: 0 }]);
 	});
 
 	test('patches both width and height', () => {
 		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
 		const next = updatePlacement(input, 'kpi', { width: 3, height: 6 });
-		expect(next).toEqual([{ id: 'kpi', width: 3, height: 6 }]);
+		expect(next).toEqual([{ id: 'kpi', width: 3, height: 6, x: 0, y: 0 }]);
 	});
 
 	test('does not mutate the input array', () => {
