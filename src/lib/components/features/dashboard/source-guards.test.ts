@@ -275,6 +275,63 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 		});
 	});
 
+	describe('WidgetsModal source: width select stringifies value', () => {
+		const source = readFileSync(
+			new URL('./WidgetsModal.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('width <select> passes a string, not a raw number, to value', () => {
+			// Svelte's select_option compares with is(option.__value, value).
+			// Static option values like value="1" become option.__value = "1" (string),
+			// so a numeric binding never matches and selectedIndex stays -1, making
+			// the saved width appear lost even though it is persisted.  Wrapping
+			// with String(...) keeps the two sides in the same type.
+			expect(source).toMatch(/value=\{String\(placement\.width\)\}/);
+		});
+
+		test('width <select> options are the four quoted string literals "1".."4"', () => {
+			expect(source).toMatch(/<option value="1">1 block<\/option>/);
+			expect(source).toMatch(/<option value="2">2 blocks<\/option>/);
+			expect(source).toMatch(/<option value="3">3 blocks<\/option>/);
+			expect(source).toMatch(/<option value="4">4 blocks \(full\)<\/option>/);
+		});
+
+		test('would fail if a numeric value were restored (regression pin)', () => {
+			// If someone reverts to value={placement.width} the String(…) guard
+			// above fails; this test documents the invariant explicitly so the
+			// failure mode is obvious on a diff.  Svelte strict `is()` compares
+			// option.__value (string) against the binding (number) → no match.
+			expect(source).not.toMatch(/value=\{placement\.width\}/);
+		});
+	});
+
+	describe('FilterSelector source: selects use string-typed values', () => {
+		const source = readFileSync(
+			new URL('./FilterSelector.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('period select value is a string (no numeric coercion)', () => {
+			// filter.period is DashboardPeriod (string union); the comparison
+			// with option.__value stays within string domain.
+			expect(source).toMatch(/value=\{filter\.period\}/);
+			expect(source).not.toMatch(/value=\{Number\(/);
+			expect(source).not.toMatch(/value=\{\d+\}/);
+		});
+
+		test('scope select value falls back to string SCOPE_ALL', () => {
+			// filter.scope ?? SCOPE_ALL is always a string (null coalesces to
+			// the string literal 'all'), keeping the is() comparison happy.
+			expect(source).toMatch(/value=\{filter\.scope \?\? SCOPE_ALL\}/);
+			expect(source).not.toMatch(/value=\{filter\.scope\b(?! \?\?)/);
+		});
+
+		test('options bind from typed string option.value fields', () => {
+			expect(source).toMatch(/value=\{option\.value\}/);
+		});
+	});
+
 	describe('Pure modules stay server-free and DOM-free', () => {
 	const pureModules = [
 		'./top-tools.ts',

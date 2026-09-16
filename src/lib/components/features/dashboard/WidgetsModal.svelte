@@ -183,7 +183,7 @@
 												<select
 													id={`width-${def.id}`}
 													class="widget-select"
-													value={placement.width}
+													value={String(placement.width)}
 													disabled={saving}
 													onchange={(event) => setWidth(def.id, event.currentTarget.value)}
 												>
