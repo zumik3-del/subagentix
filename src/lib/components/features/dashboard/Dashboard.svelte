@@ -17,6 +17,7 @@
 	 * optimistically and persist through the shared coalescing writer.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import {
 		findWidgetDef,
 		resolvePlacements,
@@ -140,13 +141,22 @@
 	<DashboardHeader>
 		{#snippet actions()}
 			<FilterSelector {filter} {scopes} onChange={onFilterChange} />
-			<button type="button" class="ui-btn" onclick={() => (pickerOpen = true)}>Widgets</button>
+			<button
+				type="button"
+				class="ui-icon-btn"
+				onclick={() => (pickerOpen = true)}
+				aria-label="Widgets"
+				title="Widgets"
+				aria-haspopup="dialog"
+			>
+				<Icon name="gear" />
+			</button>
 		{/snippet}
 	</DashboardHeader>
 
 	{#if placements.length === 0}
 		<p class="dashboard__empty">
-			No widgets selected. Use the Widgets button to add widgets to your dashboard.
+			No widgets selected. Use the gear button to add widgets to your dashboard.
 		</p>
 	{:else}
 		<WidgetGrid

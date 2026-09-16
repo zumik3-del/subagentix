@@ -697,8 +697,8 @@ describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
 			try {
 				const page = await getHtml(server.base, '/');
 				expect(page.status).toBe(200);
-				// Picker button lives in the header actions slot.
-				expect(page.body).toContain('>Widgets<');
+				// Picker control is now an icon-only gear; assert it by its accessible name.
+				expect(page.body).toMatch(/<button[^>]*aria-label="Widgets"/);
 				// The modal is open=false in SSR, so no dialog markup should appear.
 				expect(page.body).not.toContain('role="dialog"');
 				expect(page.body).not.toContain('aria-modal');
@@ -730,12 +730,12 @@ describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
 				// No grid, no skeletons.
 				expect(page.body).not.toContain('class="widget-grid');
 				expect(page.body).not.toContain('class="skeleton-widget');
-				// Empty-state paragraph is present.
+				// Empty-state paragraph names the gear control (no visible "Widgets" label).
 				expect(page.body).toContain(
-					'No widgets selected. Use the Widgets button to add widgets to your dashboard.'
+					'No widgets selected. Use the gear button to add widgets to your dashboard.'
 				);
-				// The picker button still renders (the user can open it to add widgets).
-				expect(page.body).toContain('>Widgets<');
+				// The picker control still renders (the user can open it to add widgets).
+				expect(page.body).toMatch(/<button[^>]*aria-label="Widgets"/);
 			} finally {
 				await server.stop();
 			}
