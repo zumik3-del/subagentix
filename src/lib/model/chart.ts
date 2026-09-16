@@ -111,7 +111,8 @@ export function utcDayKey(epochMs: number): string {
 	return `${date.getUTCFullYear()}-${pad2(date.getUTCMonth() + 1)}-${pad2(date.getUTCDate())}`;
 }
 
-function utcDayStart(epochMs: number): number {
+/** UTC calendar-day start for an epoch-ms instant (`NaN` for non-finite input). */
+export function utcDayStart(epochMs: number): number {
 	return Date.parse(`${utcDayKey(epochMs)}T00:00:00.000Z`);
 }
 

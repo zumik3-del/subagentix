@@ -6,16 +6,33 @@
  * DOM/Svelte dependency. Pure and deterministic; no I/O.
  */
 import type { TokenCounts } from './token';
+import { utcDayStart } from './chart';
 
-/** Fixed period presets (spec §2.2); `all` is unbounded history. */
-export type DashboardPeriod = 'all' | '7d' | '30d' | '90d';
+/**
+ * Fixed period presets (spec §2.2); `all` is unbounded history and `today` is
+ * the current UTC calendar day rather than a rolling window.
+ */
+export type DashboardPeriod = 'all' | 'today' | '3d' | '7d' | '30d' | '90d';
 
 /** Every valid period, in selector order (newest window first after `all`). */
-export const DASHBOARD_PERIODS: readonly DashboardPeriod[] = ['all', '7d', '30d', '90d'];
+export const DASHBOARD_PERIODS: readonly DashboardPeriod[] = [
+	'all',
+	'today',
+	'3d',
+	'7d',
+	'30d',
+	'90d'
+];
 
-/** Length of a preset window in whole days; `null` for the unbounded `all`. */
+/**
+ * Length of a preset window in whole days. `null` for the presets that are not a
+ * rolling day count: `all` (unbounded history) and `today` (the current UTC
+ * calendar day, resolved by {@link resolveTimeWindow}).
+ */
 export function periodDays(period: DashboardPeriod): number | null {
 	switch (period) {
+		case '3d':
+			return 3;
 		case '7d':
 			return 7;
 		case '30d':
@@ -56,10 +73,17 @@ const DAY_MS = 86_400_000;
  * Resolve a period preset to its window relative to `now` (epoch-ms). `all`
  * stays unbounded; a non-finite `now` also degrades to unbounded rather than
  * producing a meaningless range.
+ *
+ * `today` is the one calendar-aligned preset — `[start of the current UTC day,
+ * now)` — so its chart shows a single current-day bucket instead of a rolling
+ * span that straddles two. At exactly `00:00:00.000Z` the window is empty
+ * (`from === to`), never negative.
  */
 export function resolveTimeWindow(period: DashboardPeriod, now: number): TimeWindow {
+	if (!Number.isFinite(now)) return { from: null, to: null };
+	if (period === 'today') return { from: utcDayStart(now), to: now };
 	const days = periodDays(period);
-	if (days === null || !Number.isFinite(now)) return { from: null, to: null };
+	if (days === null) return { from: null, to: null };
 	return { from: now - days * DAY_MS, to: now };
 }
 

@@ -35,6 +35,8 @@ export type PeriodOption = FilterOption & { value: DashboardPeriod };
 
 /** English labels for every preset; the `Record` fails to compile if one is missed. */
 const PERIOD_LABELS: Record<DashboardPeriod, string> = {
+	today: 'Today',
+	'3d': 'Last 3 days',
 	'7d': 'Last 7 days',
 	'30d': 'Last 30 days',
 	'90d': 'Last 90 days',
@@ -42,10 +44,11 @@ const PERIOD_LABELS: Record<DashboardPeriod, string> = {
 };
 
 /**
- * Selector order per spec §2.8 (`7d | 30d | 90d | all`), unlike
- * `DASHBOARD_PERIODS` (the enum order used for validation).
+ * Selector order per spec §2.8 (`today | 3d | 7d | 30d | 90d | all`), unlike
+ * `DASHBOARD_PERIODS` (the enum order used for validation). The two shortest
+ * windows lead so the most recent view is one click away.
  */
-const PERIOD_ORDER: readonly DashboardPeriod[] = ['7d', '30d', '90d', 'all'];
+const PERIOD_ORDER: readonly DashboardPeriod[] = ['today', '3d', '7d', '30d', '90d', 'all'];
 
 /** Period chooser options, in selector order, each with its English label. */
 export const PERIOD_OPTIONS: readonly PeriodOption[] = PERIOD_ORDER.map((value) => ({

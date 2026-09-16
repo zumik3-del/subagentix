@@ -32,8 +32,15 @@ describe('SCOPE_ALL', () => {
 });
 
 describe('PERIOD_OPTIONS', () => {
-	test('has four options in selector order: 7d | 30d | 90d | all', () => {
-		expect(PERIOD_OPTIONS.map((o) => o.value)).toEqual(['7d', '30d', '90d', 'all']);
+	test('has six options in selector order: today | 3d | 7d | 30d | 90d | all', () => {
+		expect(PERIOD_OPTIONS.map((o) => o.value)).toEqual([
+			'today',
+			'3d',
+			'7d',
+			'30d',
+			'90d',
+			'all'
+		]);
 	});
 
 	test('every option has an English label', () => {
@@ -42,8 +49,10 @@ describe('PERIOD_OPTIONS', () => {
 		}
 	});
 
-	test('labels match the spec vocabulary', () => {
+	test('labels match the spec vocabulary including new presets', () => {
 		const labels = PERIOD_OPTIONS.map((o) => o.label);
+		expect(labels).toContain('Today');
+		expect(labels).toContain('Last 3 days');
 		expect(labels).toContain('Last 7 days');
 		expect(labels).toContain('Last 30 days');
 		expect(labels).toContain('Last 90 days');
@@ -92,6 +101,13 @@ describe('parseFilter()', () => {
 	test('valid period and scope are passed through', () => {
 		const search = new URLSearchParams('period=7d&scope=/a');
 		expect(parseFilter(search, ['/a', '/b'])).toEqual({ period: '7d', scope: '/a' });
+	});
+
+	test('today and 3d periods are accepted through the URL', () => {
+		const today = parseFilter(new URLSearchParams('period=today'), []);
+		const threeD = parseFilter(new URLSearchParams('period=3d'), []);
+		expect(today).toEqual({ period: 'today', scope: null });
+		expect(threeD).toEqual({ period: '3d', scope: null });
 	});
 
 	test('blank period falls back to DEFAULT_PERIOD', () => {
@@ -155,6 +171,18 @@ describe('filterSearch()', () => {
 
 	test('round-trips null scope through all', () => {
 		const original: DashboardFilter = { period: '30d', scope: null };
+		const parsed = parseFilter(filterSearch(original), []);
+		expect(parsed).toEqual(original);
+	});
+
+	test('round-trips "today" period through the URL', () => {
+		const original: DashboardFilter = { period: 'today', scope: null };
+		const parsed = parseFilter(filterSearch(original), []);
+		expect(parsed).toEqual(original);
+	});
+
+	test('round-trips "3d" period through the URL', () => {
+		const original: DashboardFilter = { period: '3d', scope: null };
 		const parsed = parseFilter(filterSearch(original), []);
 		expect(parsed).toEqual(original);
 	});
