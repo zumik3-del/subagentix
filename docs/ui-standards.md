@@ -604,34 +604,37 @@ src/
   props + callbacks (e.g. `Gantt.svelte` keeps selection/hover/cursor/scroll,
   `NodeDetailPanel.svelte` keeps filters/expanded/copy/scroll).
 
-### Dashboard widget persistence
+### Dashboard persistence
 
-The dashboard selection and per-widget sizes persist in `settings.json` under
-`dashboardWidgets`, written by the settings store (`src/lib/server/settings.ts`)
-and read back through `resolveDashboardWidgets` (`settings.ts:347-349`).
+The dashboard's persisted UI state lives in `settings.json` under two keys,
+written by the settings store (`src/lib/server/settings.ts`): the widget
+selection and per-widget sizes (`dashboardWidgets`) and the last manual
+period/scope choice (`dashboardFilter`). They are read back through
+`resolveDashboardWidgets` (`settings.ts:419-421`) and `resolveDashboardFilter`
+(`settings.ts:429-431`).
 
 - **Current shape:** `dashboardWidgets` is a `{ id, width, height }[]` — one
-  `WidgetPlacement` per selected widget (`settings.ts:36`, `registry.ts:46-52`).
-  The file payload carries `version: 2` on every write (`settings.ts:267`).
+  `WidgetPlacement` per selected widget (`settings.ts:43`, `registry.ts:55-61`).
+  The file payload carries `version: 2` on every write (`settings.ts:334`).
 - **Legacy `string[]` still loads.** A v1 file whose `dashboardWidgets` is a
   bare id list (`["kpi","top-tools"]`) is accepted and resolved to placements
   with the registry-default sizes; unknown ids are dropped, duplicates collapse
   first-wins and the result is returned in registry order
-  (`normaliseDashboardWidgets`, `settings.ts:142-179`; `resolvePlacements`,
-  `registry.ts:189-206`). The same acceptance applies to a legacy `string[]`
-  `PUT /api/settings` payload (`src/routes/api/settings/+server.ts:113-116`).
+  (`normaliseDashboardWidgets`, `settings.ts:150-187`; `resolvePlacements`,
+  `registry.ts:207-223`). The same acceptance applies to a legacy `string[]`
+  `PUT /api/settings` payload (`src/routes/api/settings/+server.ts:122-124`).
 - **Validation.** A non-array, a non-string/non-object entry, a non-finite
   `width`/`height` or an oversized list (>24 entries) is rejected with
   `SettingsValidationError('dashboardWidgets')`; a hand-edited invalid list on
   disk degrades to the registry defaults rather than failing the read
-  (`settings.ts:142-179,208-214`).
+  (`settings.ts:150-187,268-274`).
 - **First visit.** With no stored override, `resolveDashboardWidgets` falls
   back to `DEFAULT_WIDGETS` (the `defaultOn` registry entries with their default
-  sizes, `registry.ts:151-153`).
+  sizes, `registry.ts:168-170`).
 - **Two write paths, one helper.** `save.ts` owns the single
   `PUT /api/settings` call: `saveDashboardWidgets` sends the full placement list
   as `{ dashboardWidgets: placements }` and returns the server-normalised
-  placements (`save.ts:27-42`). The picker (`WidgetsModal`) drafts visibility
+  placements (`save.ts:45-60`). The picker (`WidgetsModal`) drafts visibility
   locally and calls it once on Apply (`WidgetsModal.svelte:95-106`); the
   per-card gear applies immediately through the same helper. One payload shape,
   two call sites.
@@ -648,13 +651,68 @@ and read back through `resolveDashboardWidgets` (`settings.ts:347-349`).
   once — no draft, no Apply (`WidgetSettings.svelte:62-69`). The shell patches
   the grid state with `updatePlacement` first, so the card re-lays out
   instantly, then pushes the list to the coalescing writer
-  (`Dashboard.svelte:106-114`; `createCoalescingWriter`, `save.ts:44-91`): the
+  (`Dashboard.svelte:106-114`; `createCoalescingWriter`, `save.ts:104-137`): the
   size controls stay enabled while a save is in flight, so rapid `+`/`−` clicks
   collapse into one trailing save and a stale size is never persisted. A failed
   save reverts the grid to the last server-confirmed placements (`lastSaved`,
   the loader baseline until the first successful write) and shows the error
   inside the dialog with `aria-live="polite"` (`Dashboard.svelte:81-93`;
   `WidgetSettings.svelte:123-125`).
+
+**The filter preference (`dashboardFilter`) — task #457.** The global period +
+scope filter is no longer URL-only: a manual selector change is persisted
+server-side, supplied to `parseFilter` as the fallback, and read by the landing
+loader so the first render already reflects it.
+
+- **Shape.** `dashboardFilter` stores a `{ period, scope }` pair
+  (`settings.ts:44`); `scope: null` means every directory. A stored scope
+  that no longer names a known directory degrades to every directory when the
+  filter is built (`filter.ts:87-98`).
+- **Validation / read-degrade.** `normaliseDashboardFilter` (`settings.ts:199-239`)
+  accepts only a known period preset and a `null` or string scope (empty and
+  `all` normalise to `null`; a NUL or an over-4096-char scope is rejected with
+  `SettingsValidationError('dashboardFilter')`). A hand-edited invalid filter in
+  the file is ignored on read instead of failing the load
+  (`settings.ts:275-281`). Known-directory membership is deliberately not
+  checked by the store (it has no DB access).
+- **First visit.** With no stored override, `resolveDashboardFilter` returns
+  `DEFAULT_FILTER` (`settings.ts:429-431`): `period: '7d'` — the `Last 7 days`
+  preset (`filter.ts:22,49`) — and `scope: null` (`All projects`,
+  `filter.ts:29,69`).
+- **Precedence: URL > stored preference > default.** `parseFilter(search,
+  knownScopes, stored)` (`filter.ts:111-133`) uses a valid `?period=`/`?scope=`
+  from the URL; a valid period always wins, while an absent or unknown URL value
+  falls back to the stored pair (validated on read) and then to
+  `DEFAULT_PERIOD` / every directory. An explicit `?scope=all`/blank is
+  authoritative — it is never overridden by a stored scope.
+- **The loader reads the preference, so the first server render matches.**
+  `+page.server.ts` returns `filter: resolveDashboardFilter()`
+  (`+page.server.ts:15-18`); the landing page derives the active filter with
+  `parseFilter(page.url.searchParams, knownScopes, data.filter)`
+  (`+page.svelte:32`). The stored period/scope is therefore already selected in
+  the SSR markup — no default flash, no hydration mismatch.
+- **Only a manual selector change is persisted; a deep link is read-only.**
+  `FilterSelector` reports the next filter through its `onChange` callback
+  (`FilterSelector.svelte:30-37`), which `Dashboard` forwards from its
+  `onFilterChange` prop (`Dashboard.svelte:124`). The landing page writes the
+  change back to the URL with `goto` and queues one `saveDashboardFilter` PUT
+  through the same coalescing writer as the widgets, so rapid changes collapse
+  into a single trailing PUT (`+page.svelte:38-51`; `save.ts:69-84,104-137`).
+  A failed PUT is swallowed — it cannot break the navigation or the rendered
+  filter, and the URL state is already applied (`+page.svelte:38-44`).
+- **The settings API echoes it like the widgets.** GET returns the effective
+  `dashboardFilter` plus the raw `stored` value and its `source` (`'file'` when
+  a preference is stored, else `'default'`) (`+server.ts:27,34,42,55,62,77`);
+  PUT accepts a `dashboardFilter` object, passes it through
+  `normaliseDashboardFilter`, and answers a malformed pair with
+  `400 { error, field: 'dashboardFilter' }` (`+server.ts:126-136`). A `null`
+  clears the override (`settings.ts:372-375`), so the effective value falls
+  back to the default.
+- **The widget API's own default is a separate contract.** The dashboard always
+  sends an explicit `period`, so `src/routes/api/dashboard/widgets.ts`
+  independently defaults a param-less request to `30d` (`widgets.ts:163`, spec
+  §2.8) — that is the endpoint's fallback, not the dashboard's first-visit
+  default.
 
 ### Naming & import rules
 
@@ -742,7 +800,7 @@ assertion to the file that now owns the string.
 
 | Suite | Guards |
 |---|---|
-| `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch |
+| `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch; dashboard SSR filter selection (first-visit `7d`/`all`, stored `dashboardFilter` rendered as the selected option, URL period wins over stored, unknown stored scope degrades to every directory) |
 | `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, `TaskDetailView` camelCase-payload regression (real Created/Updated/completedAt, `maxAttempts`, epic id), Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
@@ -752,18 +810,25 @@ assertion to the file that now owns the string.
 | `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
 | `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (size-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
 | `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
-| `src/lib/components/features/dashboard/save.test.ts` | `saveDashboardWidgets` (full-list `dashboardWidgets` PUT, response re-normalised through `resolvePlacements`, non-OK → `Error` carrying the server message or the HTTP status) and `createCoalescingWriter` (pushes during an in-flight save collapse into one latest-wins trailing save, a rejected save is tolerated and later pushes proceed, an idle writer issues nothing) |
+| `src/lib/components/features/dashboard/save.test.ts` | `saveDashboardWidgets` (full-list `dashboardWidgets` PUT, response re-normalised through `resolvePlacements`, non-OK → `Error` carrying the server message or the HTTP status), `saveDashboardFilter` (full `dashboardFilter` PUT re-normalised server-side, response fallbacks, non-OK → `Error`), and `createCoalescingWriter` (pushes during an in-flight save collapse into one latest-wins trailing save, a rejected save is tolerated and later pushes proceed, an idle writer issues nothing; the filter case pushes `DashboardFilter` values through the same writer) |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
 source/paths), `src/routes/api/settings/settings-dashboard.suite.ts` (the
 `dashboardWidgets` PUT/GET contract: object payloads, `version: 2` on disk, the
-legacy `string[]` echo), `src/lib/server/settings.test.ts` (store round-trip,
-legacy `string[]` read fallback, `version: 2` write, per-widget `minHeight`
-clamp on read),
+legacy `string[]` echo; and the `dashboardFilter` contract: absent → `7d`/`all`
+default, valid and `null`-scope payloads persist-and-echo, `null` clears,
+`400 { error, field: 'dashboardFilter' }` on an invalid period or scope, on-disk
+`version: 2`, hand-edited degrade to default on read), `src/lib/server/settings.test.ts`
+(store round-trip, legacy `string[]` read fallback, `version: 2` write,
+per-widget `minHeight` clamp on read, `normaliseDashboardFilter` validation,
+`dashboardFilter` round-trip / `null`-clear / hand-edited read-degrade, and
+`resolveDashboardFilter` stored-vs-default fallback),
 `src/lib/components/scroll-view.test.ts`, `src/routes/pages.test.ts`,
 `src/routes/m3c-drilldown.test.ts`, `src/routes/m4a-tracker.test.ts`
 (isolated-child-process runners), the dashboard helper units
-`features/dashboard/{data,filter,top-tools}.test.ts`, and the unit tests under
+`features/dashboard/{data,filter,top-tools}.test.ts` (the `filter` unit pins
+the `7d`/`all` default, the six selector options, the URL > stored > default
+precedence table and the unknown-stored-scope degrade), and the unit tests under
 `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware formatter cases
 (Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and guards that every
 `.svelte` format call passes `clock.tz`; `node.test.ts` pins
