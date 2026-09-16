@@ -37,7 +37,7 @@
 import {
 	GRID_COLUMNS,
 	GRID_DESKTOP_MIN_WIDTH_REM,
-	GRID_GAP_REM,
+	GRID_GAP_HALF_REM,
 	GRID_ROW_HEIGHT_REM,
 	WIDGET_MAX_HEIGHT,
 	WIDGET_MAX_WIDTH,
@@ -169,7 +169,14 @@ class GridstackController {
 				{
 					column: GRID_COLUMNS,
 					cellHeight: `${GRID_ROW_HEIGHT_REM}rem`,
-					margin: `${GRID_GAP_REM}rem`,
+					// gridstack insets `.grid-stack-item-content` by `margin` on
+					// all four sides *inside* the cell (it is not part of the
+					// box model), so a full `GRID_GAP_REM` margin would leave
+					// 2 × 16px between neighbours and 16px at the outer edge.
+					// Half the gap gives the 16px card-to-card gutter, and
+					// `WidgetGrid.svelte` pulls the container out by the same
+					// half so the outer edge lands on the page's 16px gutter.
+					margin: `${GRID_GAP_HALF_REM}rem`,
 					// Keep exact positions: `float: false` (gridstack's default) applies
 					// top-gravity packing that would silently compact stored gaps on
 					// load, diverging from the CSS fallback and triggering a repair PUT.

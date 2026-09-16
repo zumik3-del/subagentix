@@ -16,6 +16,7 @@ import {
 } from './registry';
 import {
 	GRID_COLUMNS,
+	GRID_GAP_HALF_REM,
 	GRID_GAP_PX,
 	GRID_GAP_REM,
 	GRID_ROW_HEIGHT_PX,
@@ -489,6 +490,13 @@ describe('geometry constants match CSS reality', () => {
 		expect(GRID_ROW_HEIGHT_PX).toBe(GRID_ROW_HEIGHT_REM * ROOT_FONT_SIZE_PX);
 	});
 
+	test('GRID_GAP_HALF_REM derivation canary: half the gap rem equals GRID_GAP_REM / 2', () => {
+		// GRID_GAP_HALF_REM is derived from GRID_GAP_REM, not a fresh literal.
+		// A revert that re-introduces a standalone half-gap literal (breaking the
+		// derivation link) fails this.
+		expect(GRID_GAP_HALF_REM).toBe(GRID_GAP_REM / 2);
+	});
+
 	test('GRID_GAP_PX == GRID_GAP_REM * ROOT_FONT_SIZE_PX', () => {
 		expect(GRID_GAP_PX).toBe(GRID_GAP_REM * ROOT_FONT_SIZE_PX);
 	});
@@ -500,14 +508,17 @@ describe('geometry constants match CSS reality', () => {
 		expect(WIDGET_MAX_HEIGHT).toBe(LAYOUT_MAX_HEIGHT);
 	});
 
-	test('ROOT_FONT_SIZE_PX = 14 canary: if CSS root font-size changes, this fails', () => {
+	test('ROOT_FONT_SIZE_PX = 16 canary: if the CSS root font-size changes, this fails', () => {
 		// Canaries that would catch a root-font-size drift:
-		// - ROOT_FONT_SIZE_PX != 14 means layout.ts was updated but app.css wasn't (or vice versa).
-		// - GRID_ROW_HEIGHT_PX != 42 means the row-height rem × font-size product diverges from CSS.
-		// - GRID_GAP_PX != 14 means the gap rem × font-size product diverges from CSS.
-		expect(ROOT_FONT_SIZE_PX).toBe(14);
-		expect(GRID_ROW_HEIGHT_PX).toBe(42);
-		expect(GRID_GAP_PX).toBe(14);
+		// - `html` has no font-size rule, so `rem` resolves against the browser
+		//   default 16px. `--font-size-base` (14px) applies to `body` only and
+		//   does not scale `rem`.
+		// - ROOT_FONT_SIZE_PX != 16 means layout.ts was updated but the CSS root wasn't (or vice versa).
+		// - GRID_ROW_HEIGHT_PX != 48 means the row-height rem × font-size product diverges from CSS.
+		// - GRID_GAP_PX != 16 means the gap rem × font-size product diverges from CSS.
+		expect(ROOT_FONT_SIZE_PX).toBe(16);
+		expect(GRID_ROW_HEIGHT_PX).toBe(48);
+		expect(GRID_GAP_PX).toBe(16);
 	});
 
 	test('GRID_COLUMNS = 6 canary: diverges from WidgetGrid.svelte grid-template-columns', () => {

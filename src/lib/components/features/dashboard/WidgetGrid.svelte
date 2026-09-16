@@ -30,7 +30,7 @@
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
 	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
-	import { GRID_COLUMNS, GRID_GAP_REM, GRID_ROW_HEIGHT_REM } from './layout';
+	import { GRID_COLUMNS, GRID_GAP_HALF_REM, GRID_GAP_REM, GRID_ROW_HEIGHT_REM } from './layout';
 	import { DEFAULT_FILTER } from './filter';
 	import { gridstackEnhance } from './gridstack';
 	import type { WidgetLoaders } from './widget';
@@ -75,7 +75,7 @@
 	 * (the two media-query breakpoints are the only values CSS cannot read from
 	 * a custom property).
 	 */
-	const gridVars = `--grid-columns:${GRID_COLUMNS};--grid-row-height:${GRID_ROW_HEIGHT_REM}rem;--grid-gap:${GRID_GAP_REM}rem`;
+	const gridVars = `--grid-columns:${GRID_COLUMNS};--grid-row-height:${GRID_ROW_HEIGHT_REM}rem;--grid-gap:${GRID_GAP_REM}rem;--grid-gap-half:${GRID_GAP_HALF_REM}rem`;
 
 	/**
 	 * Per-item fallback placement (epic #462, stage 2): the resolved 0-based
@@ -208,6 +208,19 @@
 		margin: 0;
 		padding: 0;
 		list-style: none;
+	}
+
+	/* Enhanced-mode gutter compensation (epic #462). gridstack insets each card
+	   by `--grid-gap-half` inside its cell (`margin: GRID_GAP_HALF_REM` in
+	   `gridstack.ts`), so a cell edge already sits half a gap inside the
+	   container. Pulling the container out by that same half makes the outer
+	   card edge land on the page's own `--space-4` (16px) gutter while adjacent
+	   cards stay 16px apart — one half-gap on each side of the boundary, never
+	   double-counted. The pull-out stays within `.dashboard`'s 16px side
+	   padding, so the wider box cannot overflow the viewport. Applies only when
+	   gridstack owns the grid; the fallback keeps `gap: var(--grid-gap)`. */
+	.widget-grid.grid-stack {
+		margin: calc(-1 * var(--grid-gap-half));
 	}
 
 	/* Every fallback rule is scoped to `:not(.grid-stack)` (epic #462, stage 3):

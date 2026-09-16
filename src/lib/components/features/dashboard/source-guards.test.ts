@@ -545,7 +545,7 @@ describe('gridstack.ts source: dynamic-import-only contract', () => {
 		// The init config must consume the shared geometry constants.
 		expect(source).toMatch(/GRID_COLUMNS/);
 		expect(source).toMatch(/GRID_ROW_HEIGHT_REM/);
-		expect(source).toMatch(/GRID_GAP_REM/);
+		expect(source).toMatch(/GRID_GAP_HALF_REM/);
 	});
 });
 
@@ -578,6 +578,128 @@ describe('gridstack.ts snap-back fix: #readLayout reads live engine nodes', () =
 		// or add a second lookup — this assertion pins the ??-only pattern.
 		expect(source).toMatch(/node\.w \?\? WIDGET_MIN_WIDTH/);
 		expect(source).toMatch(/node\.h \?\? WIDGET_MIN_HEIGHT/);
+	});
+});
+
+describe('16px gutter invariant: three-way agreement + rem base', () => {
+	const gridstackSource = readFileSync(
+		new URL('./gridstack.ts', import.meta.url),
+		'utf8'
+	);
+	const widgetGridSource = readFileSync(
+		new URL('./WidgetGrid.svelte', import.meta.url),
+		'utf8'
+	);
+	const appCssSource = readFileSync(
+		new URL('../../../../app.css', import.meta.url),
+		'utf8'
+	);
+
+	test('gridstack init margin uses GRID_GAP_HALF_REM, not GRID_GAP_REM', () => {
+		// gridstack insets .grid-stack-item-content by margin inside each cell,
+		// so a full-gap margin doubles the card-to-card gutter. The init config
+		// must pass GRID_GAP_HALF_REM (not GRID_GAP_REM) as the margin value.
+		// A revert to GRID_GAP_REM in the margin literal fails this.
+		expect(gridstackSource).toMatch(/margin:\s*`\$\{GRID_GAP_HALF_REM\}rem`/);
+		// This negative guard catches a revert even if the old value survives in a
+		// comment — only the actual margin assignment matters.
+		expect(gridstackSource).not.toMatch(/margin:\s*`\$\{GRID_GAP_REM\}rem`/);
+	});
+
+	test('--grid-gap-half is emitted in the SSR inline var string', () => {
+		// The <ul> style attribute must carry --grid-gap-half so the .grid-stack
+		// compensation rule can read it via var(--grid-gap-half). If this drops
+		// out, the negative margin becomes 0 and the outer cards collapse inward.
+		// A revert that removes --grid-gap-half from gridVars fails this.
+		expect(widgetGridSource).toMatch(/\-\-grid-gap-half:\$\{GRID_GAP_HALF_REM\}rem/);
+	});
+
+	test('container pull-out applies only under .grid-stack and uses the same half', () => {
+		// The negative margin that pulls the container out by one half-gap must
+		// be scoped to .widget-grid.grid-stack so it does not affect the fallback
+		// path. The compensation uses the same half as gridstack's margin.
+		// A revert that moves the rule out of .grid-stack scope or changes the
+		// variable fails this positive guard; a revert that adds the same rule
+		// under :not(.grid-stack) fails the negative guard below.
+		expect(widgetGridSource).toMatch(
+			/\.widget-grid\.grid-stack\s*\{[\s\S]*?margin:\s*calc\(-1 \* var\(--grid-gap-half\)\)/
+		);
+		// The compensation must not leak into any :not(.grid-stack) block.
+		const notBlocks: string[] = [];
+		let i = 0;
+		while (i < widgetGridSource.length) {
+			const idx = widgetGridSource.indexOf(':not(.grid-stack)', i);
+			if (idx === -1) break;
+			const braceIdx = widgetGridSource.indexOf('{', idx);
+			if (braceIdx === -1) { i = idx + 1; continue; }
+			let depth = 0;
+			let end = -1;
+			for (let j = braceIdx; j < widgetGridSource.length; j++) {
+				if (widgetGridSource[j] === '{') depth++;
+				else if (widgetGridSource[j] === '}') {
+					depth--;
+					if (depth === 0) { end = j; break; }
+				}
+			}
+			if (end === -1) { i = idx + 1; continue; }
+			notBlocks.push(widgetGridSource.slice(braceIdx, end + 1));
+			i = end + 1;
+		}
+		for (const block of notBlocks) {
+			expect(block).not.toMatch(/margin:\s*calc/);
+		}
+	});
+
+	test('fallback still sizes from gap: var(--grid-gap)', () => {
+		// The non-enhanced path must keep the original gap value so the two modes
+		// agree on card-to-card and page-edge spacing. A revert that changes this
+		// to gap-half or a literal fails this.
+		const notBlocks: string[] = [];
+		let i = 0;
+		while (i < widgetGridSource.length) {
+			const idx = widgetGridSource.indexOf(':not(.grid-stack)', i);
+			if (idx === -1) break;
+			const braceIdx = widgetGridSource.indexOf('{', idx);
+			if (braceIdx === -1) { i = idx + 1; continue; }
+			let depth = 0;
+			let end = -1;
+			for (let j = braceIdx; j < widgetGridSource.length; j++) {
+				if (widgetGridSource[j] === '{') depth++;
+				else if (widgetGridSource[j] === '}') {
+					depth--;
+					if (depth === 0) { end = j; break; }
+				}
+			}
+			if (end === -1) { i = idx + 1; continue; }
+			notBlocks.push(widgetGridSource.slice(braceIdx, end + 1));
+			i = end + 1;
+		}
+		const gridBlock = notBlocks.find((b) => b.includes('gap:'));
+		expect(gridBlock).toBeDefined();
+		expect(gridBlock).toMatch(/gap:\s*var\(--grid-gap\)/);
+	});
+
+	test('src/app.css declares no font-size on html or :root', () => {
+		// The 16px rem base is the browser default, guaranteed by the absence of
+		// any html/:root font-size rule. A future developer adding one would
+		// silently rescale every rem in the app (rows, gaps, breakpoints). The
+		// numeric canary (ROOT_FONT_SIZE_PX = 16) cannot detect a CSS addition;
+		// only a source scan of app.css can. This guard catches that regression.
+		expect(appCssSource).not.toMatch(/^\s*html\s*\{/m);
+		const rootIdx = appCssSource.indexOf(':root {');
+		expect(rootIdx).toBeGreaterThan(-1);
+		let depth = 0;
+		let end = -1;
+		for (let i = rootIdx; i < appCssSource.length; i++) {
+			if (appCssSource[i] === '{') depth++;
+			else if (appCssSource[i] === '}') {
+				depth--;
+				if (depth === 0) { end = i; break; }
+			}
+		}
+		expect(end).toBeGreaterThan(-1);
+		const rootBlock = appCssSource.slice(rootIdx, end + 1);
+		expect(rootBlock).not.toMatch(/font-size:/);
 	});
 });
 
