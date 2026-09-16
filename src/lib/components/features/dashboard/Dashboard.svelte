@@ -84,11 +84,12 @@
 />
 
 <style>
+	/* Side padding matches the turn page (`/sessions/[id]`): `--space-4`. */
 	.dashboard {
 		display: flex;
 		flex-direction: column;
 		gap: var(--space-6);
-		padding: var(--space-6) var(--space-8) var(--space-12);
+		padding: var(--space-6) var(--space-4) var(--space-12);
 	}
 
 	.dashboard__empty {
