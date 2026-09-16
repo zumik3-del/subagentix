@@ -35,27 +35,32 @@ function freshSettingsModule() {
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: Array<{ id: string; width: number; height: number }> | null;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		};
 		updateStoredSettings: (patch: {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: unknown;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		}) => {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: unknown;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		};
 		resolveDbPath: () => string;
 		resolveZiptaskBaseUrl: () => string | null;
 		resolveZiptaskEnabled: () => boolean;
 		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number }>;
+		resolveDashboardFilter: () => { period: string; scope: string | null };
 		onSettingsChange: (cb: (next: { dbPath?: string | null; ziptaskBaseUrl?: string | null }) => void) => () => void;
 		normaliseDbPath: (value: unknown) => string;
 		normaliseZiptaskBaseUrl: (value: unknown) => string;
 		normaliseZiptaskEnabled: (value: unknown) => boolean;
 		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number }>;
+		normaliseDashboardFilter: (value: unknown) => { period: string; scope: string | null };
 		SettingsValidationError: new (message: string, field: string) => { message: string; field: string };
 	}>;
 }
@@ -652,23 +657,165 @@ test('resolveDashboardWidgets clamps a persisted v2 height below the widget mini
 	expect(result[0].height).toBe(2);
 });
 
-test('the update path persists the clamped value (round-trip)', async () => {
+	test('the update path persists the clamped value (round-trip)', async () => {
+		const dir = tempDir();
+		const file = join(dir, 'clamp-rt.json');
+		process.env.SETTINGS_FILE = file;
+		const mod = await freshSettingsModule();
+
+		// Write a kpi with height 1; the setter should clamp it to 2 before writing.
+		mod.updateStoredSettings({
+			dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }] as unknown as unknown[]
+		});
+		const readBack = mod.getStoredSettings().dashboardWidgets;
+		expect(readBack).toHaveLength(1);
+		expect(readBack![0].height).toBe(2);
+
+		// Re-import to simulate a fresh process reading the same file.
+		const mod2 = await freshSettingsModule();
+		const reRead = mod2.getStoredSettings().dashboardWidgets;
+		expect(reRead).toHaveLength(1);
+		expect(reRead![0].height).toBe(2);
+	});
+
+/* ------------------------------------------------------------------ */
+/* dashboardFilter normalisation & round-trip                           */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardFilter rejects a non-object', async () => {
+	for (const value of [null, 'kpi', 42, ['7d'], true] as unknown[]) {
+		const mod = await freshSettingsModule();
+		expect(() => mod.normaliseDashboardFilter(value)).toThrow(/dashboardFilter must be a \{ period, scope \} object/);
+	}
+});
+
+test('normaliseDashboardFilter rejects an unknown period', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: 'forever', scope: null })).toThrow(
+		/dashboardFilter\.period must be a known period preset/
+	);
+});
+
+test('normaliseDashboardFilter rejects a non-string scope', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: 42 })).toThrow(
+		/dashboardFilter\.scope must be a string or null/
+	);
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: undefined as unknown as string })).toThrow(
+		/dashboardFilter\.scope must be a string or null/
+	);
+});
+
+test('normaliseDashboardFilter rejects NUL in scope', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: '/evil\x00dir' })).toThrow(/NUL/i);
+});
+
+test('normaliseDashboardFilter rejects an oversized scope (>4096)', async () => {
+	const mod = await freshSettingsModule();
+	const long = '/a/'.repeat(2048); // > 4096 chars
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: long })).toThrow(/at most 4096/i);
+});
+
+test('normaliseDashboardFilter normalises empty and "all" scope to null', async () => {
+	const mod = await freshSettingsModule();
+	expect(mod.normaliseDashboardFilter({ period: '7d', scope: '' })).toEqual({ period: '7d', scope: null });
+	expect(mod.normaliseDashboardFilter({ period: '7d', scope: 'all' })).toEqual({ period: '7d', scope: null });
+});
+
+test('normaliseDashboardFilter preserves a non-empty known-scope string', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardFilter({ period: '30d', scope: '/repo/myproject' });
+	expect(result).toEqual({ period: '30d', scope: '/repo/myproject' });
+});
+
+test('normaliseDashboardFilter accepts all valid period presets', async () => {
+	const mod = await freshSettingsModule();
+	for (const period of ['today', '3d', '7d', '30d', '90d', 'all'] as const) {
+		const result = mod.normaliseDashboardFilter({ period, scope: null });
+		expect(result.period).toBe(period);
+	}
+});
+
+test('updateStoredSettings accepts dashboardFilter and persists it', async () => {
 	const dir = tempDir();
-	const file = join(dir, 'clamp-rt.json');
+	const file = join(dir, 'filter-rt.json');
 	process.env.SETTINGS_FILE = file;
 	const mod = await freshSettingsModule();
 
-	// Write a kpi with height 1; the setter should clamp it to 2 before writing.
-	mod.updateStoredSettings({
-		dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }] as unknown as unknown[]
+	const next = mod.updateStoredSettings({
+		dashboardFilter: { period: '30d', scope: '/repo/a' }
 	});
-	const readBack = mod.getStoredSettings().dashboardWidgets;
-	expect(readBack).toHaveLength(1);
-	expect(readBack![0].height).toBe(2);
+	expect(next.dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+	expect(mod.getStoredSettings().dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+	expect(existsSync(file)).toBe(true);
+	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+	expect(disk).toHaveProperty('version', 2);
+	expect((disk.dashboardFilter as { period: string; scope: string | null })).toEqual({
+		period: '30d',
+		scope: '/repo/a'
+	});
+});
 
-	// Re-import to simulate a fresh process reading the same file.
-	const mod2 = await freshSettingsModule();
-	const reRead = mod2.getStoredSettings().dashboardWidgets;
-	expect(reRead).toHaveLength(1);
-	expect(reRead![0].height).toBe(2);
+test('null clears dashboardFilter; resolveDashboardFilter falls back to DEFAULT_FILTER', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-clear.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dashboardFilter: { period: '30d', scope: '/x' } });
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '30d', scope: '/x' });
+
+	mod.updateStoredSettings({ dashboardFilter: null });
+	expect(mod.getStoredSettings().dashboardFilter).toBeNull();
+	// Cleared override -> default (7d / all).
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+});
+
+test('resolveDashboardFilter returns the stored pair when set', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-resolve.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dashboardFilter: { period: '90d', scope: '/mydir' } });
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '90d', scope: '/mydir' });
+});
+
+test('resolveDashboardFilter returns DEFAULT_FILTER when nothing is stored', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-default.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+});
+
+test('hand-edited invalid dashboardFilter in the file degrades to default on read', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-bad.json');
+	// Write a file with an invalid dashboardFilter (bad period).
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 2, dashboardFilter: { period: 'bogus', scope: '/x' } }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	// Invalid filter is ignored on read -> resolves to default.
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+	// Stored settings does not carry the bad value.
+	expect(mod.getStoredSettings().dashboardFilter).toBeUndefined();
+});
+
+test('dashboardFilter round-trips through PUT → GET unchanged', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-roundtrip.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const original = { period: '30d', scope: '/repo/b' };
+	mod.updateStoredSettings({ dashboardFilter: original });
+	const readBack = mod.getStoredSettings().dashboardFilter;
+	expect(readBack).toEqual(original);
 });

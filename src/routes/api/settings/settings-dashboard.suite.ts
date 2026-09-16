@@ -295,3 +295,225 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect((body.source as Record<string, unknown>).dashboardWidgets).toBe('default');
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* PUT /api/settings — dashboardFilter validation & round-trip        */
+/* ------------------------------------------------------------------ */
+
+describe('PUT /api/settings — dashboardFilter', () => {
+	test('absent dashboardFilter in body → default (7d / all) on GET', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dbPath: '/tmp/empty.db' })
+			})
+		});
+		expect(putResp.status).toBe(200);
+
+		const getResp = settingsRoute.GET({});
+		expect(getResp.status).toBe(200);
+		const body = (await getResp.json()) as Record<string, unknown>;
+		const stored = body.stored as Record<string, unknown>;
+		expect(stored.dashboardFilter).toBeNull();
+		const source = body.source as Record<string, unknown>;
+		expect(source.dashboardFilter).toBe('default');
+		// Effective payload is the first-visit default: 7d / all.
+		const filter = body.dashboardFilter as { period: string; scope: string | null };
+		expect(filter.period).toBe('7d');
+		expect(filter.scope).toBeNull();
+	});
+
+	test('valid dashboardFilter persists and is echoed by GET', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '30d', scope: '/repo/a' } })
+			})
+		});
+		expect(putResp.status).toBe(200);
+		const body = (await putResp.json()) as Record<string, unknown>;
+		expect((body.dashboardFilter as { period: string; scope: string | null })).toEqual({
+			period: '30d',
+			scope: '/repo/a'
+		});
+		const stored = body.stored as Record<string, unknown>;
+		expect(stored.dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+		const source = body.source as Record<string, unknown>;
+		expect(source.dashboardFilter).toBe('file');
+	});
+
+	test('dashboardFilter with scope=null (every directory) persists correctly', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '7d', scope: null } })
+			})
+		});
+		expect(putResp.status).toBe(200);
+		const body = (await putResp.json()) as Record<string, unknown>;
+		expect((body.dashboardFilter as { period: string; scope: null })).toEqual({
+			period: '7d',
+			scope: null
+		});
+	});
+
+	test('null clears dashboardFilter; GET falls back to defaults', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '30d', scope: '/x' } })
+			})
+		});
+		const putClear = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: null })
+			})
+		});
+		expect(putClear.status).toBe(200);
+		const body = (await putClear.json()) as Record<string, unknown>;
+		expect((body.stored as { dashboardFilter: unknown }).dashboardFilter).toBeNull();
+		// Subsequent GET: source = default, effective = 7d/null.
+		const getResp = settingsRoute.GET({});
+		expect(getResp.status).toBe(200);
+		const getBody = (await getResp.json()) as Record<string, unknown>;
+		expect((getBody.source as { dashboardFilter: unknown }).dashboardFilter).toBe('default');
+		expect((getBody.dashboardFilter as { period: string; scope: null }).period).toBe('7d');
+		expect((getBody.dashboardFilter as { period: string; scope: null }).scope).toBeNull();
+	});
+
+	test('invalid period → 400 {error, field: "dashboardFilter"}', async () => {
+		for (const payload of [
+			{ dashboardFilter: { period: 'bogus', scope: null } },
+			{ dashboardFilter: { period: '7d', scope: 42 } },
+			{ dashboardFilter: { period: 7, scope: null } },
+			{ dashboardFilter: '7d' }
+		] as Record<string, unknown>[]) {
+			const putResp = await settingsRoute.PUT({
+				request: new Request('http://localhost/api/settings', {
+					method: 'PUT',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(payload)
+				})
+			});
+			expect(putResp.status).toBe(400);
+			const body = (await putResp.json()) as { error: string; field?: string };
+			expect(body.field).toBe('dashboardFilter');
+		}
+	});
+
+	test('NUL or oversized scope → 400 {error, field: "dashboardFilter"}', async () => {
+		const putRespNul = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '7d', scope: '/evil\x00dir' } })
+			})
+		});
+		expect(putRespNul.status).toBe(400);
+		const bodyNul = (await putRespNul.json()) as { error: string; field?: string };
+		expect(bodyNul.field).toBe('dashboardFilter');
+
+		const long = 'a'.repeat(5000);
+		const putRespLong = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '7d', scope: long } })
+			})
+		});
+		expect(putRespLong.status).toBe(400);
+		const bodyLong = (await putRespLong.json()) as { error: string; field?: string };
+		expect(bodyLong.field).toBe('dashboardFilter');
+	});
+
+	test('malformed input does NOT corrupt the existing settings file', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		// Seed a valid state.
+		await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '7d', scope: null } })
+			})
+		});
+		const before = readFileSync(SETTINGS_FILE, 'utf8').trim();
+
+		// Now send malformed input.
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: 'bad', scope: null } })
+			})
+		});
+		expect(putResp.status).toBe(400);
+		// File must be byte-identical — no partial write.
+		expect(readFileSync(SETTINGS_FILE, 'utf8').trim()).toBe(before);
+	});
+
+	test('on-disk shape: version:2 + dashboardFilter key present after PUT', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardFilter: { period: '30d', scope: '/repo/a' } })
+			})
+		});
+		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
+		expect(disk.version).toBe(2);
+		expect(disk.dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+	});
+
+	test('hand-edited invalid filter in the file degrades to defaults on read', async () => {
+		const dir = join(tempDir, 'filter-degrade');
+		mkdirSync(dir, { recursive: true });
+		const badFile = join(dir, 'settings.json');
+		writeFileSync(
+			badFile,
+			JSON.stringify({ version: 2, dashboardFilter: { period: 'bogus', scope: '/x' } }),
+			'utf8'
+		);
+		const orig = process.env.SETTINGS_FILE;
+		process.env.SETTINGS_FILE = badFile;
+		try {
+			const freshRoute = (await import(spec('./+server.ts') + '?bust=' + crypto.randomUUID())) as {
+				GET: (event: unknown) => Response;
+			};
+			const resp = freshRoute.GET({});
+			expect(resp.status).toBe(200);
+			const body = (await resp.json()) as Record<string, unknown>;
+			// Invalid filter degrades to default.
+			const src = body.source as Record<string, unknown>;
+			expect(src.dashboardFilter).toBe('default');
+			const filter = body.dashboardFilter as { period: string; scope: null };
+			expect(filter.period).toBe('7d');
+			expect(filter.scope).toBeNull();
+		} finally {
+			if (orig === undefined) delete process.env.SETTINGS_FILE;
+			else process.env.SETTINGS_FILE = orig;
+		}
+	});
+
+	test('GET echo shape: dashboardFilter object / stored source enum', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		const resp = settingsRoute.GET({});
+		expect(resp.status).toBe(200);
+		const body = (await resp.json()) as Record<string, unknown>;
+		const filter = body.dashboardFilter as { period: string; scope: null | string };
+		expect(typeof filter.period).toBe('string');
+		expect(filter.scope).toBeNull();
+		expect((body.stored as Record<string, unknown>).dashboardFilter).toBeNull();
+		expect((body.source as Record<string, unknown>).dashboardFilter).toBe('default');
+	});
+});

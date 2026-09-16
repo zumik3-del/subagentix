@@ -14,6 +14,7 @@
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
 	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
+	import { DEFAULT_FILTER } from './filter';
 	import type { WidgetLoaders } from './widget';
 	import WidgetHost from './WidgetHost.svelte';
 
@@ -33,8 +34,6 @@
 		/** Opens the size-settings modal for a widget id (task #449). */
 		onWidgetSettings?: (id: WidgetId) => void;
 	}
-
-	const DEFAULT_FILTER: DashboardFilter = { period: '30d', scope: null };
 
 	let {
 		placements,

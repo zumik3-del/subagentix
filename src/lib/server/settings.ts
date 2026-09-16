@@ -10,6 +10,9 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { DEFAULT_FILTER, SCOPE_ALL } from '$lib/components/features/dashboard/filter';
+import { isDashboardPeriod } from '$lib/model/dashboard';
+import type { DashboardFilter } from '$lib/model/dashboard';
 import { DEFAULT_WIDGETS, resolvePlacements } from '$lib/widgets/registry';
 import type { WidgetPlacement } from '$lib/widgets/registry';
 
@@ -17,6 +20,9 @@ import type { WidgetPlacement } from '$lib/widgets/registry';
 export const DEFAULT_DB_PATH = '/home/opencode/.local/share/opencode/opencode.db';
 
 const MAX_DB_PATH_LENGTH = 4096;
+
+/** Defensive upper bound on a stored filter scope (a directory path). */
+const MAX_SCOPE_LENGTH = 4096;
 
 /** Defensive upper bound on a `dashboardWidgets` list (registry has far fewer). */
 const MAX_DASHBOARD_WIDGETS = 24;
@@ -26,7 +32,8 @@ export type SettingsField =
 	| 'ziptaskBaseUrl'
 	| 'ziptaskEnabled'
 	| 'agentsPath'
-	| 'dashboardWidgets';
+	| 'dashboardWidgets'
+	| 'dashboardFilter';
 
 export interface StoredSettings {
 	dbPath?: string | null;
@@ -34,6 +41,7 @@ export interface StoredSettings {
 	ziptaskEnabled?: boolean | null;
 	agentsPath?: string | null;
 	dashboardWidgets?: WidgetPlacement[] | null;
+	dashboardFilter?: DashboardFilter | null;
 }
 
 /** Validation failure carrying the offending field for the 400 API contract. */
@@ -178,6 +186,58 @@ export function normaliseDashboardWidgets(value: unknown): WidgetPlacement[] {
 	return resolvePlacements(value);
 }
 
+/**
+ * Validate/normalise a `dashboardFilter` value; throws `SettingsValidationError`.
+ *
+ * The pair must be an object with a known period preset and a scope that is
+ * either `null`, a string or the `all`/blank sentinel (both meaning every
+ * directory, normalised to `null`). A NUL or an oversized scope is rejected so
+ * a malformed payload never reaches disk; known-directory membership is not
+ * checked here (the store has no DB access) — `parseFilter` drops an unknown
+ * stored scope when it builds the filter.
+ */
+export function normaliseDashboardFilter(value: unknown): DashboardFilter {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+		throw new SettingsValidationError(
+			'dashboardFilter must be a { period, scope } object.',
+			'dashboardFilter'
+		);
+	}
+	const record = value as Record<string, unknown>;
+	const period = record.period;
+	if (!isDashboardPeriod(period)) {
+		throw new SettingsValidationError(
+			'dashboardFilter.period must be a known period preset.',
+			'dashboardFilter'
+		);
+	}
+	const rawScope = record.scope;
+	let scope: string | null;
+	if (rawScope === null) {
+		scope = null;
+	} else if (typeof rawScope === 'string') {
+		if (rawScope.includes('\0')) {
+			throw new SettingsValidationError(
+				'dashboardFilter.scope must not contain NUL characters.',
+				'dashboardFilter'
+			);
+		}
+		if (rawScope.length > MAX_SCOPE_LENGTH) {
+			throw new SettingsValidationError(
+				`dashboardFilter.scope must be at most ${MAX_SCOPE_LENGTH} characters.`,
+				'dashboardFilter'
+			);
+		}
+		scope = rawScope === '' || rawScope === SCOPE_ALL ? null : rawScope;
+	} else {
+		throw new SettingsValidationError(
+			'dashboardFilter.scope must be a string or null.',
+			'dashboardFilter'
+		);
+	}
+	return { period, scope };
+}
+
 /** Pick the known keys off a parsed file, dropping values that fail validation. */
 function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 	const out: StoredSettings = {};
@@ -210,6 +270,13 @@ function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 			out.dashboardWidgets = normaliseDashboardWidgets(raw.dashboardWidgets);
 		} catch {
 			// A hand-edited invalid list degrades to the registry defaults.
+		}
+	}
+	if (raw.dashboardFilter !== null && typeof raw.dashboardFilter === 'object') {
+		try {
+			out.dashboardFilter = normaliseDashboardFilter(raw.dashboardFilter);
+		} catch {
+			// A hand-edited invalid filter degrades to the first-visit default.
 		}
 	}
 	return out;
@@ -270,6 +337,7 @@ function writeSettingsFile(settings: StoredSettings): void {
 	if (settings.ziptaskEnabled !== undefined) payload.ziptaskEnabled = settings.ziptaskEnabled;
 	if (settings.agentsPath !== undefined) payload.agentsPath = settings.agentsPath;
 	if (settings.dashboardWidgets !== undefined) payload.dashboardWidgets = settings.dashboardWidgets;
+	if (settings.dashboardFilter !== undefined) payload.dashboardFilter = settings.dashboardFilter;
 	const tmp = `${file}.tmp-${process.pid}`;
 	writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
 	renameSync(tmp, file);
@@ -300,6 +368,10 @@ export function updateStoredSettings(patch: StoredSettings): StoredSettings {
 	if (Object.prototype.hasOwnProperty.call(patch, 'dashboardWidgets')) {
 		next.dashboardWidgets =
 			patch.dashboardWidgets === null ? null : normaliseDashboardWidgets(patch.dashboardWidgets);
+	}
+	if (Object.prototype.hasOwnProperty.call(patch, 'dashboardFilter')) {
+		next.dashboardFilter =
+			patch.dashboardFilter === null ? null : normaliseDashboardFilter(patch.dashboardFilter);
 	}
 	writeSettingsFile(next);
 	cachedPath = settingsFilePath();
@@ -346,6 +418,16 @@ export function resolveAgentsPath(): string | null {
  */
 export function resolveDashboardWidgets(): WidgetPlacement[] {
 	return resolvePlacements(getStoredSettings().dashboardWidgets ?? DEFAULT_WIDGETS);
+}
+
+/**
+ * Effective dashboard filter preference: stored pair -> {@link DEFAULT_FILTER}
+ * (first visit). There is no environment layer — this is UI state. A cleared
+ * override (`null`) falls back to the default, exactly like the widget
+ * selection; the stored value was validated on read.
+ */
+export function resolveDashboardFilter(): DashboardFilter {
+	return { ...(getStoredSettings().dashboardFilter ?? DEFAULT_FILTER) };
 }
 
 /** Subscribe to successful settings writes; returns an unsubscribe function. */

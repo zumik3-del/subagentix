@@ -706,8 +706,8 @@ describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
 				// Filter selector: period select + project select.
 				expect(page.body).toMatch(/<select[^>]*aria-label="Period"/);
 				expect(page.body).toMatch(/<select[^>]*aria-label="Project"/);
-				// Default period is 30d, default scope is "all" (every directory).
-				expect(page.body).toContain('value="30d"');
+				// Default period is 7d (task #457), default scope is "all" (every directory).
+				expect(page.body).toContain('value="7d"');
 				expect(page.body).toContain('value="all"');
 				// Default widget selection renders skeletons (6 defaults).
 				expect(countElementClasses(page.body, 'skeleton-widget')).toBe(6);
@@ -770,8 +770,8 @@ describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
 			try {
 				const page = await getHtml(server.base, '/?period=invalid&scope=/ghost');
 				expect(page.status).toBe(200);
-				// Unknown period -> DEFAULT_PERIOD (30d); unknown scope -> null (all).
-				expect(page.body).toContain('value="30d"');
+				// Unknown period -> DEFAULT_PERIOD (7d); unknown scope -> null (all).
+				expect(page.body).toContain('value="7d"');
 				expect(page.body).toContain('value="all"');
 			} finally {
 				await server.stop();
@@ -820,6 +820,81 @@ describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
 				expect(page.body).toContain('Cost &amp; tokens');
 				expect(page.body).toContain('Top tools');
 				expect(countElementClasses(page.body, 'skeleton-widget')).toBe(2);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('stored dashboardFilter renders the stored period as selected in SSR', async () => {
+			const dir = tempDir('subagentix-dashboard-filter-stored-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			// Persist a stored filter preference (simulates a prior manual selector change).
+			writeFileSync(
+				`${dbPath}.settings.json`,
+				JSON.stringify({ version: 2, dashboardFilter: { period: '30d', scope: null } }),
+				'utf8'
+			);
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+				// The stored 30d period should be selected in the SSR markup.
+				expect(page.body).toContain('value="30d"');
+				expect(page.body).toContain('value="all"');
+				// The selected option should carry the selected attribute.
+				expect(page.body).toMatch(/<option value="30d"[^>]*selected/);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('URL period wins over stored dashboardFilter in SSR', async () => {
+			const dir = tempDir('subagentix-dashboard-filter-url-wins-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			// Persist a stored 90d preference.
+			writeFileSync(
+				`${dbPath}.settings.json`,
+				JSON.stringify({ version: 2, dashboardFilter: { period: '90d', scope: null } }),
+				'utf8'
+			);
+
+			const server = await startServer(dbPath);
+			try {
+				// URL explicitly asks for 7d — it must win over the stored 90d.
+				const page = await getHtml(server.base, '/?period=7d');
+				expect(page.status).toBe(200);
+				expect(page.body).toContain('value="7d"');
+				// The 7d option must be the selected one.
+				expect(page.body).toMatch(/<option value="7d"[^>]*selected/);
+				// The stored 90d option must NOT be selected.
+				expect(page.body).not.toMatch(/<option value="90d"[^>]*selected/);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('deep-link URL with unknown scope degrades stored scope to all-projects', async () => {
+			const dir = tempDir('subagentix-dashboard-filter-scope-degrade-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			writeFileSync(
+				`${dbPath}.settings.json`,
+				JSON.stringify({ version: 2, dashboardFilter: { period: '7d', scope: '/deleted-dir' } }),
+				'utf8'
+			);
+
+			const server = await startServer(dbPath);
+			try {
+				// No explicit scope in URL -> stored scope, but /deleted-dir is unknown so it degrades to all.
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+				// The stored 7d period is still honoured (it is valid).
+				expect(page.body).toMatch(/<option value="7d"[^>]*selected/);
+				// Scope degrades to all (null).
+				expect(page.body).toMatch(/<option value="all"[^>]*selected/);
 			} finally {
 				await server.stop();
 			}

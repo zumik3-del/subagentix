@@ -6,8 +6,9 @@
 	 * and composes the header + responsive grid. The header's `actions` slot
 	 * hosts the global period/project selector (#415) and the "Widgets" picker
 	 * button (#414). The filter is a prop with a default so the shell renders
-	 * standalone; the landing page supplies it from URL state and receives every
-	 * selector change through `onFilterChange` (no persistence here). Each
+	 * standalone; the landing page supplies it from URL state (falling back to
+	 * the stored preference) and receives every selector change through
+	 * `onFilterChange` — the shell itself never persists the filter (#457). Each
 	 * selected widget mounts lazily and fetches its own data through the grid's
 	 * loaders, re-fetching whenever the filter prop changes (tasks #410/#415).
 	 *
@@ -27,13 +28,11 @@
 	import WidgetGrid from './WidgetGrid.svelte';
 	import WidgetSettings from './WidgetSettings.svelte';
 	import WidgetsModal from './WidgetsModal.svelte';
-	import { DEFAULT_PERIOD, type FilterOption } from './filter';
+	import { DEFAULT_FILTER, type FilterOption } from './filter';
 	import { WIDGET_LOADERS } from './loaders';
 	import { updatePlacement } from './picker';
 	import { createCoalescingWriter, saveDashboardWidgets } from './save';
 	import type { WidgetSizePatch } from './widget';
-
-	const DEFAULT_FILTER: DashboardFilter = { period: DEFAULT_PERIOD, scope: null };
 
 	interface Props {
 		/** Selected widget placements, already normalised by the settings store. */
@@ -78,7 +77,7 @@
 
 	// One shared writer for the gear path: rapid size changes collapse into the
 	// last one, and a failure restores the last server-confirmed placements.
-	const writer = createCoalescingWriter(async (next) => {
+	const writer = createCoalescingWriter<readonly WidgetPlacement[]>(async (next) => {
 		try {
 			const saved = await saveDashboardWidgets(next);
 			lastSaved = saved;

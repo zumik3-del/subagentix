@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { createCoalescingWriter, saveDashboardWidgets } from './save';
+import { createCoalescingWriter, saveDashboardWidgets, saveDashboardFilter } from './save';
 import type { WidgetPlacement } from '$lib/widgets/registry';
+import type { DashboardFilter } from '$lib/model/dashboard';
 
 /**
  * Unit tests for the shared dashboard widget persistence helpers (task #449).
@@ -130,6 +131,118 @@ describe('createCoalescingWriter()', () => {
 		const calls: WidgetPlacement[][] = [];
 		function save(_placements: readonly WidgetPlacement[]): void | Promise<void> {
 			calls.push([]);
+		}
+
+		const writer = createCoalescingWriter(save);
+		await writer.idle();
+		expect(calls).toHaveLength(0);
+	});
+});
+
+// --- saveDashboardFilter ------------------------------------------------------
+
+describe('saveDashboardFilter()', () => {
+	test('returns the server-normalised filter on a successful PUT', async () => {
+		const filter: DashboardFilter = { period: '7d', scope: '/repo/a' };
+		const stub = async () =>
+			new Response(
+				JSON.stringify({
+					dashboardFilter: { period: '7d', scope: '/repo/a' }
+				}),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			);
+		const result = await saveDashboardFilter(filter, stub as unknown as typeof fetch);
+		expect(result).toEqual(filter);
+	});
+
+	test('falls back to the sent filter when the server response omits dashboardFilter', async () => {
+		const filter: DashboardFilter = { period: '30d', scope: null };
+		const stub = async () =>
+			new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+		const result = await saveDashboardFilter(filter, stub as unknown as typeof fetch);
+		expect(result).toEqual(filter);
+	});
+
+	test('falls back to the sent filter when the server returns a malformed dashboardFilter', async () => {
+		const filter: DashboardFilter = { period: '7d', scope: '/repo/a' };
+		const stub = async () =>
+			new Response(
+				JSON.stringify({ dashboardFilter: { period: 'invalid', scope: 42 } }),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			);
+		const result = await saveDashboardFilter(filter, stub as unknown as typeof fetch);
+		// savedFilter rejects invalid period (falls back to sent.period) and non-string scope (falls back to null).
+		expect(result).toEqual({ period: '7d', scope: null });
+	});
+
+	test('throws an Error carrying the server error on non-OK response', async () => {
+		const filter: DashboardFilter = { period: '7d', scope: null };
+		const stub = async () =>
+			new Response(
+				JSON.stringify({ error: 'rate limited' }),
+				{ status: 429, headers: { 'content-type': 'application/json' } }
+			);
+		await expect(saveDashboardFilter(filter, stub as unknown as typeof fetch)).rejects.toThrow(/rate limited/);
+	});
+
+	test('falls back to a status-based message when the non-OK body is not JSON', async () => {
+		const filter: DashboardFilter = { period: '7d', scope: null };
+		const stub = async () => new Response('internal server error', { status: 500 });
+		await expect(saveDashboardFilter(filter, stub as unknown as typeof fetch)).rejects.toThrow(/500/);
+	});
+});
+
+// --- createCoalescingWriter with DashboardFilter ------------------------------
+
+describe('createCoalescingWriter() with DashboardFilter', () => {
+	test('rapid selector changes collapse into one trailing save with the latest filter', async () => {
+		const calls: DashboardFilter[] = [];
+		function save(filter: DashboardFilter): void | Promise<void> {
+			calls.push({ ...filter });
+			return new Promise<void>((resolve) => setTimeout(resolve, 50));
+		}
+
+		const writer = createCoalescingWriter<DashboardFilter>(save);
+		const base: DashboardFilter = { period: '7d', scope: null };
+
+		writer.push(base);
+		writer.push({ period: '30d', scope: '/a' });
+		writer.push({ period: '90d', scope: '/b' });
+		writer.push({ period: 'all', scope: null });
+
+		await writer.idle();
+		expect(calls).toHaveLength(2);
+		expect(calls[0]!).toEqual(base);
+		expect(calls[1]!).toEqual({ period: 'all', scope: null });
+	});
+
+	test('a rejected filter save is swallowed; later pushes still proceed', async () => {
+		const calls: DashboardFilter[] = [];
+		let run = 0;
+		function save(filter: DashboardFilter): void | Promise<void> {
+			calls.push({ ...filter });
+			run++;
+			if (run === 1) return Promise.reject(new Error('save failed'));
+			return Promise.resolve();
+		}
+
+		const writer = createCoalescingWriter<DashboardFilter>(save);
+		const base: DashboardFilter = { period: '7d', scope: null };
+
+		writer.push(base);
+		await Bun.sleep(10);
+		writer.push({ period: '30d', scope: '/x' });
+		await writer.idle();
+
+		expect(calls).toHaveLength(2);
+		expect(calls[0]!).toEqual(base);
+		expect(calls[1]!).toEqual({ period: '30d', scope: '/x' });
+	});
+
+	test('an idle writer with no filter changes issues no request', async () => {
+		const calls: DashboardFilter[] = [];
+		function save(_filter: DashboardFilter): void | Promise<void> {
+			calls.push({ period: '7d', scope: null });
 		}
 
 		const writer = createCoalescingWriter(save);

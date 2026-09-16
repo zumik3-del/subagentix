@@ -65,14 +65,16 @@ describe('GET /api/settings', () => {
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
 			agentsPath: null,
-			dashboardWidgets: null
+			dashboardWidgets: null,
+			dashboardFilter: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'default',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
 			agentsPath: 'none',
-			dashboardWidgets: 'default'
+			dashboardWidgets: 'default',
+			dashboardFilter: 'default'
 		});
 	});
 
@@ -97,14 +99,16 @@ describe('GET /api/settings', () => {
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
 			agentsPath: null,
-			dashboardWidgets: null
+			dashboardWidgets: null,
+			dashboardFilter: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'file',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
 			agentsPath: 'none',
-			dashboardWidgets: 'default'
+			dashboardWidgets: 'default',
+			dashboardFilter: 'default'
 		});
 	});
 });
