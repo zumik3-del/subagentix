@@ -603,39 +603,40 @@ describe('perf guard — assembly is O(calls + requests), not O(calls × request
 
 describe('Action.role is mapped from the source message role', () => {
 	const model = buildTurnModel('perfRoot', 'u1')!;
+	const actions = model.actions ?? [];
 
 	test('action parts on root assistant message carry role=assistant', () => {
 		for (const id of ['txt-assist', 'patch1', 'reason1', 'file1', 'agent1']) {
-			const action = model.actions.find((a) => a.id === id);
-			expect(action).toBeDefined(`missing action ${id}`);
+			const action = actions.find((a) => a.id === id);
+			expect(action, `missing action ${id}`).toBeDefined();
 			expect(action!.role).toBe('assistant');
 		}
 	});
 
 	test('action parts on child user messages carry role=user', () => {
 		for (let i = 0; i < 5; i++) {
-			const action = model.actions.find((a) => a.id === `catxt-u${i}`);
-			expect(action).toBeDefined(`missing action catxt-u${i}`);
+			const action = actions.find((a) => a.id === `catxt-u${i}`);
+			expect(action, `missing action catxt-u${i}`).toBeDefined();
 			expect(action!.role).toBe('user');
 		}
 	});
 
 	test('action parts on child assistant messages carry role=assistant', () => {
 		for (let i = 0; i < 5; i++) {
-			const action = model.actions.find((a) => a.id === `catxt-a${i}`);
-			expect(action).toBeDefined(`missing action catxt-a${i}`);
+			const action = actions.find((a) => a.id === `catxt-a${i}`);
+			expect(action, `missing action catxt-a${i}`).toBeDefined();
 			expect(action!.role).toBe('assistant');
 		}
 	});
 
 	test('orphan action part (messageId absent from session messages) has role=null', () => {
-		const action = model.actions.find((a) => a.id === 'orphan-child-txt');
+		const action = actions.find((a) => a.id === 'orphan-child-txt');
 		expect(action).toBeDefined();
 		expect(action!.role).toBeNull();
 	});
 
 	test('compaction actions always have role=null', () => {
-		const compactions = model.actions.filter((a) => a.kind === 'compaction');
+		const compactions = actions.filter((a) => a.kind === 'compaction');
 		expect(compactions.length).toBeGreaterThan(0);
 		for (const action of compactions) {
 			expect(action.role).toBeNull();
