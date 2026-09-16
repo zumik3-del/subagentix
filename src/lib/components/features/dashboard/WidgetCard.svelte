@@ -79,9 +79,14 @@
 
 <style>
 	.widget-card {
-		/* Stretch to the grid cell assigned by `WidgetGrid` (task #438). */
+		/* Stretch to the grid cell assigned by `WidgetGrid` (task #438). The
+		   `overflow` clip is the hard guarantee that a body can never paint past
+		   the rounded contour, even mid-measurement (task #444); the tighter
+		   `gap` is the measured header/body spacing the fit budget assumes. */
 		height: 100%;
+		gap: var(--space-3);
 		min-width: 0;
+		overflow: hidden;
 	}
 
 	.widget-card__head {
@@ -106,6 +111,7 @@
 		gap: var(--space-3);
 		min-height: 0;
 		min-width: 0;
+		overflow: hidden;
 	}
 
 	/* Refresh control feedback while a fetch is in flight (task #438): CSS-only

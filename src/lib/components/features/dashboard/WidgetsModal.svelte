@@ -3,8 +3,8 @@
 	 * Widget picker dialog (dashboard Phase 5, task #414; resizable in #438).
 	 *
 	 * Lists every registry widget in registry order with a toggle, and for each
-	 * checked widget a width (1–4 quarter-width blocks) and height (1–8 rows)
-	 * control. Drafts the selection + sizes locally and persists them through
+	 * checked widget a width (1–4 quarter-width blocks) and height control
+	 * (`def.minHeight`–8 rows). Drafts the selection + sizes locally and persists them through
 	 * `PUT /api/settings` on Apply. Cancel (and Escape / backdrop click)
 	 * discards the draft; the parent owns `open` and applies the saved
 	 * selection. Focus handling follows docs/ui-standards.md §9: dialog
@@ -16,7 +16,7 @@
 		DEFAULT_WIDGETS,
 		WIDGET_DEFS,
 		WIDGET_MAX_HEIGHT,
-		WIDGET_MIN_HEIGHT,
+		findWidgetDef,
 		resolvePlacements
 	} from '$lib/widgets/registry';
 	import type { WidgetId, WidgetPlacement } from '$lib/widgets/registry';
@@ -73,7 +73,7 @@
 	}
 
 	function stepHeight(id: WidgetId, delta: number): void {
-		const current = draftById.get(id)?.height ?? WIDGET_MIN_HEIGHT;
+		const current = draftById.get(id)?.height ?? findWidgetDef(id).minHeight;
 		draft = updatePlacement(draft, id, { height: current + delta });
 	}
 
@@ -205,8 +205,8 @@
 														type="button"
 														class="widget-step"
 														aria-label={`Decrease ${def.title} height`}
-														disabled={saving || placement.height <= WIDGET_MIN_HEIGHT}
-														onclick={() => stepHeight(def.id, -1)}
+													disabled={saving || placement.height <= def.minHeight}
+													onclick={() => stepHeight(def.id, -1)}
 													>
 														−
 													</button>

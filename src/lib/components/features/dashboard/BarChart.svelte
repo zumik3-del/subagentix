@@ -8,9 +8,16 @@
 	 * `aria-label`; the row's label and numeric value are real text (the
 	 * non-graphical fallback). The bar scales with its cell, so the chart is
 	 * responsive and the labels stay crisp.
+	 *
+	 * The list is trimmed to the whole rows the card height can show (task
+	 * #444): the figure fills its body and `useRowFit` measures it after mount.
+	 * SSR and the first client paint render every supplied row, so hydration
+	 * cannot mismatch; the bar scale is computed from the untrimmed rows, so
+	 * resizing the card never re-scales the bars.
 	 */
 	import { linearScale, topN } from '$lib/model/chart';
 	import { formatNumber } from '$lib/model/format';
+	import { useRowFit } from './fit.svelte';
 
 	/** One ranked bar before truncation. */
 	interface BarDatum {
@@ -33,7 +40,7 @@
 		bars: readonly BarDatum[];
 		/** Accessible caption, e.g. "Top projects". */
 		label: string;
-		/** Maximum bars rendered; defaults to 8. */
+		/** Upper bound on ranked rows; defaults to every supplied bar. */
 		limit?: number;
 		/** Value formatter for the row and its `aria-label`; defaults to `formatNumber`. */
 		formatValue?: (value: number) => string;
@@ -44,25 +51,31 @@
 	let {
 		bars,
 		label,
-		limit = 8,
+		limit = Number.POSITIVE_INFINITY,
 		formatValue = formatNumber,
 		colorVar = '--chart-5'
 	}: Props = $props();
 
-	/** Highest-value rows first, capped at `limit`. */
+	/** Highest-value rows first, capped at `limit` (all rows by default). */
 	let rows = $derived(topN(bars, limit, (bar) => bar.value));
 
-	/** Largest rendered value; a non-positive peak means there is nothing to draw. */
+	/** Largest supplied value; a non-positive peak means there is nothing to draw. */
 	let peak = $derived(rows.reduce((max, row) => Math.max(max, row.value), 0));
 
 	/** Value → bar width in `[0, 100]`; a zero peak maps every row to `0`. */
 	let percent = $derived(linearScale([0, peak], [0, 100]));
+
+	/** Clipped list host; fills the body so its height is the row budget. */
+	let list = $state<HTMLElement | null>(null);
+	const fit = useRowFit({ container: () => list, total: () => rows.length });
+	/** Whole rows that fit; SSR sees every row (no measurement yet). */
+	let visible = $derived(rows.slice(0, fit.budget));
 </script>
 
 {#if rows.length === 0 || peak <= 0}
 	<p class="bar-chart__empty">No data for this period.</p>
 {:else}
-	<figure class="bar-chart">
+	<figure class="bar-chart" bind:this={list}>
 		<table class="bar-chart__table">
 			<caption class="sr-only">{label}</caption>
 			<thead class="sr-only">
@@ -73,7 +86,7 @@
 				</tr>
 			</thead>
 			<tbody>
-				{#each rows as row}
+				{#each visible as row}
 					<tr>
 						<th scope="row" class="bar-chart__label" title={row.title ?? row.label}>
 							{row.label}
@@ -110,9 +123,16 @@
 {/if}
 
 <style>
+	/* Fills the card body so `clientHeight` is the available row budget; the
+	   hard `overflow` clip is a mid-measurement guarantee, not the trimming. */
 	.bar-chart {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
 		margin: 0;
 		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
 	}
 
 	.bar-chart__table {

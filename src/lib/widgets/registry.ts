@@ -42,6 +42,15 @@ export function clampHeight(value: number): number {
 	return Math.min(WIDGET_MAX_HEIGHT, Math.max(WIDGET_MIN_HEIGHT, Math.round(value)));
 }
 
+/**
+ * Clamp a height to this widget's own range: `[def.minHeight, WIDGET_MAX_HEIGHT]`.
+ * The per-widget minimum keeps every body legible at the smallest allowed size,
+ * so a persisted height below it is raised rather than rendered broken.
+ */
+export function clampWidgetHeight(id: WidgetId, value: number): number {
+	return Math.max(findWidgetDef(id).minHeight, clampHeight(value));
+}
+
 /** One persisted/grid placement for a widget: id plus its size. */
 export interface WidgetPlacement {
 	id: WidgetId;
@@ -61,6 +70,8 @@ export interface WidgetDef {
 	width: number;
 	/** Registry-default height in 6rem rows (1–8). */
 	height: number;
+	/** Smallest height (rows) at which this widget's body stays legible. */
+	minHeight: number;
 	/** Dominant aggregation source tier (`S` | `M` | `P`). */
 	tier: WidgetTier;
 	/** `true` when the widget is part of the first-visit default selection. */
@@ -81,6 +92,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Cost & tokens',
 		width: 4,
 		height: 2,
+		minHeight: 2,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/kpi'
@@ -90,6 +102,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Sessions per day',
 		width: 2,
 		height: 3,
+		minHeight: 3,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/sessions-per-day'
@@ -99,6 +112,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Cost per day',
 		width: 2,
 		height: 3,
+		minHeight: 3,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/cost-per-day'
@@ -108,6 +122,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Top tools',
 		width: 2,
 		height: 3,
+		minHeight: 2,
 		tier: 'P',
 		defaultOn: true,
 		source: '/api/dashboard/top-tools'
@@ -117,6 +132,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Agent distribution',
 		width: 1,
 		height: 3,
+		minHeight: 2,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/agent-distribution'
@@ -126,6 +142,7 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		title: 'Top projects',
 		width: 2,
 		height: 3,
+		minHeight: 1,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/top-projects'
@@ -184,7 +201,8 @@ function parsePlacement(entry: unknown): { id: WidgetId; width?: number; height?
  * `{id,width,height}` objects, drops unknown ids, collapses duplicates (first
  * occurrence wins) and returns registry order regardless of input order. A
  * missing or non-numeric size falls back to the registry default; numeric sizes
- * are clamped into range. Never throws.
+ * are clamped into the bound range (height against the per-widget minimum).
+ * Never throws.
  */
 export function resolvePlacements(raw: unknown): WidgetPlacement[] {
 	if (!Array.isArray(raw)) return [];
@@ -200,7 +218,7 @@ export function resolvePlacements(raw: unknown): WidgetPlacement[] {
 		return {
 			id: def.id,
 			width: override?.width === undefined ? def.width : clampWidth(override.width),
-			height: override?.height === undefined ? def.height : clampHeight(override.height)
+			height: override?.height === undefined ? def.height : clampWidgetHeight(def.id, override.height)
 		};
 	});
 }

@@ -7,6 +7,10 @@
 	 * show the windowed cost, token total and session count; the stacked mix bar
 	 * plus its legend break the token total down by category. Bar geometry uses
 	 * `linearScale` from `model/chart.ts` — no chart library, no raw-HTML injection.
+	 *
+	 * Block-level fitting (task #444): the tiles always render, and the mix bar /
+	 * token breakdown are dropped whole when the measured remaining height cannot
+	 * hold them, so a short card never shows a half-cut block.
 	 */
 	import { linearScale } from '$lib/model/chart';
 	import { formatCost, formatNumber, tokenBreakdown } from '$lib/model/format';
@@ -36,13 +40,13 @@
 
 	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
 
-	const state = useWidgetData<KpiData>({
+	const widgetData = useWidgetData<KpiData>({
 		source: () => widget.source,
 		filter: () => filter,
 		refreshToken: () => refreshToken
 	});
 
-	let tokens = $derived(state.data?.tokens ?? EMPTY_TOKENS);
+	let tokens = $derived(widgetData.data?.tokens ?? EMPTY_TOKENS);
 	let tokenTotal = $derived(total(tokens));
 
 	/**
@@ -76,24 +80,59 @@
 			.map((row) => `${row.label} ${tokenTotal > 0 ? Math.round((row.value / tokenTotal) * 100) : 0}%`)
 			.join(', ')}`
 	);
+
+	/** Card body host; measured after mount to decide which blocks fit. */
+	let root = $state<HTMLElement | null>(null);
+	/** Both blocks render until the first client measurement (SSR-safe). */
+	let showMix = $state(true);
+	let showBreakdown = $state(true);
+
+	$effect(() => {
+		const element = root;
+		if (!element) return;
+		const tiles = element.querySelector<HTMLElement>('.kpi__tiles');
+		const mixBar = element.querySelector<HTMLElement>('.kpi__mix');
+		const breakdown = element.querySelector<HTMLElement>('.kpi__breakdown');
+		// Natural heights are captured while a block is visible and kept when it
+		// is dropped, so hiding a block cannot make it "fit" again in a loop.
+		let tilesHeight = 0;
+		let mixHeight = 0;
+		let breakdownHeight = 0;
+
+		const measure = (): void => {
+			const gap = Number.parseFloat(getComputedStyle(element).rowGap) || 0;
+			if (tiles && tiles.offsetHeight > 0) tilesHeight = tiles.offsetHeight;
+			if (mixBar && mixBar.offsetHeight > 0) mixHeight = mixBar.offsetHeight;
+			if (breakdown && breakdown.offsetHeight > 0) breakdownHeight = breakdown.offsetHeight;
+			const available = element.clientHeight;
+			showMix = available >= tilesHeight + gap + mixHeight;
+			showBreakdown = available >= tilesHeight + gap + mixHeight + gap + breakdownHeight;
+		};
+		measure();
+
+		if (typeof ResizeObserver === 'undefined') return;
+		const observer = new ResizeObserver(measure);
+		observer.observe(element);
+		return () => observer.disconnect();
+	});
 </script>
 
 <WidgetCard
 	title={widget.title}
-	status={state.status}
-	error={state.error ?? undefined}
-	refreshing={state.refreshing}
-	onRefresh={state.refresh}
+	status={widgetData.status}
+	error={widgetData.error ?? undefined}
+	refreshing={widgetData.refreshing}
+	onRefresh={widgetData.refresh}
 >
-	<div class="kpi">
+	<div class="kpi" bind:this={root}>
 		<dl class="kpi__tiles">
 			<div class="kpi__tile">
 				<dt class="kpi__tile-label">Sessions</dt>
-				<dd class="kpi__tile-value">{formatNumber(state.data?.sessions ?? 0)}</dd>
+				<dd class="kpi__tile-value">{formatNumber(widgetData.data?.sessions ?? 0)}</dd>
 			</div>
 			<div class="kpi__tile">
 				<dt class="kpi__tile-label">Cost (gross)</dt>
-				<dd class="kpi__tile-value">{formatCost(state.data?.cost ?? 0)}</dd>
+				<dd class="kpi__tile-value">{formatCost(widgetData.data?.cost ?? 0)}</dd>
 			</div>
 			<div class="kpi__tile">
 				<dt class="kpi__tile-label">Total tokens</dt>
@@ -101,45 +140,52 @@
 			</div>
 		</dl>
 
-		<div class="kpi__mix">
-			<svg
-				class="kpi__mix-svg"
-				viewBox="0 0 100 1"
-				preserveAspectRatio="none"
-				role="img"
-				aria-label={mixLabel}
-			>
-				{#each mix as row (row.label)}
-					<rect
-						class="kpi__mix-seg"
-						x={row.x}
-						y="0"
-						width={row.width}
-						height="1"
-						style={`fill:${row.color}`}
-					/>
-				{/each}
-			</svg>
-		</div>
+		{#if showMix}
+			<div class="kpi__mix">
+				<svg
+					class="kpi__mix-svg"
+					viewBox="0 0 100 1"
+					preserveAspectRatio="none"
+					role="img"
+					aria-label={mixLabel}
+				>
+					{#each mix as row (row.label)}
+						<rect
+							class="kpi__mix-seg"
+							x={row.x}
+							y="0"
+							width={row.width}
+							height="1"
+							style={`fill:${row.color}`}
+						/>
+					{/each}
+				</svg>
+			</div>
+		{/if}
 
-		<ul class="kpi__breakdown">
-			{#each mix as row (row.label)}
-				<li class="kpi__breakdown-item">
-					<span class="ui-swatch" style={`background:${row.color}`}></span>
-					<span class="kpi__breakdown-label">{row.label}</span>
-					<span class="kpi__breakdown-value">{formatNumber(row.value)}</span>
-				</li>
-			{/each}
-		</ul>
+		{#if showBreakdown}
+			<ul class="kpi__breakdown">
+				{#each mix as row (row.label)}
+					<li class="kpi__breakdown-item">
+						<span class="ui-swatch" style={`background:${row.color}`}></span>
+						<span class="kpi__breakdown-label">{row.label}</span>
+						<span class="kpi__breakdown-value">{formatNumber(row.value)}</span>
+					</li>
+				{/each}
+			</ul>
+		{/if}
 	</div>
 </WidgetCard>
 
 <style>
+	/* Fills the card body so `clientHeight` is the height the blocks share. */
 	.kpi {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		gap: var(--space-4);
 		min-width: 0;
+		min-height: 0;
 	}
 
 	.kpi__tiles {

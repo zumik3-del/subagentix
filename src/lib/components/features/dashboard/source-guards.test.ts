@@ -80,6 +80,19 @@ describe('BarChart source: no chart library import', () => {
 		expect(source).toMatch(/from ['"]\$lib\/model\/chart['"]/);
 	});
 
+	test('does not hardcode a default limit of 8 (fit is driven by useRowFit)', () => {
+		// Task #444 replaced the old `limit = 8` default with `limit = Number.POSITIVE_INFINITY`
+		// and uses `useRowFit` to trim to whole rows after mount. A hardcoded default of 8
+		// would silently ignore the per-widget minHeight contract.
+		expect(source).not.toMatch(/\blimit\s*=\s*8\b/);
+		expect(source).toMatch(/\blimit\s*=\s*Number\.POSITIVE_INFINITY\b/);
+	});
+
+	test('imports useRowFit for client-side whole-row trimming', () => {
+		expect(source).toMatch(/from ['"]\.\/fit\.svelte['"]/);
+		expect(source).toMatch(/\buseRowFit\b/);
+	});
+
 	test('each bar SVG has role="img" and aria-label', () => {
 		expect(source).toMatch(/role="img"/);
 		expect(source).toMatch(/aria-label=/);
@@ -272,6 +285,23 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 		test('prefers-reduced-motion suppresses the spinner', () => {
 			expect(source).toMatch(/@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)/);
 			expect(source).toMatch(/animation:\s*none/);
+		});
+	});
+
+	describe('WidgetCard source: body overflow clip', () => {
+		const source = readFileSync(
+			new URL('./WidgetCard.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('widget-card root has overflow: hidden to clip the body contour', () => {
+			// The hard overflow clip on the card root is the guarantee that no body
+			// can paint past the rounded contour, even mid-measurement (task #444).
+			expect(source).toMatch(/\.widget-card[^{]*\{[^}]*overflow:\s*hidden/);
+		});
+
+		test('widget-card__body has overflow: hidden as a secondary clip', () => {
+			expect(source).toMatch(/\.widget-card__body[^{]*\{[^}]*overflow:\s*hidden/);
 		});
 	});
 

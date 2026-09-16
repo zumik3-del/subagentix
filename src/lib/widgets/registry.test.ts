@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
 	DEFAULT_WIDGETS,
-	clampWidth,
 	clampHeight,
+	clampWidgetHeight,
+	clampWidth,
 	isWidgetId,
 	resolvePlacements,
 	WIDGET_DEFS,
@@ -65,6 +66,16 @@ describe('WIDGET_DEFS', () => {
 			expect(byId.get(id)?.width, id).toBe(2);
 			expect(byId.get(id)?.height, id).toBe(3);
 		}
+	});
+
+	test('per-widget minHeight matches the spec', () => {
+		const byId = new Map(WIDGET_DEFS.map((def) => [def.id, def]));
+		expect(byId.get('top-projects')?.minHeight).toBe(1);
+		expect(byId.get('top-tools')?.minHeight).toBe(2);
+		expect(byId.get('kpi')?.minHeight).toBe(2);
+		expect(byId.get('agent-distribution')?.minHeight).toBe(2);
+		expect(byId.get('sessions-per-day')?.minHeight).toBe(3);
+		expect(byId.get('cost-per-day')?.minHeight).toBe(3);
 	});
 
 	test('the optional catalog extensions are not v1 registry entries', () => {
@@ -131,6 +142,44 @@ describe('clampWidth()', () => {
 		expect(clampWidth(NaN)).toBe(WIDGET_MIN_WIDTH);
 		expect(clampWidth(Infinity)).toBe(WIDGET_MIN_WIDTH);
 		expect(clampWidth(-Infinity)).toBe(WIDGET_MIN_WIDTH);
+	});
+});
+
+describe('clampWidgetHeight()', () => {
+	test('below-minimum input clamps up to the widget minimum', () => {
+		// kpi minHeight is 2; height 0 and 1 must both raise to 2.
+		expect(clampWidgetHeight('kpi', 0)).toBe(2);
+		expect(clampWidgetHeight('kpi', 1)).toBe(2);
+		expect(clampWidgetHeight('kpi', -5)).toBe(2);
+	});
+
+	test('within the widget range returns the value unchanged', () => {
+		expect(clampWidgetHeight('kpi', 2)).toBe(2);
+		expect(clampWidgetHeight('kpi', 4)).toBe(4);
+		expect(clampWidgetHeight('kpi', 8)).toBe(8);
+	});
+
+	test('above WIDGET_MAX_HEIGHT clamps down to the global maximum', () => {
+		expect(clampWidgetHeight('kpi', 9)).toBe(WIDGET_MAX_HEIGHT);
+		expect(clampWidgetHeight('kpi', 100)).toBe(WIDGET_MAX_HEIGHT);
+	});
+
+	test('non-finite values fall back to the widget minimum', () => {
+		expect(clampWidgetHeight('kpi', NaN)).toBe(2);
+		expect(clampWidgetHeight('kpi', Infinity)).toBe(2);
+		expect(clampWidgetHeight('kpi', -Infinity)).toBe(2);
+	});
+
+	test('each widget uses its own minimum (not a global one)', () => {
+		// top-projects has minHeight=1, so height 0 raises only to 1.
+		expect(clampWidgetHeight('top-projects', 0)).toBe(1);
+		expect(clampWidgetHeight('top-projects', 1)).toBe(1);
+		// sessions-per-day has minHeight=3, so height 1 and 2 raise to 3.
+		expect(clampWidgetHeight('sessions-per-day', 0)).toBe(3);
+		expect(clampWidgetHeight('sessions-per-day', 1)).toBe(3);
+		expect(clampWidgetHeight('sessions-per-day', 2)).toBe(3);
+		// cost-per-day has minHeight=3 as well.
+		expect(clampWidgetHeight('cost-per-day', 1)).toBe(3);
 	});
 });
 
@@ -215,7 +264,8 @@ describe('resolvePlacements()', () => {
 
 	test('out-of-range sizes are clamped', () => {
 		const result = resolvePlacements([{ id: 'kpi', width: 10, height: 0 }] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 1 }]);
+		// kpi minHeight is 2, so height 0 clamps up to 2 (not the old global min of 1).
+		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
 	});
 
 	test('non-array input returns empty array', () => {
@@ -234,8 +284,8 @@ describe('resolvePlacements()', () => {
 			{ id: 'kpi', width: 1, height: 1 },
 			{ id: 'kpi', width: 4, height: 8 }
 		] as unknown as unknown[]);
-		// First occurrence wins.
-		expect(result).toEqual([{ id: 'kpi', width: 1, height: 1 }]);
+		// First occurrence wins; kpi minHeight is 2, so height 1 clamps up to 2.
+		expect(result).toEqual([{ id: 'kpi', width: 1, height: 2 }]);
 	});
 
 	test('result placements are in registry order even when objects override sizes', () => {
@@ -244,7 +294,8 @@ describe('resolvePlacements()', () => {
 			{ id: 'kpi', width: 2, height: 1 }
 		] as unknown as unknown[]);
 		expect(result.map((p) => p.id)).toEqual(['kpi', 'top-projects']);
-		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 1 });
+		// kpi minHeight is 2, so height 1 is raised to 2.
+		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 2 });
 		expect(result[1]).toEqual({ id: 'top-projects', width: 3, height: 5 });
 	});
 });

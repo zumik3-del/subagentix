@@ -573,3 +573,102 @@ test('version 2 is written on every updateStoredSettings call', async () => {
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
 	expect(disk.version).toBe(2);
 });
+
+/* ------------------------------------------------------------------ */
+/* dashboardWidgets minHeight clamping                                 */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardWidgets clamps a v2 height below the widget minimum up to it', async () => {
+	const mod = await freshSettingsModule();
+	// kpi minHeight is 2; a persisted height of 0 or 1 must raise to 2.
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 0 }])
+		[0].height
+	).toBe(2);
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 1 }])
+		[0].height
+	).toBe(2);
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 2 }])
+		[0].height
+	).toBe(2);
+});
+
+test('normaliseDashboardWidgets clamps each widget to its own minimum', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ id: 'top-projects' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'top-tools' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'agent-distribution' as WidgetPlacement['id'], width: 1, height: 0 },
+		{ id: 'sessions-per-day' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'cost-per-day' as WidgetPlacement['id'], width: 2, height: 0 }
+	] as unknown as unknown[]);
+	const byId = new Map(result.map((p) => [p.id, p]));
+	// top-projects minHeight is 1; top-tools is 2; agent-distribution is 2;
+	// sessions-per-day and cost-per-day are 3.
+	expect(byId.get('top-projects')?.height).toBe(1);
+	expect(byId.get('top-tools')?.height).toBe(2);
+	expect(byId.get('agent-distribution')?.height).toBe(2);
+	expect(byId.get('sessions-per-day')?.height).toBe(3);
+	expect(byId.get('cost-per-day')?.height).toBe(3);
+});
+
+test('a legacy string[] file resolves registry defaults (no minHeight issue)', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'legacy-min.json');
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 1, dashboardWidgets: ['kpi', 'top-projects'] }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.getStoredSettings().dashboardWidgets;
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 4, height: 2 },
+		{ id: 'top-projects', width: 2, height: 3 }
+	]);
+});
+
+test('resolveDashboardWidgets clamps a persisted v2 height below the widget minimum', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'clamp-persisted.json');
+	// Write a v2 file with a kpi height of 1 (below kpi's minHeight of 2).
+	writeFileSync(
+		file,
+		JSON.stringify({
+			version: 2,
+			dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }]
+		}),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.resolveDashboardWidgets();
+	expect(result).toHaveLength(1);
+	expect(result[0].id).toBe('kpi');
+	// Persisted height 1 is clamped up to kpi's minHeight of 2 on read.
+	expect(result[0].height).toBe(2);
+});
+
+test('the update path persists the clamped value (round-trip)', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'clamp-rt.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	// Write a kpi with height 1; the setter should clamp it to 2 before writing.
+	mod.updateStoredSettings({
+		dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }] as unknown as unknown[]
+	});
+	const readBack = mod.getStoredSettings().dashboardWidgets;
+	expect(readBack).toHaveLength(1);
+	expect(readBack![0].height).toBe(2);
+
+	// Re-import to simulate a fresh process reading the same file.
+	const mod2 = await freshSettingsModule();
+	const reRead = mod2.getStoredSettings().dashboardWidgets;
+	expect(reRead).toHaveLength(1);
+	expect(reRead![0].height).toBe(2);
+});

@@ -59,7 +59,8 @@ The landing dashboard lays its widgets out on a declarative CSS grid
   dense` (`WidgetGrid.svelte:55-64`). `row dense` lets a short widget backfill
   the gap beside a taller one.
 - **Per-widget placement.** Each `WidgetPlacement` carries `width` (1–4
-  quarter-width blocks) and `height` (1–8 rows); the grid item emits them as
+  quarter-width blocks) and `height` (`minHeight`–8 rows, see
+  [Widget sizing & overflow](#widget-sizing--overflow)); the grid item emits them as
   `data-w`/`data-h` (`WidgetGrid.svelte:48`) and numeric attribute selectors
   map them to `grid-column: span N` / `grid-row: span N`
   (`WidgetGrid.svelte:71-117`). Width `4` is a full row.
@@ -69,16 +70,82 @@ The landing dashboard lays its widgets out on a declarative CSS grid
   `grid-column: 1 / -1` regardless of `data-w` (`WidgetGrid.svelte:119-140`).
   Height spans stay valid at every breakpoint.
 - **Bounds and defaults** live in the registry: `WIDGET_MIN_WIDTH`/`MAX_WIDTH`
-  (1/4), `WIDGET_MIN_HEIGHT`/`MAX_HEIGHT` (1/8) and the per-widget default
-  `width`/`height` on each `WidgetDef` (`src/lib/widgets/registry.ts:26-31,78-133`).
-  `clampWidth`/`clampHeight` round and clamp, mapping a non-finite value to the
-  minimum (`registry.ts:33-43`).
+  (1/4) and `WIDGET_MIN_HEIGHT`/`MAX_HEIGHT` (1/8)
+  (`src/lib/widgets/registry.ts:27-31`); each `WidgetDef` also carries its own
+  default `width`/`height` and a per-widget `minHeight`
+  (`registry.ts:89-150`). `clampWidth`/`clampHeight` round and clamp to the
+  global bounds, mapping a non-finite value to the global minimum
+  (`registry.ts:34-43`); `clampWidgetHeight(id, value)` additionally raises the
+  result to that widget's own `minHeight`, so the effective height range is
+  `[minHeight, 8]` (`registry.ts:50-52`).
 - **Refresh control.** `WidgetCard` renders an optional `.ui-icon-btn` refresh
   button whose icon spins while a fetch is in flight
   (`class:is-spinning={refreshing || status === 'loading'}`,
   `WidgetCard.svelte:43-55`); the spin is CSS-only keyframes
-  (`widget-refresh-spin`, `WidgetCard.svelte:111-121`) and is suppressed under
-  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:123-127`).
+  (`widget-refresh-spin`, `WidgetCard.svelte:119-127`) and is suppressed under
+  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:129-133`).
+
+### Widget sizing & overflow
+
+The contract the grid, the registry and the widget bodies share (task #444):
+how tall a body actually is, how far a widget may shrink, and what a too-small
+card does with content that no longer fits.
+
+- **Row geometry.** Rows are `6rem` and the column gap is `--space-4` (1rem)
+  (`WidgetGrid.svelte:57-60`), so a placement of `h` rows spans
+  `6h + (h − 1)` = `7h − 1rem`. The card chrome consumes `4.25rem`: the
+  `--space-4` (1rem) padding top + bottom (`src/app.css:601`), the `--space-6`
+  (1.5rem) header (`WidgetCard.svelte:97`) and the `--space-3` (0.75rem)
+  header↔body gap (`WidgetCard.svelte:87`). The usable body height for a
+  placement of `h` rows is therefore **`7h − 5.25rem`**.
+- **Per-widget minimum heights.** `minHeight` is part of each `WidgetDef`
+  (`registry.ts:74,89-150`); a short widget is never rendered broken, its
+  persisted height is raised instead.
+
+  | Widget | `minHeight` |
+  |---|---|
+  | `top-projects` | 1 |
+  | `top-tools` | 2 |
+  | `kpi` | 2 |
+  | `agent-distribution` | 2 |
+  | `sessions-per-day` | 3 |
+  | `cost-per-day` | 3 |
+
+  The height range is `[minHeight, WIDGET_MAX_HEIGHT]` (`8`).
+  `clampWidgetHeight(id, value)` = `max(def.minHeight, clampHeight(value))`
+  (`registry.ts:50-52`) and is applied wherever placements are resolved: the
+  registry `resolvePlacements` (`registry.ts:207-223`), the settings API
+  `normaliseDashboardWidgets` → `resolvePlacements` (`settings.ts:142-179`) and
+  the picker `toggleWidgetSelection`/`updatePlacement`
+  (`picker.ts:18-39`). The picker's height stepper disables `−` at `minHeight`
+  and `+` at `WIDGET_MAX_HEIGHT` (`WidgetsModal.svelte:208,220`).
+- **Silent whole-row truncation.** A body that does not fit drops whole rows —
+  no `+N more` affordance, no fade, no inner scrollbar. Truncation is silent by
+  design; the card body's `overflow: hidden` (on both the card and the body,
+  `WidgetCard.svelte:89,114`) is the hard guarantee that a body can never paint
+  past the rounded contour, even mid-measurement.
+- **Row budget = what the measured height holds.** `rowsThatFit` returns
+  `floor(available / rowHeight)`, clamped to `[min, total]`, and returns the
+  floor (never `NaN`/`Infinity`/a fractional row) when the box is not laid out
+  yet (`fit.ts:38-49`). `useRowFit` measures the clipped list container and its
+  first real row with one `ResizeObserver`; it reports the full list until the
+  first client measurement, so SSR and hydration render every row and the trim
+  lands after mount (`fit.svelte.ts:39-40,61-71`). The budget **grows with the
+  card up to the rows the payload supplied** — the payload is the ceiling, not a
+  fixed cap.
+- **Per-body behaviour.** `BarChart` slices to the measured budget; its `limit`
+  no longer defaults to `8` but to every supplied row, and the bar scale is
+  computed from the untrimmed rows so resizing never re-scales the bars
+  (`BarChart.svelte:54,60-72`). `TopProjectsWidget` leaves `limit` unset and
+  `TopToolsWidget` passes `limit={bars.length}`, so both feed all API rows
+  (`TopProjectsWidget.svelte:51`, `TopToolsWidget.svelte:51`). `DonutChart`
+  shrinks the ring via `flex-basis: 0` + `aspect-ratio` (max `10rem`) and trims
+  the legend to the rows the ring leaves (`DonutChart.svelte:95,169-177`).
+  `KpiWidget` keeps the tiles and drops whole blocks — the mix bar first, then
+  the token breakdown — based on measured natural heights
+  (`KpiWidget.svelte:90-117,143-176`). `TimeSeriesChart` drops both axes below
+  `COMPACT_HEIGHT = 120` and rebuilds the instance once at that boundary
+  (`TimeSeriesChart.svelte:54,149,174-179`).
 
 ---
 
@@ -486,14 +553,15 @@ src/
           widget.ts                             # loader/status contract (#409)
           data.svelte.ts                        # useWidgetData rune hook (#410)
           loaders.ts                            # per-widget code-split loaders
-          filter.ts  picker.ts  top-tools.ts    # pure helpers (unit-tested)
+          filter.ts  picker.ts  top-tools.ts  fit.ts  # pure helpers (unit-tested)
+          fit.svelte.ts                         # useRowFit measurement rune (#444)
           TimeSeriesChart.svelte                # uPlot time series (§2)
           BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG (§2)
           KpiWidget.svelte  TopToolsWidget.svelte
           SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
           TopProjectsWidget.svelte  AgentDistributionWidget.svelte
           # tests (co-located): dashboard-widgets.suite.ts + .test.ts wrapper,
-          # data/filter/picker/top-tools.test.ts, source-guards.test.ts
+          # data/filter/picker/top-tools/fit.test.ts, source-guards.test.ts
         gantt/                                  # L3
           Gantt.svelte                          # feature root (orchestrator)
           GanttHeader.svelte  GanttLabels.svelte  GanttLabelRow.svelte
@@ -638,15 +706,17 @@ assertion to the file that now owns the string.
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
 | `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, and `loaders.ts` id→body routing |
-| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, pure modules stay DOM/`$lib/server`-free |
-| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes, `isWidgetId`, `clampWidth`/`clampHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), pure modules stay DOM/`$lib/server`-free |
+| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
 | `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (size-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
+| `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
 source/paths), `src/routes/api/settings/settings-dashboard.suite.ts` (the
 `dashboardWidgets` PUT/GET contract: object payloads, `version: 2` on disk, the
 legacy `string[]` echo), `src/lib/server/settings.test.ts` (store round-trip,
-legacy `string[]` read fallback, `version: 2` write),
+legacy `string[]` read fallback, `version: 2` write, per-widget `minHeight`
+clamp on read),
 `src/lib/components/scroll-view.test.ts`, `src/routes/pages.test.ts`,
 `src/routes/m3c-drilldown.test.ts`, `src/routes/m4a-tracker.test.ts`
 (isolated-child-process runners), the dashboard helper units

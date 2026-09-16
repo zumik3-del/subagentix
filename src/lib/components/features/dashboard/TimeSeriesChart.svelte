@@ -50,11 +50,17 @@
 
 	/** Fallback canvas height until the container reports its own (CSS) height. */
 	const DEFAULT_HEIGHT = 180;
+	/** Below this canvas height the axes are dropped, so the plot stays legible. */
+	const COMPACT_HEIGHT = 120;
 
 	let host: HTMLDivElement | undefined = $state();
 	let failed = $state(false);
 	/** Live instance while mounted; plain (non-reactive) so it never loops an effect. */
 	let chart: UPlotInstance | null = null;
+	/** Resolved constructor, kept for a rebuild when the compact state flips. */
+	let chartCtor: UPlotConstructor | null = null;
+	/** Whether the current instance was built without axes (see {@link COMPACT_HEIGHT}). */
+	let compact = false;
 	let disposed = false;
 	let width = 0;
 	let height = 0;
@@ -84,7 +90,11 @@
 		return /^#[0-9a-f]{6}$/i.test(color) ? `${color}${alpha}` : null;
 	}
 
-	function buildOptions(initialWidth: number, initialHeight: number): Record<string, unknown> {
+	function buildOptions(
+		initialWidth: number,
+		initialHeight: number,
+		axesOff: boolean
+	): Record<string, unknown> {
 		const stroke = readToken(colorVar, 'grey');
 		const axis = readToken('--text-weak', 'grey');
 		const grid = readToken('--border-weak-base', 'transparent');
@@ -109,22 +119,35 @@
 					value: (_u: unknown, v: number | null) => (v == null ? '—' : format(v))
 				}
 			],
-			axes: [
-				{
-					stroke: axis,
-					grid: { stroke: grid, width: 1 },
-					ticks: { stroke: grid },
-					values: (_u: unknown, splits: number[]) => splits.map((v) => utcDayKey(v).slice(5))
-				},
-				{
-					stroke: axis,
-					grid: { stroke: grid, width: 1 },
-					ticks: { stroke: grid },
-					size: 56,
-					values: (_u: unknown, splits: number[]) => splits.map((v) => format(v))
-				}
-			]
+			// A short plot drops the axes rather than squeezing unreadable ticks in.
+			axes: axesOff
+				? []
+				: [
+						{
+							stroke: axis,
+							grid: { stroke: grid, width: 1 },
+							ticks: { stroke: grid },
+							values: (_u: unknown, splits: number[]) => splits.map((v) => utcDayKey(v).slice(5))
+						},
+						{
+							stroke: axis,
+							grid: { stroke: grid, width: 1 },
+							ticks: { stroke: grid },
+							size: 56,
+							values: (_u: unknown, splits: number[]) => splits.map((v) => format(v))
+						}
+					]
 		};
+	}
+
+	/** Build (or rebuild) the instance at the measured size; axes follow height. */
+	function createChart(): void {
+		if (!host || !chartCtor) return;
+		const size = measure() ?? { width: 320, height: DEFAULT_HEIGHT };
+		width = size.width;
+		height = size.height;
+		compact = size.height < COMPACT_HEIGHT;
+		chart = new chartCtor(host, buildOptions(width, height, compact), toSeries(points));
 	}
 
 	/** Measured container size, or `null` while it has no laid-out width. */
@@ -139,11 +162,22 @@
 		};
 	}
 
-	/** Resize the canvas when the container changes size. */
+	/**
+	 * Resize the canvas when the container changes size. Crossing the compact
+	 * threshold changes the axis set, which uPlot only applies at construction,
+	 * so the instance is rebuilt once at that boundary.
+	 */
 	function resize(): void {
 		if (!chart) return;
 		const size = measure();
-		if (!size || (size.width === width && size.height === height)) return;
+		if (!size) return;
+		if ((size.height < COMPACT_HEIGHT) !== compact) {
+			chart.destroy();
+			chart = null;
+			createChart();
+			return;
+		}
+		if (size.width === width && size.height === height) return;
 		width = size.width;
 		height = size.height;
 		chart.setSize(size);
@@ -160,11 +194,8 @@
 					import('uplot/dist/uPlot.min.css')
 				]);
 				if (disposed || !host) return;
-				const UPlot = (module as unknown as { default: UPlotConstructor }).default;
-				const size = measure() ?? { width: 320, height: DEFAULT_HEIGHT };
-				width = size.width;
-				height = size.height;
-				chart = new UPlot(host, buildOptions(width, height), toSeries(points));
+				chartCtor = (module as unknown as { default: UPlotConstructor }).default;
+				createChart();
 				if (typeof ResizeObserver !== 'undefined') {
 					observer = new ResizeObserver(resize);
 					observer.observe(host);

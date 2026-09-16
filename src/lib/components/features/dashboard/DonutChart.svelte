@@ -4,13 +4,18 @@
 	 *
 	 * Presentational only: `arcSegments`/`arcPath` from `model/chart.ts` turn the
 	 * shares into SVG paths, and the fills come from the `--chart-*` tokens
-	 * (spec D1) — no chart library, no raw-HTML injection, no DOM measurement. The plot is
+	 * (spec D1) — no chart library, no raw-HTML injection. The plot is
 	 * one `role="img"` node with a summary `aria-label`; the visible legend table
 	 * below is the non-graphical fallback carrying the value text. The container
 	 * scales the `viewBox`, so the donut stays responsive.
+	 *
+	 * Both halves share the card body (task #444): the ring shrinks via
+	 * `aspect-ratio`/`max-height` and the legend is trimmed to the whole rows the
+	 * remaining height can show (`useRowFit` after mount; SSR shows all rows).
 	 */
 	import { arcPath, arcSegments, topN } from '$lib/model/chart';
 	import { formatNumber } from '$lib/model/format';
+	import { useRowFit } from './fit.svelte';
 
 	/** One input slice before the top-N + "Other" aggregation. */
 	interface DonutSlice {
@@ -84,6 +89,12 @@
 			.map((arc) => `${arc.label} ${formatValue(arc.value)} (${share(arc.fraction)})`)
 			.join(', ')}`
 	);
+
+	/** Clipped legend host; it keeps whatever the shrinking ring leaves. */
+	let legend = $state<HTMLElement | null>(null);
+	const fit = useRowFit({ container: () => legend, total: () => arcs.length });
+	/** Whole legend rows that fit; SSR sees every arc (no measurement yet). */
+	let visibleArcs = $derived(arcs.slice(0, fit.budget));
 </script>
 
 {#if total <= 0}
@@ -113,51 +124,62 @@
 			</div>
 		</div>
 
-		<table class="donut__legend">
-			<caption class="sr-only">{label}</caption>
-			<thead class="sr-only">
-				<tr>
-					<th scope="col">Name</th>
-					<th scope="col">Count</th>
-					<th scope="col">Share</th>
-				</tr>
-			</thead>
-			<tbody>
-				{#each arcs as arc (arc.label)}
+		<div class="donut__legend-wrap" bind:this={legend}>
+			<table class="donut__legend">
+				<caption class="sr-only">{label}</caption>
+				<thead class="sr-only">
 					<tr>
-						<td class="donut__swatch">
-							<span class="ui-swatch" style={`background:${arc.color}`}></span>
-						</td>
-						<th scope="row" class="donut__label">{arc.label}</th>
-						<td class="donut__value">{formatValue(arc.value)}</td>
-						<td class="donut__share">{share(arc.fraction)}</td>
+						<th scope="col">Name</th>
+						<th scope="col">Count</th>
+						<th scope="col">Share</th>
 					</tr>
-				{/each}
-			</tbody>
-		</table>
+				</thead>
+				<tbody>
+					{#each visibleArcs as arc (arc.label)}
+						<tr>
+							<td class="donut__swatch">
+								<span class="ui-swatch" style={`background:${arc.color}`}></span>
+							</td>
+							<th scope="row" class="donut__label">{arc.label}</th>
+							<td class="donut__value">{formatValue(arc.value)}</td>
+							<td class="donut__share">{share(arc.fraction)}</td>
+						</tr>
+					{/each}
+				</tbody>
+			</table>
+		</div>
 	</figure>
 {/if}
 
 <style>
+	/* Fills the card body; ring and legend share it and never exceed it. */
 	.donut {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		gap: var(--space-3);
 		margin: 0;
 		min-width: 0;
+		min-height: 0;
 	}
 
+	/* `flex-basis: 0` + `aspect-ratio` let the ring take the height it is given
+	   (up to its max) and derive a matching width, so it shrinks on short cards
+	   instead of pushing the legend out. The `viewBox` letterboxes the circle. */
 	.donut__plot {
 		position: relative;
-		width: 100%;
-		max-width: 10rem;
+		flex: 1 1 0;
+		min-height: 0;
+		max-height: 10rem;
+		aspect-ratio: 1 / 1;
+		max-width: 100%;
 		margin: 0 auto;
 	}
 
 	.donut__svg {
 		display: block;
 		width: 100%;
-		height: auto;
+		height: 100%;
 	}
 
 	/* A hairline of card background separates adjacent slices. */
@@ -187,6 +209,13 @@
 	.donut__unit {
 		font-size: var(--font-size-xs);
 		color: var(--text-weak);
+	}
+
+	/* The measured list: `clientHeight` is the height the ring left behind. */
+	.donut__legend-wrap {
+		flex: 1 1 0;
+		min-height: 0;
+		overflow: hidden;
 	}
 
 	.donut__legend {
