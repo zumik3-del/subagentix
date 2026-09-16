@@ -201,7 +201,9 @@
 
 	/* Global navigation indicator (task #384). An indeterminate top bar:
 	   fixed + pointer-events: none, so pages below stay usable and nothing
-	   reflows. Track and fill use semantic tokens only. */
+	   reflows. Track uses a semantic token; the fill is the dark-amber
+	   emphasis tone so a slow page load (the heavy turn route) reads as
+	   "working", not as the blue accent used for interactive affordances. */
 	.nav-progress {
 		position: fixed;
 		top: 0;
@@ -218,7 +220,7 @@
 		display: block;
 		width: 40%;
 		height: 100%;
-		background: var(--color-accent-base);
+		background: var(--color-warning-strong);
 		animation: nav-progress-sweep 1.1s ease-in-out infinite;
 	}
 

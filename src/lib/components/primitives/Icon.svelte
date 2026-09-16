@@ -5,7 +5,16 @@
 	 * stays the tree-only chevron/folder provider.
 	 */
 	interface Props {
-		name: 'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' | 'arrow-up';
+		name:
+			| 'gear'
+			| 'menu'
+			| 'close'
+			| 'copy'
+			| 'check'
+			| 'expand'
+			| 'collapse'
+			| 'arrow-up'
+			| 'refresh';
 		size?: number;
 	}
 
@@ -20,16 +29,20 @@
 		viewBox="0 0 16 16"
 		fill="none"
 		stroke="currentColor"
-		stroke-width="1.3"
 		stroke-linecap="round"
 		stroke-linejoin="round"
 		aria-hidden="true"
 		focusable="false"
 	>
-		<circle cx="8" cy="8" r="2.1" />
-		<path
-			d="M8 1.8v1.7M8 12.5v1.7M1.8 8h1.7M12.5 8h1.7M3.6 3.6l1.2 1.2M11.2 11.2l1.2 1.2M12.4 3.6l-1.2 1.2M4.8 11.2l-1.2 1.2"
-		/>
+		<!-- Standard Lucide/Feather `settings` cog, authored on the 24-unit grid
+		     and scaled into the shared 16-unit viewBox; `stroke-width` lives on
+		     the group so the 2-unit pen scales to an effective 1.33. -->
+		<g transform="scale(0.666667)" stroke-width="2">
+			<path
+				d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+			/>
+			<circle cx="12" cy="12" r="3" />
+		</g>
 	</svg>
 {:else if name === 'menu'}
 	<svg
@@ -120,6 +133,23 @@
 		focusable="false"
 	>
 		<path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" />
+	</svg>
+{:else if name === 'refresh'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.4"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M13.66 10a6 6 0 1 1-1.41-6.24L15.33 6.67" />
+		<polyline points="15.33 2.67 15.33 6.67 11.33 6.67" />
 	</svg>
 {:else}
 	<svg

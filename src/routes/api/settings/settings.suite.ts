@@ -64,13 +64,17 @@ describe('GET /api/settings', () => {
 			dbPath: null,
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
-			agentsPath: null
+			agentsPath: null,
+			dashboardWidgets: null,
+			dashboardFilter: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'default',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
-			agentsPath: 'none'
+			agentsPath: 'none',
+			dashboardWidgets: 'default',
+			dashboardFilter: 'default'
 		});
 	});
 
@@ -94,13 +98,17 @@ describe('GET /api/settings', () => {
 			dbPath: '/tmp/seeded.db',
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
-			agentsPath: null
+			agentsPath: null,
+			dashboardWidgets: null,
+			dashboardFilter: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'file',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
-			agentsPath: 'none'
+			agentsPath: 'none',
+			dashboardWidgets: 'default',
+			dashboardFilter: 'default'
 		});
 	});
 });
@@ -125,7 +133,7 @@ describe('PUT /api/settings', () => {
 		expect(body.stored.dbPath).toBe('/tmp/partial.db');
 		// File on disk reflects the write.
 		expect(JSON.parse(readFileSync(SETTINGS_FILE, 'utf8').trim())).toMatchObject({
-			version: 1,
+			version: 2,
 			dbPath: '/tmp/partial.db'
 		});
 	});

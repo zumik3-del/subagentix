@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { WidgetPlacement } from '$lib/widgets/registry';
 
 /**
  * Unit tests for the runtime settings store (task #257, ADR §4).
@@ -33,23 +34,33 @@ function freshSettingsModule() {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: Array<{ id: string; width: number; height: number; x?: number; y?: number }> | null;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		};
 		updateStoredSettings: (patch: {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: unknown;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		}) => {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: unknown;
+			dashboardFilter?: { period: string; scope: string | null } | null;
 		};
 		resolveDbPath: () => string;
 		resolveZiptaskBaseUrl: () => string | null;
 		resolveZiptaskEnabled: () => boolean;
+		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
+		resolveDashboardFilter: () => { period: string; scope: string | null };
 		onSettingsChange: (cb: (next: { dbPath?: string | null; ziptaskBaseUrl?: string | null }) => void) => () => void;
 		normaliseDbPath: (value: unknown) => string;
 		normaliseZiptaskBaseUrl: (value: unknown) => string;
 		normaliseZiptaskEnabled: (value: unknown) => boolean;
+		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
+		normaliseDashboardFilter: (value: unknown) => { period: string; scope: string | null };
 		SettingsValidationError: new (message: string, field: string) => { message: string; field: string };
 	}>;
 }
@@ -151,7 +162,7 @@ test('updateStoredSettings writes and the next read returns the value', async ()
 	// File actually exists on disk.
 	expect(existsSync(file)).toBe(true);
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-	expect(disk).toHaveProperty('version', 1);
+	expect(disk).toHaveProperty('version', 2);
 	expect(disk.dbPath).toBe('/tmp/a.db');
 });
 
@@ -446,4 +457,403 @@ test('invalid dbPath in the file is ignored; other keys still work', async () =>
 	const stored = mod.getStoredSettings();
 	expect(stored.dbPath).toBeUndefined(); // invalid key dropped
 	expect(stored.ziptaskBaseUrl).toBe('http://127.0.0.1:3005');
+	});
+
+/* ------------------------------------------------------------------ */
+/* dashboardWidgets normalisation & round-trip                          */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardWidgets rejects a non-array', async () => {
+	for (const value of [null, 'kpi', 42, { id: 'kpi' }] as unknown[]) {
+		const mod = await freshSettingsModule();
+		expect(() => mod.normaliseDashboardWidgets(value)).toThrow(/dashboardWidgets/);
+	}
+});
+
+test('normaliseDashboardWidgets rejects an oversized list (>24)', async () => {
+	const mod = await freshSettingsModule();
+	const tooMany = Array.from({ length: 25 }, (_, i) => `widget-${i}`);
+	expect(() => mod.normaliseDashboardWidgets(tooMany)).toThrow(/at most 24/);
+});
+
+test('normaliseDashboardWidgets rejects non-finite width', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: NaN }])).toThrow(
+		/width must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: Infinity }])).toThrow(
+		/width must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets rejects non-finite height', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], height: NaN }])).toThrow(
+		/height must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], height: -Infinity }])).toThrow(
+		/height must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets rejects non-finite x or y', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: NaN }])).toThrow(
+		/x must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: Infinity }])).toThrow(
+		/x must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], y: -Infinity }])).toThrow(
+		/y must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets accepts a partial x/y pair (treated as unpositioned)', async () => {
+	const mod = await freshSettingsModule();
+	// x-only: accepted by the validator (x is finite), but resolvePlacements auto-positions
+	// because y is missing — the result gets x/y from the auto-position slot, not from input.
+	const withXOnly = mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], x: 1 }] as unknown as unknown[]);
+	expect(withXOnly[0].x).toBe(0);
+	expect(withXOnly[0].y).toBe(0);
+	// y-only: same behaviour.
+	const withYOnly = mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], y: 2 }] as unknown as unknown[]);
+	expect(withYOnly[0].x).toBe(0);
+	expect(withYOnly[0].y).toBe(0);
+});
+
+test('normaliseDashboardWidgets accepts a valid positioned object and round-trips it', async () => {
+	const mod = await freshSettingsModule();
+	// kpi minHeight is 4; height 3 is clamped up to 4.
+	const positioned = [{ id: 'kpi' as WidgetPlacement['id'], width: 2, height: 3, x: 1, y: 2 }];
+	const result = mod.normaliseDashboardWidgets(positioned);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 4, x: 1, y: 2 }]);
+});
+
+test('normaliseDashboardWidgets rejects non-object non-string entries', async () => {
+	const mod = await freshSettingsModule();
+	// Each entry in the array must be either a string id or a plain object.
+	// Arrays, numbers, booleans, and null are rejected.
+	for (const entry of [42, null, true] as unknown[]) {
+		expect(() => mod.normaliseDashboardWidgets([entry])).toThrow(/must contain only ids or/);
+	}
+	// An array nested inside is also rejected.
+	expect(() => mod.normaliseDashboardWidgets([['kpi']])).toThrow(/must contain only ids or/);
+});
+
+test('normaliseDashboardWidgets accepts legacy string[] and resolves registry defaults', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets(['kpi', 'agent-distribution']);
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'agent-distribution', width: 2, height: 6, x: 0, y: 4 }
+	]);
+});
+
+test('normaliseDashboardWidgets accepts object placements with explicit sizes', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ id: 'kpi', width: 2, height: 5 }
+	] as unknown as unknown[]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5, x: 0, y: 0 }]);
+});
+
+test('normaliseDashboardWidgets drops objects without a known id', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ width: 2, height: 5 },
+		{ id: 'nope', width: 2, height: 5 },
+		{ id: 'kpi', width: 2, height: 5 }
+	] as unknown as unknown[]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5, x: 0, y: 0 }]);
+});
+
+test('dashboardWidgets round-trips through PUT → GET unchanged', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'rt-widgets.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const original: WidgetPlacement[] = [
+		{ id: 'kpi', width: 3, height: 5 },
+		{ id: 'top-tools', width: 2, height: 2 }
+	];
+	mod.updateStoredSettings({ dashboardWidgets: original });
+	const readBack = mod.getStoredSettings().dashboardWidgets;
+	// normaliseDashboardWidgets resolves auto-positions; read-back matches the resolved layout.
+	expect(readBack).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 3, height: 5, x: 0, y: 0 },
+		{ id: 'top-tools', width: 2, height: 4, x: 3, y: 0 }
+	]);
+});
+
+test('legacy string[] file degrades gracefully on read', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'legacy.json');
+	// Write a v1-style string[] file directly to disk.
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 1, dashboardWidgets: ['kpi', 'top-tools'] }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.getStoredSettings().dashboardWidgets;
+	// Legacy strings are resolved to placements with registry defaults and auto-positions.
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 }
+	]);
+});
+
+test('version 2 is written on every updateStoredSettings call', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'v2.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dbPath: '/tmp/test.db' });
+	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+	expect(disk.version).toBe(2);
+});
+
+/* ------------------------------------------------------------------ */
+/* dashboardWidgets minHeight clamping                                 */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardWidgets clamps a v2 height below the widget minimum up to it', async () => {
+	const mod = await freshSettingsModule();
+	// kpi minHeight is 4; a persisted height of 0..3 must raise to 4.
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 0 }])
+		[0].height
+	).toBe(4);
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 1 }])
+		[0].height
+	).toBe(4);
+	expect(
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 3 }])
+		[0].height
+	).toBe(4);
+});
+
+test('normaliseDashboardWidgets clamps each widget to its own minimum', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ id: 'top-projects' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'top-tools' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'agent-distribution' as WidgetPlacement['id'], width: 1, height: 0 },
+		{ id: 'sessions-per-day' as WidgetPlacement['id'], width: 2, height: 0 },
+		{ id: 'cost-per-day' as WidgetPlacement['id'], width: 2, height: 0 }
+	] as unknown as unknown[]);
+	const byId = new Map(result.map((p) => [p.id, p]));
+	// top-projects minHeight is 2; top-tools is 4; agent-distribution is 4;
+	// sessions-per-day and cost-per-day are 6.
+	expect(byId.get('top-projects')?.height).toBe(2);
+	expect(byId.get('top-tools')?.height).toBe(4);
+	expect(byId.get('agent-distribution')?.height).toBe(4);
+	expect(byId.get('sessions-per-day')?.height).toBe(6);
+	expect(byId.get('cost-per-day')?.height).toBe(6);
+});
+
+test('a legacy string[] file resolves registry defaults (no minHeight issue)', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'legacy-min.json');
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 1, dashboardWidgets: ['kpi', 'top-projects'] }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.getStoredSettings().dashboardWidgets;
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'top-projects', width: 3, height: 6, x: 0, y: 4 }
+	]);
+});
+
+test('resolveDashboardWidgets clamps a persisted v2 height below the widget minimum', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'clamp-persisted.json');
+	// Write a v2 file with a kpi height of 3 (below kpi's minHeight of 4).
+	writeFileSync(
+		file,
+		JSON.stringify({
+			version: 2,
+			dashboardWidgets: [{ id: 'kpi', width: 4, height: 3 }]
+		}),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.resolveDashboardWidgets();
+	expect(result).toHaveLength(1);
+	expect(result[0].id).toBe('kpi');
+	// Persisted height 3 is clamped up to kpi's minHeight of 4 on read.
+	expect(result[0].height).toBe(4);
+});
+
+test('the update path persists the clamped value (round-trip)', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'clamp-rt.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	// Write a kpi with height 3; the setter should clamp it to 4 before writing.
+	mod.updateStoredSettings({
+		dashboardWidgets: [{ id: 'kpi', width: 4, height: 3 }] as unknown as unknown[]
+	});
+	const readBack = mod.getStoredSettings().dashboardWidgets;
+	expect(readBack).toHaveLength(1);
+	expect(readBack![0].height).toBe(4);
+
+	// Re-import to simulate a fresh process reading the same file.
+	const mod2 = await freshSettingsModule();
+	const reRead = mod2.getStoredSettings().dashboardWidgets;
+	expect(reRead).toHaveLength(1);
+	expect(reRead![0].height).toBe(4);
+});
+
+/* ------------------------------------------------------------------ */
+/* dashboardFilter normalisation & round-trip                           */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardFilter rejects a non-object', async () => {
+	for (const value of [null, 'kpi', 42, ['7d'], true] as unknown[]) {
+		const mod = await freshSettingsModule();
+		expect(() => mod.normaliseDashboardFilter(value)).toThrow(/dashboardFilter must be a \{ period, scope \} object/);
+	}
+});
+
+test('normaliseDashboardFilter rejects an unknown period', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: 'forever', scope: null })).toThrow(
+		/dashboardFilter\.period must be a known period preset/
+	);
+});
+
+test('normaliseDashboardFilter rejects a non-string scope', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: 42 })).toThrow(
+		/dashboardFilter\.scope must be a string or null/
+	);
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: undefined as unknown as string })).toThrow(
+		/dashboardFilter\.scope must be a string or null/
+	);
+});
+
+test('normaliseDashboardFilter rejects NUL in scope', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: '/evil\x00dir' })).toThrow(/NUL/i);
+});
+
+test('normaliseDashboardFilter rejects an oversized scope (>4096)', async () => {
+	const mod = await freshSettingsModule();
+	const long = '/a/'.repeat(2048); // > 4096 chars
+	expect(() => mod.normaliseDashboardFilter({ period: '7d', scope: long })).toThrow(/at most 4096/i);
+});
+
+test('normaliseDashboardFilter normalises empty and "all" scope to null', async () => {
+	const mod = await freshSettingsModule();
+	expect(mod.normaliseDashboardFilter({ period: '7d', scope: '' })).toEqual({ period: '7d', scope: null });
+	expect(mod.normaliseDashboardFilter({ period: '7d', scope: 'all' })).toEqual({ period: '7d', scope: null });
+});
+
+test('normaliseDashboardFilter preserves a non-empty known-scope string', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardFilter({ period: '30d', scope: '/repo/myproject' });
+	expect(result).toEqual({ period: '30d', scope: '/repo/myproject' });
+});
+
+test('normaliseDashboardFilter accepts all valid period presets', async () => {
+	const mod = await freshSettingsModule();
+	for (const period of ['today', '3d', '7d', '30d', '90d', 'all'] as const) {
+		const result = mod.normaliseDashboardFilter({ period, scope: null });
+		expect(result.period).toBe(period);
+	}
+});
+
+test('updateStoredSettings accepts dashboardFilter and persists it', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-rt.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const next = mod.updateStoredSettings({
+		dashboardFilter: { period: '30d', scope: '/repo/a' }
+	});
+	expect(next.dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+	expect(mod.getStoredSettings().dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
+	expect(existsSync(file)).toBe(true);
+	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+	expect(disk).toHaveProperty('version', 2);
+	expect((disk.dashboardFilter as { period: string; scope: string | null })).toEqual({
+		period: '30d',
+		scope: '/repo/a'
+	});
+});
+
+test('null clears dashboardFilter; resolveDashboardFilter falls back to DEFAULT_FILTER', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-clear.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dashboardFilter: { period: '30d', scope: '/x' } });
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '30d', scope: '/x' });
+
+	mod.updateStoredSettings({ dashboardFilter: null });
+	expect(mod.getStoredSettings().dashboardFilter).toBeNull();
+	// Cleared override -> default (7d / all).
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+});
+
+test('resolveDashboardFilter returns the stored pair when set', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-resolve.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dashboardFilter: { period: '90d', scope: '/mydir' } });
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '90d', scope: '/mydir' });
+});
+
+test('resolveDashboardFilter returns DEFAULT_FILTER when nothing is stored', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-default.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+});
+
+test('hand-edited invalid dashboardFilter in the file degrades to default on read', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-bad.json');
+	// Write a file with an invalid dashboardFilter (bad period).
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 2, dashboardFilter: { period: 'bogus', scope: '/x' } }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	// Invalid filter is ignored on read -> resolves to default.
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '7d', scope: null });
+	// Stored settings does not carry the bad value.
+	expect(mod.getStoredSettings().dashboardFilter).toBeUndefined();
+});
+
+test('dashboardFilter round-trips through PUT → GET unchanged', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'filter-roundtrip.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const original = { period: '30d', scope: '/repo/b' };
+	mod.updateStoredSettings({ dashboardFilter: original });
+	const readBack = mod.getStoredSettings().dashboardFilter;
+	expect(readBack).toEqual(original);
 });

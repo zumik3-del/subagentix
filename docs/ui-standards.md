@@ -20,8 +20,10 @@ reviewable.
 - Components follow the layer rules in [§10](#10-layer--component-conventions).
   Where a rule here and a legacy comment disagree, this file and the guarding
   suite ([§12](#12-verification-map)) win.
-- No Tailwind, no UI library, no new runtime dependency. Plain CSS custom
-  properties only.
+- No Tailwind, no UI library, no chart library. The only runtime dependency is
+  `gridstack` (dashboard desktop layout, client-only); it is the one exception
+  to "devDependencies only" and is bound by the enhancement contract in
+  [§10](#10-layer--component-conventions). Plain CSS custom properties only.
 
 ---
 
@@ -30,6 +32,17 @@ reviewable.
 - **4px spacing scale.** Spacing tokens `--space-1 … --space-12` are a 4px
   scale (`0.25rem … 3rem`), declared in `src/app.css:33-42`. Use the tokens, not
   raw `px`/`rem` values.
+- **Standard block spacing.** The gap between sibling blocks and the page insets
+  come from the spacing tokens: `--space-4` (`1rem` = 16px) is the default block
+  gutter and page side inset, and `--space-6` (`1.5rem` = 24px) separates a
+  page's major sections (`src/app.css:37,39`). A component uses a different value
+  **only when a task or the user explicitly asks for it**, and then states the
+  deviation and its reason at the call site. Real call sites: the dashboard's
+  column gap and top/bottom padding are `--space-6` while its side inset is
+  `--space-4` (`src/lib/components/features/dashboard/Dashboard.svelte:185-186`);
+  the turn page keeps `--space-4` sides
+  (`src/routes/sessions/[id]/+page.svelte:103`); `.ui-card` pads with `--space-4`
+  (`src/app.css:601`).
 - **Full-viewport shell.** The app shell is a two-column grid
   (`grid-template-columns: var(--sidebar-width) minmax(0, 1fr)`) with
   `height`/`min-height: 100dvh`; the sidebar column is `position: sticky`
@@ -48,6 +61,196 @@ reviewable.
 - Radii (`--radius-xs … --radius-full`), shadows (`--shadow-xs/md/lg`) and
   `--sidebar-width` are declared in `src/app.css:44-63`.
 
+### Dashboard widget grid
+
+The landing dashboard lays its widgets out from persisted placements — one
+`WidgetPlacement` (`id`, `width`, `height`, optional `x`/`y`) per selected
+widget — on a single markup tree that serves two modes (epic #462). Sizing and
+position are data, never inline `grid-template`; the grid stays presentational
+and the shell owns persistence ([§10](#10-layer--component-conventions)).
+
+**Two modes, one tree.**
+
+- **Free-form desktop (≥64rem).** Every item is pinned to its resolved cell —
+  `grid-column: calc(var(--gs-x) + 1) / span var(--gs-w)` and
+  `grid-row: calc(var(--gs-y) + 1) / span var(--gs-h)` in a
+  `@media (min-width: 64rem)` block (`WidgetGrid.svelte:282-287`) — so the model
+  is exactly what renders: no flow packing, no overlap for a non-colliding
+  model. With JavaScript on, the client-only gridstack enhancement adds **drag
+  and resize**; both gestures are desktop-only and unavailable below the
+  breakpoint.
+- **Narrow fallback (unchanged).** `≤63.99rem` drops to 2 columns and clamps
+  every width above 2 (`data-w="3"`…`data-w="6"`) to `span 2`; `≤39.99rem`
+  drops to 1 column and forces every item to `grid-column: 1 / -1` regardless of
+  `data-w` (`WidgetGrid.svelte:289-313`). Height spans stay valid at every
+  breakpoint, and `x`/`y` are ignored there — the narrow modes pack by flow, as
+  before.
+- **Span sourcing is asymmetric.** Width still runs through a `data-w` numeric
+  lookup table — one rule per value, `data-w='1'`…`data-w='6'`
+  (`WidgetGrid.svelte:253-275`) — because the two narrow modes override it.
+  Height has no `data-h` table: the item's row span is
+  `grid-row: span var(--gs-h)` (`WidgetGrid.svelte:237`), reading the same
+  resolved `--gs-h` the desktop rule uses, which a 16-entry table up to
+  `WIDGET_MAX_HEIGHT` would only duplicate. `data-h` stays on the `<li>` as
+  inert metadata.
+- **`WidgetSettings` is the accessible sizing path.** Drag/resize need a
+  pointer and the enhancement; the per-card gear opens the size dialog, which
+  works with the keyboard and with JavaScript disabled
+  ([§9](#9-modal--dialog-contract)). It stays the only non-graphical way to set
+  a widget's height. Its width `<select>` lists 1…`WIDGET_MAX_WIDTH` (6) blocks,
+  deriving its options from the shared constant rather than hardcoded literals
+  (`WidgetSettings.svelte:54,142-149`).
+
+**Geometry — 16px root, 48px rows, 16px gaps.** Columns, row height, gap and
+breakpoints come from the pure `layout.ts` module; `WidgetGrid.svelte` surfaces
+them as inline `--grid-*` custom properties (`WidgetGrid.svelte:78`) consumed by
+the fallback CSS (`WidgetGrid.svelte:232-241`). Six columns, `3rem` rows,
+`--space-4` (`1rem`) gap — the grid's gutter is the standard block gutter and
+page inset, not a local choice ([§1](#1-layout--spacing)). `html` carries no
+`font-size` rule, so `rem` resolves against the **browser default 16px**;
+`--font-size-base: 14px` (`src/app.css:24`) is applied to `body` only
+(`src/app.css:239`) and sets body text without scaling `rem`. A row is therefore
+**48px** and the gap **16px**. `layout.ts` carries both units and their products
+(`ROOT_FONT_SIZE_PX = 16`, `GRID_ROW_HEIGHT_PX = 48`, `GRID_GAP_PX = 16`,
+`layout.ts:34,50,67`) plus every breakpoint (`layout.ts:70-81`). The
+`min-width: 64rem` media query is the one literal CSS
+keeps, because a media query cannot read a custom property.
+
+**Progressive enhancement is a contract, not a tactic.** The client-only
+wrapper (`gridstack.ts`) owns everything gridstack-related.
+
+- **The server never carries gridstack state.** SSR renders the container as
+  `.widget-grid` only — never `grid-stack` — and each item's
+  `grid-stack-item`/`gs-x`/`gs-y`/`gs-w`/`gs-h`/`grid-stack-item-content`
+  (`WidgetGrid.svelte:173-197`) is inert adoption markup: the `--gs-*` values
+  (`WidgetGrid.svelte:88`) feed the CSS fallback, and nothing positions from a
+  live engine.
+- **The page stays usable without the enhancement.** With JavaScript disabled,
+  before the chunk loads, or after an import/init failure, the CSS grid *is* the
+  layout; a failed start is caught and torn down (`gridstack.ts:196-201`).
+- **The DOM is touched only after a successful dynamic import.**
+  `gridstackEnhance` is a Svelte `use:` action, so it never runs during SSR;
+  `#start` dynamically imports the library *and* its stylesheet, and only then
+  adds `grid-stack` and lets gridstack adopt the existing nodes
+  (`gridstack.ts:53,156-166`). Crossing below the breakpoint tears the
+  enhancement down, stripping every class and inline style it added
+  (`gridstack.ts:299-315`).
+- **The 16px gutter is a two-mode invariant.** Card-to-card and page-edge
+  spacing are the same `--space-4` (16px) whether gridstack owns the grid or the
+  CSS fallback does. The fallback gets it from `gap: var(--grid-gap)`
+  (`WidgetGrid.svelte:240`); in the enhanced mode gridstack insets
+  `.grid-stack-item-content` by its `margin` *inside* the cell (the
+  `--gs-item-margin-*` variables set in
+  `node_modules/gridstack/dist/gridstack.js:2100-2145` and applied in
+  `node_modules/gridstack/dist/gridstack.css:43-48`), so a full-gap margin would
+  leave `2 × GRID_GAP_REM` between neighbours but only one at the outer edge. The
+  code therefore passes `GRID_GAP_HALF_REM` as that margin (`gridstack.ts:179`)
+  and pulls the grid container out by the same half under `.grid-stack` only
+  (`.widget-grid.grid-stack { margin: calc(-1 * var(--grid-gap-half)) }`,
+  `WidgetGrid.svelte:222-223`), which lands the outer card edge on the page's own
+  `--space-4` gutter. Both halves stay derived from the gap
+  (`GRID_GAP_HALF_REM = GRID_GAP_REM / 2`, `layout.ts:64`); doubling either one
+  re-doubles the gutter.
+- **Persist the live layout, never a stale model size.** `#readLayout` reads
+  `grid.engine.nodes` directly (`gridstack.ts:271-288`) and must never fall back
+  to the previous model value. gridstack's `Utils.removeInternalForSave` deletes
+  `w` when it equals `1` or the widget minimum and `h` when it equals `1` or
+  `minH`, so `grid.save(false)` returns nodes without those keys; a fallback to
+  the old placement then reported the *previous* size, persisted it, and `#sync`
+  pushed it back into the live node — the widget snapped back after a resize.
+  The engine nodes carry numeric in-bounds `x`/`y`/`w`/`h`, so the `??` floors
+  are typing-only and can never resurrect a stale size.
+- **Keep the list normalization unconditional.** `.widget-grid { margin: 0;
+  padding: 0; list-style: none }` must not be scoped to `:not(.grid-stack)`
+  (`WidgetGrid.svelte:200-211`): once the enhancement adds `grid-stack`, a
+  scoped rule stops matching and every `<li>` falls back to `display:
+  list-item`, painting its native disc marker at the card's top-left (the stray
+  white circle).
+
+**Bounds and defaults** live in `layout.ts` (`WIDGET_MIN_WIDTH`/`MAX_WIDTH`
+1/6, `WIDGET_MIN_HEIGHT`/`MAX_HEIGHT` 1/16, `layout.ts:65-70`) and are re-exported
+by the registry; each `WidgetDef` also carries its own default `width`/`height`
+and a per-widget `minHeight` (`registry.ts:97-98,113-174`).
+`clampWidth`/`clampHeight` round and clamp to the global bounds, mapping a
+non-finite value to the global minimum (`registry.ts:46-55`);
+`clampWidgetHeight(id, value)` additionally raises the result to that widget's
+own `minHeight`, so the effective height range is `[minHeight, 16]`
+(`registry.ts:62-64`).
+- **Refresh control.** `WidgetCard` renders an optional `.ui-icon-btn` refresh
+  button whose icon spins while a fetch is in flight
+  (`class:is-spinning={refreshing || status === 'loading'}`,
+  `WidgetCard.svelte:48-60`); the spin is CSS-only keyframes
+  (`widget-refresh-spin`, `WidgetCard.svelte:155-163`) and is suppressed under
+  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:165-173`).
+
+### Widget sizing & overflow
+
+The contract the grid, the registry and the widget bodies share (task #444):
+how tall a body actually is, how far a widget may shrink, and what a too-small
+card does with content that no longer fits.
+
+- **Row geometry.** Rows are `3rem` (48px at the 16px root, see the grid above)
+  and the column gap is `--space-4` (1rem, 16px) (`WidgetGrid.svelte:240`),
+  so a placement of `h` rows spans `3h + (h − 1)` = `4h − 1rem`. The card chrome
+  consumes `4.25rem`: the
+  `--space-4` (1rem) padding top + bottom (`src/app.css:601`), the `--space-6`
+  (1.5rem) header (`WidgetCard.svelte:116`) and the `--space-3` (0.75rem)
+  header↔body gap (`WidgetCard.svelte:106`). The usable body height for a
+  placement of `h` rows is therefore **`4h − 5.25rem`** — the budget is
+  `rem`-only, so the root-base correction does not move it.
+- **Per-widget minimum heights.** `minHeight` is part of each `WidgetDef`
+  (`registry.ts:97-98,113-174`); a short widget is never rendered broken, its
+  persisted height is raised instead.
+
+  | Widget | `minHeight` |
+  |---|---|
+  | `top-projects` | 2 |
+  | `top-tools` | 4 |
+  | `kpi` | 4 |
+  | `agent-distribution` | 4 |
+  | `sessions-per-day` | 6 |
+  | `cost-per-day` | 6 |
+
+  The height range is `[minHeight, WIDGET_MAX_HEIGHT]` (`16`).
+  `clampWidgetHeight(id, value)` = `max(def.minHeight, clampHeight(value))`
+  (`registry.ts:62-64`) and is applied wherever placements are resolved: the
+  registry `resolvePlacements` (`registry.ts:317-363`), the settings API
+  `normaliseDashboardWidgets` → `resolvePlacements` (`settings.ts:153-201`) and
+  the pure placement helpers `toggleWidgetSelection` (picker) and
+  `updatePlacement` (gear apply) (`picker.ts:18-39`). The per-widget height
+  stepper now lives in `WidgetSettings`: it disables `−` at `minHeight` and `+`
+  at `WIDGET_MAX_HEIGHT` (`WidgetSettings.svelte:159,169`); the picker only
+  toggles visibility and no longer edits sizes (see
+  [§10](#10-layer--component-conventions)).
+- **Silent whole-row truncation.** A body that does not fit drops whole rows —
+  no `+N more` affordance, no fade, no inner scrollbar. Truncation is silent by
+  design; the card body's `overflow: hidden` (on both the card and the body,
+  `WidgetCard.svelte:108,140`) is the hard guarantee that a body can never paint
+  past the rounded contour, even mid-measurement.
+- **Row budget = what the measured height holds.** `rowsThatFit` returns
+  `floor(available / rowHeight)`, clamped to `[min, total]`, and returns the
+  floor (never `NaN`/`Infinity`/a fractional row) when the box is not laid out
+  yet (`fit.ts:38-49`). `useRowFit` measures the clipped list container and its
+  first real row with one `ResizeObserver`; it reports the full list until the
+  first client measurement, so SSR and hydration render every row and the trim
+  lands after mount (`fit.svelte.ts:39-40,61-71`). The budget **grows with the
+  card up to the rows the payload supplied** — the payload is the ceiling, not a
+  fixed cap.
+- **Per-body behaviour.** `BarChart` slices to the measured budget; its `limit`
+  no longer defaults to `8` but to every supplied row, and the bar scale is
+  computed from the untrimmed rows so resizing never re-scales the bars
+  (`BarChart.svelte:54,60-72`). `TopProjectsWidget` leaves `limit` unset and
+  `TopToolsWidget` passes `limit={bars.length}`, so both feed all API rows
+  (`TopProjectsWidget.svelte:52`, `TopToolsWidget.svelte:52`). `DonutChart`
+  shrinks the ring via `flex-basis: 0` + `aspect-ratio` (max `10rem`) and trims
+  the legend to the rows the ring leaves (`DonutChart.svelte:95,169-177`).
+  `KpiWidget` keeps the tiles and drops whole blocks — the mix bar first, then
+  the token breakdown — based on measured natural heights
+  (`KpiWidget.svelte:90-117,144-177`). `DayTable` renders the per-day series
+  newest-first (`[...points].reverse()`, `DayTable.svelte:29`) and slices to the
+  measured budget exactly like `BarChart` (`DayTable.svelte:35`), so
+  `sessions-per-day` and `cost-per-day` are tables, not charts.
+
 ---
 
 ## 2. Color & tokens
@@ -65,6 +268,12 @@ reviewable.
 - **Chart palette.** `--chart-1 … --chart-7` alias the palette levels 9
   (`src/app.css:185-191`). Legend wording/chips consume the same status tokens
   as the chart.
+- **No chart library.** Every widget stays hand-rolled over the `--chart-*`
+  tokens (`BarChart`, `DonutChart`, the KPI mix bar); the two per-day widgets
+  (`sessions-per-day`, `cost-per-day`) render a plain newest-first HTML table
+  (`DayTable`) instead of a chart. The only runtime dependency is `gridstack`
+  (dashboard desktop layout only, [§10](#10-layer--component-conventions)); no
+  chart library is present.
 - **No hardcoded legacy hex.** No `.svelte` file may hardcode a hex from the
   pre-theme palette; the guard walks every `.svelte` under `src/` against
   `LEGACY_PALETTE` (`pages.suite.ts`: "no component keeps the legacy hardcoded
@@ -222,8 +431,8 @@ adopt (do not delete).
 - `.ui-btn--danger` — destructive tone (danger border/text, danger hover
   surface). **unused.**
 - `.ui-btn--block` — full-width button.
-- `.ui-icon-btn` — square, borderless icon-only control (gear, copy…); hover
-  uses the neutral overlay.
+- `.ui-icon-btn` — square, borderless icon-only control (card refresh + settings
+  gear, sidebar settings gear, copy…); hover uses the neutral overlay.
 - `.ui-link-btn` — borderless inline text action; `:hover` underlines and
   brightens to `--text-strong`.
 - `.ui-swatch` — fixed 8px agent colour chip; geometry is standard, the
@@ -280,6 +489,14 @@ Some tones reach markup only through dynamic composition —
 `ui-badge--${action.kind}` → text|reasoning|patch|file|agent|compaction — so a
 literal-token grep reports them unused; they are live.
 
+**Card**
+- `.ui-card` — widget surface: column flow, `--space-4` padding,
+  `--background-strong` background, `--border-weak-base` border,
+  `--radius-lg`. It renders a single DOM node and carries styling only (no
+  behaviour), so by the class-vs-component rule it stays a plain class; the
+  dashboard's `WidgetCard` and `SkeletonWidget` consume it
+  (`WidgetCard.svelte:40`, `SkeletonWidget.svelte:19`).
+
 **Modal** (structure only; focus trap / Escape behaviour lives in the feature
 components that own it — a `ModalShell` composite is deferred, see
 [§9](#9-modal--dialog-contract))
@@ -306,8 +523,8 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **`Icon.svelte`** (L1 primitive) is the shared inline-SVG set. Its glyph union
   is `'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' |
-  'arrow-up'`, with an optional `size` (`default 16`)
-  (`src/lib/components/primitives/Icon.svelte:8-12`). Color inherits via
+  'arrow-up' | 'refresh'`, with an optional `size` (`default 16`)
+  (  `src/lib/components/primitives/Icon.svelte:8-17`). Color inherits via
   `currentColor`; every glyph is `aria-hidden="true"` and `focusable="false"`.
   It states the no-emoji rule (`Icon.svelte:3`).
 - **`TreeIcon.svelte`** is the tree-only chevron/folder provider:
@@ -315,7 +532,7 @@ components that own it — a `ModalShell` composite is deferred, see
   expanded, right when collapsed) and `size`, `currentColor`, `aria-hidden`
   (`src/lib/components/primitives/TreeIcon.svelte:7-15,17-50`).
 - **No emoji glyphs anywhere in the UI**; use an `Icon`/`TreeIcon` name.
-- Icons render `display: block; flex: none` (`Icon.svelte:143-147`,
+- Icons render `display: block; flex: none` (`Icon.svelte:174-176`,
   `TreeIcon.svelte:52-56`).
 
 ---
@@ -358,23 +575,33 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **Structure is the `.ui-modal*` classes** in `src/app.css` (see
   [§6](#6-shared-primitives-ui-)); a component adds sizing only
-  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`).
+  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`,
+  `WidgetsModal.svelte:179-183`, `WidgetSettings.svelte:179-181`).
 - **Dialog semantics:** `role="dialog"`, `aria-modal="true"`, `tabindex="-1"`,
   and a label (`aria-label` or `aria-labelledby`), on the
   `.ui-modal__dialog` element (`TaskModal.svelte:110-118`;
-  `SettingsModal.svelte:467-475`). The backdrop is a button with a close
-  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`).
+  `SettingsModal.svelte:467-475`; `WidgetsModal.svelte:117-125`;
+  `WidgetSettings.svelte:105-113`). The backdrop is a button with a close
+  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`;
+  `WidgetsModal.svelte:111-116`, `WidgetSettings.svelte:99-104`).
 - **Behaviour owned by the component** (a `ModalShell` composite is **not**
   landed):
   - **Escape** closes (`TaskModal.svelte:77-82`;
-    `SettingsModal.svelte:205`).
+    `SettingsModal.svelte:205`; `WidgetsModal.svelte:70-75`;
+    `WidgetSettings.svelte:71-76`).
   - **Focus trap:** Tab/Shift+Tab cycle within the dialog
-    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`).
+    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`;
+    `WidgetsModal.svelte:76-93`; `WidgetSettings.svelte:77-94`).
   - **Initial focus and focus return:** the dialog is focused on mount and the
     previously focused element is restored on unmount
-    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`).
+    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`;
+    `WidgetsModal.svelte:46-60`; `WidgetSettings.svelte:49-60` — the latter
+    restores focus to the opener, i.e. the card's gear).
 - The panel body hosts a `ScrollView` (`.ui-modal__body` + `.ui-modal__content`,
-  e.g. `TaskModal.svelte:125-137`).
+  e.g. `TaskModal.svelte:125-137`, `WidgetsModal.svelte:130-157`).
+  `WidgetSettings` is a two-field form whose content never scrolls, so its body
+  is the plain `.ui-modal__body`/`.ui-modal__content` pair with no `ScrollView`
+  (`WidgetSettings.svelte:121-168`).
 - **Detail payload is validated, not re-normalised.** The modal fetches
   subagentix's own `/api/tracker/task/:id` proxy, whose server layer already
   mapped ziptask's snake_case fields to the camelCase `TrackerTaskDetail`; the
@@ -384,8 +611,12 @@ components that own it — a `ModalShell` composite is deferred, see
   (`TaskModal.svelte:49-55`; `src/routes/api/tracker/task/[id]/+server.ts:53`;
   `src/lib/model/tracker.ts:116-149,151-176`).
 - **SSR:** a closed modal renders no dialog markup (guarded by `pages.suite.ts`,
-  "SSR closed-modal: settings button present, no dialog markup"); an open
-  `TaskModal` renders the accessible loading dialog
+  "SSR closed-modal: settings button present, no dialog markup"; the size
+  dialog adds `dashboard-widgets.suite.ts`, "closed dialog (open=false) emits
+  no dialog markup at all"); the open size dialog carries `role="dialog"`,
+  `aria-modal` and its label (`dashboard-widgets.suite.ts`, "opened dialog
+  carries role=dialog, aria-modal and labelled-by"); an open `TaskModal`
+  renders the accessible loading dialog
   (`m3c-drilldown.suite.ts`, "TaskModal SSR — dialog shell and loading state").
 
 ---
@@ -401,19 +632,27 @@ layers `1..n`, never an upper layer.
 |---|---|---|
 | L0 tokens | `src/app.css` custom properties + element/base styles + `.ui-*` classes | design tokens |
 | L1 primitives | single-purpose, context-free | `Icon`, `TreeIcon`, `ScrollView` |
-| L2 composites | assemble primitives, still context-free | `TrackerChipList`, `SummaryLine`, `IoBlock`, `BackToTableButton` |
-| L3 feature | domain-aware roots + their presentation children | `Gantt`, `NodeDetailPanel`, `SessionSidebar`, `SettingsModal`, `TaskModal` |
+| L2 composites | assemble primitives, still context-free | `TrackerChipList`, `SummaryLine`, `IoBlock`, `BackToTableButton`, `WidgetCard`, `SkeletonWidget` |
+| L3 feature | domain-aware roots + their presentation children | `Gantt`, `NodeDetailPanel`, `SessionSidebar`, `SettingsModal`, `TaskModal`, `Dashboard`, `WidgetHost` |
 | L4 page | routes | `+layout.svelte`, `+page.svelte`, `sessions/[id]/+page.svelte` |
 
 ### Landed directory layout
 
-Feature folders: `src/lib/components/features/{gantt,node-detail,sidebar,settings,tracker}`.
+Feature folders:
+`src/lib/components/features/{dashboard,gantt,node-detail,sidebar,settings,tracker}`.
 
 ```
 src/
   app.css                                       # L0: tokens + .ui-* + base styles
   lib/
-    model/                                      # pure domain math + formatters
+    model/                                      # pure domain math + formatters (SSR-safe)
+      chart.ts                                  # scale/tick/bucket/arc math for the charts
+      dashboard.ts                              # dashboard DTOs, period + window rules
+      agent.ts  format.ts  gantt.ts  node.ts  paging.ts  token.ts  tracker.ts
+      types.ts  clock.svelte.ts
+    widgets/
+      registry.ts                               # WidgetId/WidgetDef/WidgetPlacement/WIDGET_DEFS + re-exported bounds (client-safe)
+      registry.test.ts                          # registry + resolvePlacements/clamp units
     components/
       primitives/                               # L1
         Icon.svelte  TreeIcon.svelte  ScrollView.svelte
@@ -421,6 +660,28 @@ src/
         TrackerChipList.svelte  SummaryLine.svelte
         IoBlock.svelte  BackToTableButton.svelte
       features/
+        dashboard/                              # L3 shell + its L2 card pieces
+          Dashboard.svelte                      # shell root (selection + settings target)
+          DashboardHeader.svelte  WidgetGrid.svelte  FilterSelector.svelte
+          layout.ts                             # pure grid geometry, single source (#462, stage 1)
+          gridstack.ts                          # client-only drag/resize enhancement (#462, stage 3)
+          WidgetHost.svelte                     # lazy mount boundary (#409)
+          WidgetCard.svelte  SkeletonWidget.svelte
+          WidgetsModal.svelte                   # global picker (visibility draft + Apply)
+          WidgetSettings.svelte                 # per-widget size dialog, gear-opened (#449)
+          widget.ts                             # loader/status contract + WidgetSizePatch (#409/#449)
+          data.svelte.ts                        # useWidgetData rune hook (#410)
+          loaders.ts                            # per-widget code-split loaders
+          filter.ts  picker.ts  top-tools.ts  fit.ts  # pure helpers (unit-tested)
+          save.ts                               # shared PUT /api/settings writer (#449)
+          fit.svelte.ts                         # useRowFit measurement rune (#444)
+          DayTable.svelte                       # per-day table, fit-trimmed (sessions/cost)
+          BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG charts (§2)
+          KpiWidget.svelte  TopToolsWidget.svelte
+          SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
+          TopProjectsWidget.svelte  AgentDistributionWidget.svelte
+          # tests (co-located): dashboard-widgets.suite.ts + .test.ts wrapper,
+          # data/filter/picker/top-tools/fit/save.test.ts, source-guards.test.ts
         gantt/                                  # L3
           Gantt.svelte                          # feature root (orchestrator)
           GanttHeader.svelte  GanttLabels.svelte  GanttLabelRow.svelte
@@ -435,15 +696,140 @@ src/
         sidebar/SessionSidebar.svelte
         settings/SettingsModal.svelte
         tracker/TaskModal.svelte  TaskDetailView.svelte
-  routes/                                       # L4 pages + *.suite.ts / *.test.ts
+  routes/                                       # L4 pages + route-level *.suite.ts / *.test.ts
 ```
 
+- Tests are co-located with what they guard: route-level suites under
+  `src/routes/**` and feature/unit suites beside their modules
+  (`features/dashboard/*.suite.ts`, `model/*.test.ts`).
 - Not landed (deferred by the ADR): `composites/ModalShell.svelte` and
   `features/gantt/view.ts`.
 - **State ownership:** feature roots keep interactive state and cross-block
   behaviour; extracted children are presentation-only and receive precomputed
   props + callbacks (e.g. `Gantt.svelte` keeps selection/hover/cursor/scroll,
   `NodeDetailPanel.svelte` keeps filters/expanded/copy/scroll).
+
+### Dashboard persistence
+
+The dashboard's persisted UI state lives in `settings.json` under two keys,
+written by the settings store (`src/lib/server/settings.ts`): the widget
+selection and per-widget sizes (`dashboardWidgets`) and the last manual
+period/scope choice (`dashboardFilter`). They are read back through
+`resolveDashboardWidgets` (`settings.ts:434-435`) and `resolveDashboardFilter`
+(`settings.ts:444-446`).
+
+- **Current shape:** `dashboardWidgets` is a `{ id, width, height, x?, y? }[]` —
+  one `WidgetPlacement` per selected widget (`registry.ts:75-85`, stored as
+  `settings.ts:43`). `x`/`y` are optional 0-based column/row indices: **both
+  must be present and finite to take effect**, and a lone or non-finite value is
+  treated as unpositioned rather than guessed (`registry.ts:247-260`); an
+  explicit pair is clamped so `x + width ≤ 6` and `y ≥ 0`
+  (`registry.ts:234-241`). Every unpositioned entry is auto-placed at the first
+  free slot scanning row-major from the top-left, so a legacy
+  `{ id, width, height }` entry stays valid and simply gets a slot
+  (`resolvePlacements`, `registry.ts:317-363`). The file payload carries
+  `version: 2` on every write (`settings.ts:349`).
+- **Legacy `string[]` still loads.** A v1 file whose `dashboardWidgets` is a
+  bare id list (`["kpi","top-tools"]`) is accepted and resolved to placements
+  with the registry-default sizes and auto-positions; unknown ids are dropped,
+  duplicates collapse first-wins and the result is returned in registry order
+  (`normaliseDashboardWidgets`, `settings.ts:153-201`; `resolvePlacements`,
+  `registry.ts:317-363`). The same acceptance applies to a legacy `string[]`
+  `PUT /api/settings` payload (`src/routes/api/settings/+server.ts:122-124`).
+- **Validation.** A non-array, a non-string/non-object entry, a non-finite
+  `width`/`height`/`x`/`y` or an oversized list (>24 entries) is rejected with
+  `SettingsValidationError('dashboardWidgets')`; a hand-edited invalid list on
+  disk degrades to the registry defaults rather than failing the read
+  (`settings.ts:153-201,283-289`).
+- **First visit.** With no stored override, `resolveDashboardWidgets` falls
+  back to `DEFAULT_WIDGETS` (the `defaultOn` registry entries with their default
+  sizes, `registry.ts:204-210`).
+- **Three write paths, one helper.** `save.ts` owns the single
+  `PUT /api/settings` call: `saveDashboardWidgets` sends the full placement list
+  as `{ dashboardWidgets: placements }` and returns the server-normalised
+  placements (`save.ts:45-60`). The picker (`WidgetsModal`) drafts visibility
+  locally and calls it once on Apply (`WidgetsModal.svelte:95-106`); the
+  per-card gear applies immediately through an `applied`-first coalescing writer
+  (`Dashboard.svelte:80-92,123-131`); and the desktop gridstack drag/resize
+  gesture reports a settled layout through a second writer that advances
+  `applied` for the picker/next save but deliberately does not feed the server
+  response back into the grid (`onLayoutChange` → `layoutWriter`,
+  `Dashboard.svelte:99-110`). One payload shape, three call sites.
+- **The gear writes through explicit callback props, not context.**
+  `WidgetCard` renders the gear only when `onSettings` is supplied
+  (`WidgetCard.svelte:61-72`, `aria-haspopup="dialog"`). `Dashboard` owns the
+  single settings target (`settingsId`) and mounts exactly one `WidgetSettings`
+  (`Dashboard.svelte:67,170-176`); the callback travels as an explicit
+  `WidgetBodyProps.onSettings` field (`widget.ts:28-32`) through `WidgetGrid`
+  (`WidgetGrid.svelte:52-60,189-193`) and `WidgetHost` (`{...widgetProps}`,
+  `WidgetHost.svelte:80`) into each body, which forwards it to its `WidgetCard`
+  — no context or store carries it.
+- **Immediate apply, optimistically.** A Width/Height change calls `onChange` at
+  once — no draft, no Apply (`WidgetSettings.svelte:62-69`). The shell patches
+  the grid state with `updatePlacement` first, so the card re-lays out
+  instantly, then pushes the list to the coalescing writer
+  (`Dashboard.svelte:123-131`; `createCoalescingWriter`, `save.ts:104-137`): the
+  size controls stay enabled while a save is in flight, so rapid `+`/`−` clicks
+  collapse into one trailing save and a stale size is never persisted. A failed
+  save reverts the grid to the last server-confirmed placements (`lastSaved`,
+  the loader baseline until the first successful write) and shows the error
+  inside the dialog with `aria-live="polite"` (`Dashboard.svelte:81-93`;
+  `WidgetSettings.svelte:123-125`).
+
+**The filter preference (`dashboardFilter`) — task #457.** The global period +
+scope filter is no longer URL-only: a manual selector change is persisted
+server-side, supplied to `parseFilter` as the fallback, and read by the landing
+loader so the first render already reflects it.
+
+- **Shape.** `dashboardFilter` stores a `{ period, scope }` pair
+  (`settings.ts:44`); `scope: null` means every directory. A stored scope
+  that no longer names a known directory degrades to every directory when the
+  filter is built (`filter.ts:87-98`).
+- **Validation / read-degrade.** `normaliseDashboardFilter` (`settings.ts:214-254`)
+  accepts only a known period preset and a `null` or string scope (empty and
+  `all` normalise to `null`; a NUL or an over-4096-char scope is rejected with
+  `SettingsValidationError('dashboardFilter')`). A hand-edited invalid filter in
+  the file is ignored on read instead of failing the load
+  (`settings.ts:290-296`). Known-directory membership is deliberately not
+  checked by the store (it has no DB access).
+- **First visit.** With no stored override, `resolveDashboardFilter` returns
+  `DEFAULT_FILTER` (`settings.ts:444-446`): `period: '7d'` — the `Last 7 days`
+  preset (`filter.ts:22,49`) — and `scope: null` (`All projects`,
+  `filter.ts:29,69`).
+- **Precedence: URL > stored preference > default.** `parseFilter(search,
+  knownScopes, stored)` (`filter.ts:111-133`) uses a valid `?period=`/`?scope=`
+  from the URL; a valid period always wins, while an absent or unknown URL value
+  falls back to the stored pair (validated on read) and then to
+  `DEFAULT_PERIOD` / every directory. An explicit `?scope=all`/blank is
+  authoritative — it is never overridden by a stored scope.
+- **The loader reads the preference, so the first server render matches.**
+  `+page.server.ts` returns `filter: resolveDashboardFilter()`
+  (`+page.server.ts:15-18`); the landing page derives the active filter with
+  `parseFilter(page.url.searchParams, knownScopes, data.filter)`
+  (`+page.svelte:32`). The stored period/scope is therefore already selected in
+  the SSR markup — no default flash, no hydration mismatch.
+- **Only a manual selector change is persisted; a deep link is read-only.**
+  `FilterSelector` reports the next filter through its `onChange` callback
+  (`FilterSelector.svelte:30-37`), which `Dashboard` forwards from its
+  `onFilterChange` prop (`Dashboard.svelte:142`). The landing page writes the
+  change back to the URL with `goto` and queues one `saveDashboardFilter` PUT
+  through the same coalescing writer as the widgets, so rapid changes collapse
+  into a single trailing PUT (`+page.svelte:38-51`; `save.ts:69-84,104-137`).
+  A failed PUT is swallowed — it cannot break the navigation or the rendered
+  filter, and the URL state is already applied (`+page.svelte:38-44`).
+- **The settings API echoes it like the widgets.** GET returns the effective
+  `dashboardFilter` plus the raw `stored` value and its `source` (`'file'` when
+  a preference is stored, else `'default'`) (`+server.ts:27,34,42,55,62,77`);
+  PUT accepts a `dashboardFilter` object, passes it through
+  `normaliseDashboardFilter`, and answers a malformed pair with
+  `400 { error, field: 'dashboardFilter' }` (`+server.ts:126-136`). A `null`
+  clears the override (`settings.ts:372-375`), so the effective value falls
+  back to the default.
+- **The widget API's own default is a separate contract.** The dashboard always
+  sends an explicit `period`, so `src/routes/api/dashboard/widgets.ts`
+  independently defaults a param-less request to `30d` (`widgets.ts:163`, spec
+  §2.8) — that is the endpoint's fallback, not the dashboard's first-visit
+  default.
 
 ### Naming & import rules
 
@@ -531,19 +917,49 @@ assertion to the file that now owns the string.
 
 | Suite | Guards |
 |---|---|
-| `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch |
+| `src/routes/pages.suite.ts` | built `adapter-node` shell: full-width layout / no centered max-width, built dark tokens, legacy-hex ban, shell client hygiene, SSR closed-modal, scroll ownership in built CSS, inspector below chart + first-node auto-open, closed-sidebar focus safety, Gantt selection vs hover, dark running hatch; dashboard SSR filter selection (first-visit `7d`/`all`, stored `dashboardFilter` rendered as the selected option, URL period wins over stored, unknown stored scope degrades to every directory) |
 | `src/routes/m3c-drilldown.suite.ts` | SSR `NodeDetailPanel` drill-down (steps numbered by list position, truncation/Expand, Details, raw JSON, escaping), `TaskModal` dialog shell, `TaskDetailView` camelCase-payload regression (real Created/Updated/completedAt, `maxAttempts`, epic id), Gantt focusable rows / no panel before selection, source wiring (keyboard, jump ids, reduced-motion scroll) |
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
+| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `DayTable` newest-first rows + fit wiring), `WidgetGrid` dual-mode markup (per placement `data-w`/`data-h`, `grid-stack-item`, `gs-x`/`gs-y`/`gs-w`/`gs-h`, the inline `--gs-*` fallback pair, the `grid-stack-item-content` wrapper order, registry order, and the negative that the container never carries `grid-stack` in SSR), the `layout.ts`-derived custom properties replacing the 6-col/3rem literals, the `data-w` clamp selectors up to `data-w='6'`, and both clamp breakpoints, `WidgetSettings` dialog SSR (closed → no markup; open → `role="dialog"` + label), the `WidgetCard` gear control (present with `onSettings`, absent without), and `loaders.ts` id→body routing |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | `DayTable` source guards (no chart-library import, `useRowFit` wiring, newest-first `reverse()`, whole-row `slice` trim, sr-only caption/thead, day row headers, value formatter, empty state, `figure` fit host), `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules (gridstack never statically or type-only imported — the client-only wrapper owns the dynamic import), the `gridstack.ts` dynamic-import-only contract (dynamic `import('gridstack')` plus its stylesheet, no static/type-only import, desktop gate read from `layout.ts` rather than a fresh literal, `grid-stack` class added at enhancement and removed on teardown, the `try`/`catch` failure path calling teardown, `onActiveChange(false)` on teardown, `#readLayout` → `onLayoutChange` persistence hop, layout constants in the config), the snap-back guard (`#readLayout` iterates the live `grid.engine.nodes` and must never fall back to `grid.save(false)` or a stale model size — the comment names the `removeInternalForSave` stripping, and the `?? WIDGET_MIN_WIDTH`/`HEIGHT` floors are typing-only), the unconditional-`list-style: none` guard (the declaration lives outside `:not(.grid-stack)` in every such block), `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), the 16px gutter invariant guards (the gridstack init `margin` uses `GRID_GAP_HALF_REM` — not `GRID_GAP_REM`; the container pull-out applies only under `.grid-stack` and uses the same half; `--grid-gap-half` is present in the SSR inline var string; the fallback still sizes from `gap: var(--grid-gap)`; and `src/app.css` declares no `font-size` on `html` or `:root`, since the 16px rem base is the browser default), pure modules stay DOM/`$lib/server`-free |
+| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), the optional `x`/`y` placement model (honoured pair, the `x + width == columns` boundary, out-of-range clamping, partial/`null`/non-finite/string treated as unpositioned, mixed positioned+unpositioned input, determinism across repeated and reordered input, a cell-by-cell no-overlap assertion, the exact packed `DEFAULT_WIDGETS` layout), the `layout.ts` geometry canaries (16px root → 48px row → 16px gap → 6 columns, plus the `GRID_GAP_HALF_REM === GRID_GAP_REM / 2` and `GRID_GAP_REM * ROOT_FONT_SIZE_PX === GRID_GAP_PX` derivation canaries, pinning the CSS and JS sides in sync), registry source stays server/DOM-free |
+| `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (a size-only, a position-only or a y-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
+| `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
+| `src/lib/components/features/dashboard/save.test.ts` | `saveDashboardWidgets` (full-list `dashboardWidgets` PUT, response re-normalised through `resolvePlacements`, non-OK → `Error` carrying the server message or the HTTP status), `saveDashboardFilter` (full `dashboardFilter` PUT re-normalised server-side, response fallbacks, non-OK → `Error`), and `createCoalescingWriter` (pushes during an in-flight save collapse into one latest-wins trailing save, a rejected save is tolerated and later pushes proceed, an idle writer issues nothing; the filter case pushes `DashboardFilter` values through the same writer) |
+
+**Not covered by the suite — manual QA required.** The free-form layout cannot
+be exercised here (no DOM test library): the pointer gesture itself, real
+snapping and bound enforcement, the breakpoint-crossing teardown (no leftover
+absolute positioning or inline styles), the persisted round-trip after a
+gesture, the JS-unavailable or failed-import fallback, and gridstack's
+`_sortDom` reordering of Svelte-owned `<li>` nodes. Nothing in the automated
+suite would fail if any of those regressed, so a layout change always ends with
+the checklist: drag, resize, reload-persists, picker add/remove,
+settings-dialog resize, enhancement disabled, breakpoint crossed both ways, and
+a stored pair of widgets at the same `x`/`y`.
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
-source/paths), `src/lib/components/scroll-view.test.ts`,
-`src/routes/pages.test.ts`, `src/routes/m3c-drilldown.test.ts`,
-`src/routes/m4a-tracker.test.ts` (isolated-child-process runners), and the unit
-tests under `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware
-formatter cases (Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and
-guards that every `.svelte` format call passes `clock.tz`; `node.test.ts` pins
+source/paths), `src/routes/api/settings/settings-dashboard.suite.ts` (the
+`dashboardWidgets` PUT/GET contract: object payloads, `version: 2` on disk, the
+legacy `string[]` echo; and the `dashboardFilter` contract: absent → `7d`/`all`
+default, valid and `null`-scope payloads persist-and-echo, `null` clears,
+`400 { error, field: 'dashboardFilter' }` on an invalid period or scope, on-disk
+`version: 2`, hand-edited degrade to default on read), `src/lib/server/settings.test.ts`
+(store round-trip, legacy `string[]` read fallback, `version: 2` write,
+per-widget `minHeight` clamp on read, `normaliseDashboardFilter` validation,
+`dashboardFilter` round-trip / `null`-clear / hand-edited read-degrade, and
+`resolveDashboardFilter` stored-vs-default fallback),
+`src/lib/components/scroll-view.test.ts`, `src/routes/pages.test.ts`,
+`src/routes/m3c-drilldown.test.ts`, `src/routes/m4a-tracker.test.ts`
+(isolated-child-process runners), the dashboard helper units
+`features/dashboard/{data,filter,top-tools}.test.ts` (the `filter` unit pins
+the `7d`/`all` default, the six selector options, the URL > stored > default
+precedence table and the unknown-stored-scope degrade), and the unit tests under
+`src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware formatter cases
+(Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and guards that every
+`.svelte` format call passes `clock.tz`; `node.test.ts` pins
 `formatToolCallText`'s tz shift; `gantt.test.ts` pins the exact `MODEL_PALETTE`
 colors.
 

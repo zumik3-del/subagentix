@@ -5,12 +5,16 @@ import { probeOpencodeDb } from '$lib/server/db-probe';
 import {
 	getStoredSettings,
 	resolveAgentsPath,
+	resolveDashboardFilter,
+	resolveDashboardWidgets,
 	resolveDbPath,
 	resolveZiptaskBaseUrl,
 	resolveZiptaskEnabled,
 	SettingsValidationError,
 	updateStoredSettings
 } from '$lib/server/settings';
+import type { DashboardFilter } from '$lib/model/dashboard';
+import type { WidgetPlacement } from '$lib/widgets/registry';
 
 type Source = 'file' | 'env' | 'default' | 'none';
 
@@ -19,13 +23,24 @@ interface SettingsPayload {
 	ziptaskBaseUrl: string | null;
 	ziptaskEnabled: boolean;
 	agentsPath: string | null;
+	dashboardWidgets: WidgetPlacement[];
+	dashboardFilter: DashboardFilter;
 	stored: {
 		dbPath: string | null;
 		ziptaskBaseUrl: string | null;
 		ziptaskEnabled: boolean | null;
 		agentsPath: string | null;
+		dashboardWidgets: WidgetPlacement[] | null;
+		dashboardFilter: DashboardFilter | null;
 	};
-	source: { dbPath: Source; ziptaskBaseUrl: Source; ziptaskEnabled: Source; agentsPath: Source };
+	source: {
+		dbPath: Source;
+		ziptaskBaseUrl: Source;
+		ziptaskEnabled: Source;
+		agentsPath: Source;
+		dashboardWidgets: Source;
+		dashboardFilter: Source;
+	};
 }
 
 /** Effective + stored values and the layer each effective value came from. */
@@ -36,11 +51,15 @@ function settingsPayload(): SettingsPayload {
 		ziptaskBaseUrl: resolveZiptaskBaseUrl(),
 		ziptaskEnabled: resolveZiptaskEnabled(),
 		agentsPath: resolveAgentsPath(),
+		dashboardWidgets: resolveDashboardWidgets(),
+		dashboardFilter: resolveDashboardFilter(),
 		stored: {
 			dbPath: stored.dbPath ?? null,
 			ziptaskBaseUrl: stored.ziptaskBaseUrl ?? null,
 			ziptaskEnabled: typeof stored.ziptaskEnabled === 'boolean' ? stored.ziptaskEnabled : null,
-			agentsPath: stored.agentsPath ?? null
+			agentsPath: stored.agentsPath ?? null,
+			dashboardWidgets: stored.dashboardWidgets ?? null,
+			dashboardFilter: stored.dashboardFilter ?? null
 		},
 		source: {
 			dbPath: stored.dbPath ? 'file' : process.env.OPENCODE_DB ? 'env' : 'default',
@@ -51,7 +70,11 @@ function settingsPayload(): SettingsPayload {
 					: process.env.ZIPTASK_ENABLED
 						? 'env'
 						: 'default',
-			agentsPath: stored.agentsPath ? 'file' : process.env.OPENCODE_AGENTS_DIR ? 'env' : 'none'
+			agentsPath: stored.agentsPath ? 'file' : process.env.OPENCODE_AGENTS_DIR ? 'env' : 'none',
+			// Explicit empty selection is still a stored ("file") value; only a
+			// missing/null override falls back to the first-visit defaults.
+			dashboardWidgets: stored.dashboardWidgets != null ? 'file' : 'default',
+			dashboardFilter: stored.dashboardFilter != null ? 'file' : 'default'
 		}
 	};
 }
@@ -81,6 +104,8 @@ export const PUT: RequestHandler = async ({ request }) => {
 		ziptaskBaseUrl?: string | null;
 		ziptaskEnabled?: boolean | null;
 		agentsPath?: string | null;
+		dashboardWidgets?: WidgetPlacement[] | null;
+		dashboardFilter?: DashboardFilter | null;
 	} = {};
 	if (Object.prototype.hasOwnProperty.call(record, 'dbPath')) {
 		patch.dbPath = record.dbPath as string | null;
@@ -93,6 +118,15 @@ export const PUT: RequestHandler = async ({ request }) => {
 	}
 	if (Object.prototype.hasOwnProperty.call(record, 'agentsPath')) {
 		patch.agentsPath = record.agentsPath as string | null;
+	}
+	if (Object.prototype.hasOwnProperty.call(record, 'dashboardWidgets')) {
+		// Legacy `string[]` payloads are still accepted and normalised downstream.
+		patch.dashboardWidgets = record.dashboardWidgets as WidgetPlacement[] | null;
+	}
+	if (Object.prototype.hasOwnProperty.call(record, 'dashboardFilter')) {
+		// The raw value is passed through; `normaliseDashboardFilter` rejects a
+		// malformed pair with the 400 `{ error, field }` contract.
+		patch.dashboardFilter = record.dashboardFilter as DashboardFilter | null;
 	}
 
 	try {
