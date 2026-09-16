@@ -1,10 +1,10 @@
 /**
  * Pure chart math for the dashboard widgets (dashboard Phase 1, task #402).
  *
- * No DOM, no Svelte and no `uplot` import: this module is safe in SSR, in the
- * client bundle and in `bun test`, mirroring `model/gantt.ts`. Every function is
- * deterministic and side-effect free, so the scales, ticks, buckets, arcs and
- * top-N truncation are testable without a renderer.
+ * No DOM, no Svelte and no chart-library import: this module is safe in SSR, in
+ * the client bundle and in `bun test`, mirroring `model/gantt.ts`. Every
+ * function is deterministic and side-effect free, so the scales, ticks, buckets,
+ * arcs and top-N truncation are testable without a renderer.
  */
 
 /** Full turn, in radians. */

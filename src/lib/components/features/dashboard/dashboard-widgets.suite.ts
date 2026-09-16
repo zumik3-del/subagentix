@@ -3,8 +3,8 @@
  *
  * Pins the rendered structure of the pure presentational components —
  * WidgetCard status branches, BarChart with/without detail, DonutChart
- * non-empty/empty/top-N aggregation, TimeSeriesChart sr-only table and
- * visible fallback — via Vite's SSR module runner. No DOM runtime, no DB.
+ * non-empty/empty/top-N aggregation, DayTable newest-first rows and fit
+ * wiring — via Vite's SSR module runner. No DOM runtime, no DB.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createServer, type ViteDevServer } from 'vite';
@@ -24,7 +24,7 @@ type RenderFn = (
 	let SkeletonWidget: unknown;
 	let BarChart: unknown;
 	let DonutChart: unknown;
-	let TimeSeriesChart: unknown;
+	let DayTable: unknown;
 	let WidgetGrid: unknown;
 	let WidgetSettings: unknown;
 
@@ -57,9 +57,9 @@ beforeAll(async () => {
 			'/src/lib/components/features/dashboard/DonutChart.svelte'
 		)) as { default: unknown }
 	).default;
-	TimeSeriesChart = (
+	DayTable = (
 		(await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/TimeSeriesChart.svelte'
+			'/src/lib/components/features/dashboard/DayTable.svelte'
 		)) as { default: unknown }
 	).default;
 	WidgetGrid = (
@@ -175,8 +175,8 @@ function renderDonutChartTopN(): string {
 	}).body;
 }
 
-function renderTimeSeriesChart(props: Record<string, unknown> = {}): string {
-	return render(TimeSeriesChart, {
+function renderDayTable(props: Record<string, unknown> = {}): string {
+	return render(DayTable, {
 		props: {
 			points: [
 				{ day: '2026-01-01', value: 10 },
@@ -189,8 +189,8 @@ function renderTimeSeriesChart(props: Record<string, unknown> = {}): string {
 	}).body;
 }
 
-function renderTimeSeriesChartEmpty(): string {
-	return render(TimeSeriesChart, {
+function renderDayTableEmpty(): string {
+	return render(DayTable, {
 		props: {
 			points: [],
 			label: 'Sessions'
@@ -404,40 +404,53 @@ describe('DonutChart SSR', () => {
 	});
 });
 
-// --- TimeSeriesChart ---------------------------------------------------------
+// --- DayTable ----------------------------------------------------------------
 
-describe('TimeSeriesChart SSR', () => {
-	test('renders a sr-only table with day/value rows', () => {
-		const html = renderTimeSeriesChart();
-		expect(html).toContain('sr-only');
-		expect(html).toContain('caption');
-		expect(html).toContain('2026-01-01');
-		expect(html).toContain('10');
-		expect(html).toContain('2026-01-02');
-		expect(html).toContain('20');
+describe('DayTable SSR', () => {
+	test('renders days in newest-first order', () => {
+		const html = renderDayTable();
+		// Points are ascending; reverse makes the last day appear first.
+		expect(html).toContain('>2026-01-03<');
+		expect(html).toContain('>2026-01-02<');
+		expect(html).toContain('>2026-01-01<');
+		// 2026-01-03 must appear before 2026-01-01 in the markup.
+		const idx03 = html.indexOf('2026-01-03');
+		const idx01 = html.indexOf('2026-01-01');
+		expect(idx03).toBeLessThan(idx01);
 	});
 
-	test('table caption uses the label', () => {
-		const html = renderTimeSeriesChart({ label: 'Cost' });
+	test('table caption uses the label as sr-only accessible name', () => {
+		const html = renderDayTable({ label: 'Cost' });
 		expect(html).toContain('Cost per day');
 	});
 
-	test('empty points yields an empty table body', () => {
-		const html = renderTimeSeriesChartEmpty();
-		expect(html).not.toContain('2026-');
-		// Still has the table structure
-		expect(html).toContain('<table');
+	test('thead has Day and value scope="col" headers', () => {
+		const html = renderDayTable();
+		// Svelte appends its own class hash; match the scoped attribute and label independently.
+		expect(html).toMatch(/<th\s+scope="col"[^>]*>Day<\/th>/);
+		expect(html).toMatch(/<th\s+scope="col"[^>]*>Sessions<\/th>/);
 	});
 
-	test('canvas div is aria-hidden', () => {
-		const html = renderTimeSeriesChart();
-		expect(html).toContain('aria-hidden="true"');
+	test('each row has a scope="row" day header and a value cell', () => {
+		const html = renderDayTable();
+		expect(html).toContain('scope="row"');
+		expect(html).toContain('day-table__day');
+		expect(html).toContain('day-table__value');
+		expect(html).toContain('>10<');
+		expect(html).toContain('>15<');
+		expect(html).toContain('>20<');
 	});
 
-	test('figure wrapper is present', () => {
-		const html = renderTimeSeriesChart();
-		expect(html).toContain('<figure');
-		expect(html).toContain('ts-chart');
+	test('empty points renders the empty-state paragraph, not the table', () => {
+		const html = renderDayTableEmpty();
+		expect(html).not.toContain('<table');
+		expect(html).toContain('day-table__empty');
+		expect(html).toContain('No data for this period.');
+	});
+
+	test('figure wrapper is present with the fit-host class', () => {
+		const html = renderDayTable();
+		expect(html).toMatch(/<figure class="[^"]*day-table/);
 	});
 });
 

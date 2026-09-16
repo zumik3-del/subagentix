@@ -4,14 +4,14 @@
 	 *
 	 * Tier-S time series: `useWidgetData` fetches `/api/dashboard/sessions-per-day`
 	 * for the shared filter, and `WidgetCard` renders the loading/error/empty
-	 * states. A ready payload is drawn by the shared `TimeSeriesChart` (uPlot).
+	 * states. A ready payload is shown as a newest-first day table (`DayTable`).
 	 */
 	import { formatNumber } from '$lib/model/format';
 	import type { DayBucket } from '$lib/model/chart';
 	import type { WidgetBodyProps } from './widget';
 	import { useWidgetData } from './data.svelte';
 	import WidgetCard from './WidgetCard.svelte';
-	import TimeSeriesChart from './TimeSeriesChart.svelte';
+	import DayTable from './DayTable.svelte';
 
 	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
@@ -31,11 +31,6 @@
 	{onSettings}
 >
 	{#if state.data}
-		<TimeSeriesChart
-			points={state.data}
-			label="Sessions"
-			colorVar="--chart-1"
-			formatValue={formatNumber}
-		/>
+		<DayTable points={state.data} label="Sessions" formatValue={formatNumber} />
 	{/if}
 </WidgetCard>

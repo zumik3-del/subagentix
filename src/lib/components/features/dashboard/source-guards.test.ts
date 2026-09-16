@@ -10,57 +10,62 @@ import { readFileSync } from 'node:fs';
  * tests in the characterization suite.
  */
 
-describe('TimeSeriesChart source: uplot only via dynamic import', () => {
+describe('DayTable source: fit wiring + no chart import', () => {
 	const source = readFileSync(
-		new URL('./TimeSeriesChart.svelte', import.meta.url),
+		new URL('./DayTable.svelte', import.meta.url),
 		'utf8'
 	);
 
-	test('does not have a static import of uplot', () => {
+	test('does not import any chart library', () => {
 		expect(source).not.toMatch(/from ['"]uplot['"]/);
+		expect(source).not.toMatch(/from ['"]d3['"]/);
+		expect(source).not.toMatch(/from ['"]chart['"]/);
 	});
 
-	test('does not have a type-only import of uplot', () => {
-		expect(source).not.toMatch(/import\s+type\s+.*from\s+['"]uplot['"]/);
+	test('imports useRowFit for client-side whole-row trimming', () => {
+		expect(source).toMatch(/from ['"]\.\/fit\.svelte['"]/);
+		expect(source).toMatch(/\buseRowFit\b/);
 	});
 
-	test('contains the dynamic import("uplot") call inside onMount', () => {
-		expect(source).toMatch(/import\(['"]uplot['"]\)/);
+	test('reverses the ascending points array so the newest day is first', () => {
+		// [...points].reverse() is the explicit newest-first ordering required
+		// by task #453; a naive ascending render would show the oldest day on top.
+		expect(source).toMatch(/\[\.\.\.points\]\.reverse\(\)/);
 	});
 
-	test('contains the dynamic import of the uPlot CSS', () => {
-		expect(source).toMatch(/import\(['"]uplot\/dist\/uPlot\.min\.css['"]\)/);
+	test('slices visible rows to fit.budget (whole-row trim)', () => {
+		// The fit contract: rows.slice(0, fit.budget) trims to whole rows after
+		// mount; SSR renders every row because fit.budget equals total until measured.
+		expect(source).toMatch(/rows\.slice\(0,\s*fit\.budget\)/);
 	});
 
-	test('declares local UPlotInstance and UPlotConstructor interfaces', () => {
-		expect(source).toMatch(/interface\s+UPlotInstance/);
-		expect(source).toMatch(/interface\s+UPlotConstructor/);
+	test('renders sr-only caption with the label', () => {
+		expect(source).toMatch(/<caption class="sr-only">/);
+		expect(source).toMatch(/\{label\}/);
 	});
 
-	test('calls chart.destroy in the onMount cleanup', () => {
-		expect(source).toMatch(/chart\?\.destroy\(\)/);
+	test('renders sr-only thead with Day and value column headers', () => {
+		expect(source).toMatch(/<th scope="col">Day<\/th>/);
+		expect(source).toMatch(/<th scope="col">\{label\}<\/th>/);
 	});
 
-	test('calls chart.setSize when resizing', () => {
-		expect(source).toMatch(/chart\.setSize/);
+	test('renders each day as a scope="row" header cell', () => {
+		expect(source).toMatch(/<th scope="row"/);
+		expect(source).toMatch(/class="day-table__day"/);
 	});
 
-	test('disconnects ResizeObserver on cleanup', () => {
-		expect(source).toMatch(/observer\?\.disconnect\(\)/);
+	test('formats the value cell with the supplied formatter', () => {
+		expect(source).toMatch(/formatValue\(row\.value\)/);
 	});
 
-	test('sets failed=true when the dynamic import rejects', () => {
-		expect(source).toMatch(/failed\s*=\s*true/);
+	test('renders the empty state when points are absent', () => {
+		expect(source).toMatch(/day-table__empty/);
 	});
 
-	test('sr-only table is present for accessible fallback', () => {
-		expect(source).toMatch(/sr-only/);
-		expect(source).toMatch(/caption/);
-	});
-
-	test('visible fallback note appears when chart load fails', () => {
-		expect(source).toMatch(/ts-chart__note/);
-		expect(source).toMatch(/Chart unavailable/);
+	test('wraps the table in a figure with overflow:hidden fit host', () => {
+		expect(source).toMatch(/<figure class="day-table"/);
+		expect(source).toMatch(/bind:this=\{list\}/);
+		expect(source).toMatch(/overflow:\s*hidden/);
 	});
 });
 
