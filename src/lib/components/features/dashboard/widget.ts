@@ -1,0 +1,43 @@
+/**
+ * Lazy-mount contract for dashboard widgets (dashboard Phase 3, task #409).
+ *
+ * A widget body is code-split: `WidgetHost` calls a loader only once its host
+ * scrolled into view. The loader is the Vite dynamic-import boundary, so no
+ * widget module is pulled into the SSR graph or the initial client bundle
+ * until then. Kept free of `$lib/server` / DOM so both SSR and client import
+ * it (docs/ui-standards.md §10).
+ */
+import type { Component } from 'svelte';
+import type { DashboardFilter } from '$lib/model/dashboard';
+import type { WidgetDef, WidgetId } from '$lib/widgets/registry';
+
+/**
+ * Props every widget body receives from its `WidgetHost` (task #410). The host
+ * forwards these from the grid, so a body never reaches for global shell state:
+ * it fetches its own `widget.source` with the shared `filter`, and refetches
+ * with `?refresh=1` when `refreshToken` changes (global refresh) or its own
+ * card refresh control fires (this widget only).
+ */
+export interface WidgetBodyProps {
+	/** Registry entry for this body; supplies the endpoint and card title. */
+	widget: WidgetDef;
+	/** Active global filter (period + scope), shared by every widget. */
+	filter: DashboardFilter;
+	/** Global refresh counter; a change refetches this widget with `refresh=1`. */
+	refreshToken: number;
+}
+
+/** A widget body component; every body shares the {@link WidgetBodyProps} surface. */
+export type WidgetComponent = Component<WidgetBodyProps>;
+
+/** Dynamic import of one widget body; Vite code-splits the target module. */
+export type WidgetLoader = () => Promise<{ default: WidgetComponent }>;
+
+/** Per-widget loaders, keyed by registry id; a missing entry stays a skeleton. */
+export type WidgetLoaders = Partial<Record<WidgetId, WidgetLoader>>;
+
+/**
+ * Per-widget lifecycle state the card chrome renders. Produced by the data
+ * hook (task #410) and accepted by `WidgetCard` (only `ready` shows the body).
+ */
+export type WidgetStatus = 'loading' | 'ready' | 'error' | 'empty';

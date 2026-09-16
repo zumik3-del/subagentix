@@ -20,8 +20,9 @@ reviewable.
 - Components follow the layer rules in [§10](#10-layer--component-conventions).
   Where a rule here and a legacy comment disagree, this file and the guarding
   suite ([§12](#12-verification-map)) win.
-- No Tailwind, no UI library, no new runtime dependency. Plain CSS custom
-  properties only.
+- No Tailwind, no UI library, no new runtime dependency — **one documented
+  exception:** the `uplot` time-series chart library, justified in
+  [§2](#2-color--tokens). Plain CSS custom properties only.
 
 ---
 
@@ -65,6 +66,15 @@ reviewable.
 - **Chart palette.** `--chart-1 … --chart-7` alias the palette levels 9
   (`src/app.css:185-191`). Legend wording/chips consume the same status tokens
   as the chart.
+- **Accepted dependency exception: `uplot`.** The one runtime dependency after
+  `src/app.css` (`uplot@^1.6.32`, MIT, `package.json:25`), used **only** by the
+  two dense time-series widgets (`sessions-per-day`, `cost-per-day`) through
+  `TimeSeriesChart.svelte`. It is canvas-based and client-only: dynamically
+  imported inside `onMount` (`TimeSeriesChart.svelte:159-160`), so it never
+  enters the SSR graph or the initial bundle. Size (pinned `1.6.32` build):
+  ≈50 KB minified / ≈22 KB gzip; the epic's ADR quotes ≈45 KB min / ≈15 KB gzip.
+  **Every other widget stays hand-rolled inline SVG** over the `--chart-*`
+  tokens (`BarChart`, `DonutChart`, the KPI mix bar) — no second chart library.
 - **No hardcoded legacy hex.** No `.svelte` file may hardcode a hex from the
   pre-theme palette; the guard walks every `.svelte` under `src/` against
   `LEGACY_PALETTE` (`pages.suite.ts`: "no component keeps the legacy hardcoded
@@ -280,6 +290,14 @@ Some tones reach markup only through dynamic composition —
 `ui-badge--${action.kind}` → text|reasoning|patch|file|agent|compaction — so a
 literal-token grep reports them unused; they are live.
 
+**Card**
+- `.ui-card` — widget surface: column flow, `--space-4` padding,
+  `--background-strong` background, `--border-weak-base` border,
+  `--radius-lg`. It renders a single DOM node and carries styling only (no
+  behaviour), so by the class-vs-component rule it stays a plain class; the
+  dashboard's `WidgetCard` and `SkeletonWidget` consume it
+  (`WidgetCard.svelte:40`, `SkeletonWidget.svelte:19`).
+
 **Modal** (structure only; focus trap / Escape behaviour lives in the feature
 components that own it — a `ModalShell` composite is deferred, see
 [§9](#9-modal--dialog-contract))
@@ -306,8 +324,8 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **`Icon.svelte`** (L1 primitive) is the shared inline-SVG set. Its glyph union
   is `'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' |
-  'arrow-up'`, with an optional `size` (`default 16`)
-  (`src/lib/components/primitives/Icon.svelte:8-12`). Color inherits via
+  'arrow-up' | 'refresh'`, with an optional `size` (`default 16`)
+  (  `src/lib/components/primitives/Icon.svelte:8-17`). Color inherits via
   `currentColor`; every glyph is `aria-hidden="true"` and `focusable="false"`.
   It states the no-emoji rule (`Icon.svelte:3`).
 - **`TreeIcon.svelte`** is the tree-only chevron/folder provider:
@@ -401,19 +419,26 @@ layers `1..n`, never an upper layer.
 |---|---|---|
 | L0 tokens | `src/app.css` custom properties + element/base styles + `.ui-*` classes | design tokens |
 | L1 primitives | single-purpose, context-free | `Icon`, `TreeIcon`, `ScrollView` |
-| L2 composites | assemble primitives, still context-free | `TrackerChipList`, `SummaryLine`, `IoBlock`, `BackToTableButton` |
-| L3 feature | domain-aware roots + their presentation children | `Gantt`, `NodeDetailPanel`, `SessionSidebar`, `SettingsModal`, `TaskModal` |
+| L2 composites | assemble primitives, still context-free | `TrackerChipList`, `SummaryLine`, `IoBlock`, `BackToTableButton`, `WidgetCard`, `SkeletonWidget` |
+| L3 feature | domain-aware roots + their presentation children | `Gantt`, `NodeDetailPanel`, `SessionSidebar`, `SettingsModal`, `TaskModal`, `Dashboard`, `WidgetHost` |
 | L4 page | routes | `+layout.svelte`, `+page.svelte`, `sessions/[id]/+page.svelte` |
 
 ### Landed directory layout
 
-Feature folders: `src/lib/components/features/{gantt,node-detail,sidebar,settings,tracker}`.
+Feature folders:
+`src/lib/components/features/{dashboard,gantt,node-detail,sidebar,settings,tracker}`.
 
 ```
 src/
   app.css                                       # L0: tokens + .ui-* + base styles
   lib/
-    model/                                      # pure domain math + formatters
+    model/                                      # pure domain math + formatters (SSR-safe)
+      chart.ts                                  # scale/tick/bucket/arc math for the charts
+      dashboard.ts                              # dashboard DTOs, period + window rules
+      agent.ts  format.ts  gantt.ts  node.ts  paging.ts  token.ts  tracker.ts
+      types.ts  clock.svelte.ts
+    widgets/
+      registry.ts                               # WidgetId/WidgetDef/WIDGET_DEFS (client-safe)
     components/
       primitives/                               # L1
         Icon.svelte  TreeIcon.svelte  ScrollView.svelte
@@ -421,6 +446,20 @@ src/
         TrackerChipList.svelte  SummaryLine.svelte
         IoBlock.svelte  BackToTableButton.svelte
       features/
+        dashboard/                              # L3 shell + its L2 card pieces
+          Dashboard.svelte                      # shell root (owns selection)
+          DashboardHeader.svelte  WidgetGrid.svelte  FilterSelector.svelte
+          WidgetHost.svelte                     # lazy mount boundary (#409)
+          WidgetCard.svelte  SkeletonWidget.svelte  WidgetsModal.svelte
+          widget.ts                             # loader/status contract (#409)
+          data.svelte.ts                        # useWidgetData rune hook (#410)
+          loaders.ts                            # per-widget code-split loaders
+          filter.ts  picker.ts  top-tools.ts    # pure helpers (unit-tested)
+          TimeSeriesChart.svelte                # uPlot time series (§2)
+          BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG (§2)
+          KpiWidget.svelte  TopToolsWidget.svelte
+          SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
+          TopProjectsWidget.svelte  AgentDistributionWidget.svelte
         gantt/                                  # L3
           Gantt.svelte                          # feature root (orchestrator)
           GanttHeader.svelte  GanttLabels.svelte  GanttLabelRow.svelte
@@ -435,9 +474,12 @@ src/
         sidebar/SessionSidebar.svelte
         settings/SettingsModal.svelte
         tracker/TaskModal.svelte  TaskDetailView.svelte
-  routes/                                       # L4 pages + *.suite.ts / *.test.ts
+  routes/                                       # L4 pages + route-level *.suite.ts / *.test.ts
 ```
 
+- Tests are co-located with what they guard: route-level suites under
+  `src/routes/**` and feature/unit suites beside their modules
+  (`features/dashboard/*.suite.ts`, `model/*.test.ts`).
 - Not landed (deferred by the ADR): `composites/ModalShell.svelte` and
   `features/gantt/view.ts`.
 - **State ownership:** feature roots keep interactive state and cross-block
@@ -536,12 +578,15 @@ assertion to the file that now owns the string.
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
+| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback) and `loaders.ts` id→body routing |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, pure modules stay DOM/`$lib/server`-free |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
 source/paths), `src/lib/components/scroll-view.test.ts`,
 `src/routes/pages.test.ts`, `src/routes/m3c-drilldown.test.ts`,
-`src/routes/m4a-tracker.test.ts` (isolated-child-process runners), and the unit
-tests under `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware
+`src/routes/m4a-tracker.test.ts` (isolated-child-process runners), the dashboard
+helper units `features/dashboard/{data,filter,picker,top-tools}.test.ts`, and the
+unit tests under `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware
 formatter cases (Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and
 guards that every `.svelte` format call passes `clock.tz`; `node.test.ts` pins
 `formatToolCallText`'s tz shift; `gantt.test.ts` pins the exact `MODEL_PALETTE`

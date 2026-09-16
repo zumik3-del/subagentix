@@ -1,0 +1,40 @@
+<script lang="ts">
+	/**
+	 * Cost-per-day widget body (dashboard Phase 4, task #411).
+	 *
+	 * Tier-M time series: `useWidgetData` fetches `/api/dashboard/cost-per-day`
+	 * for the shared filter, and `WidgetCard` renders the loading/error/empty
+	 * states. A ready payload is drawn by the shared `TimeSeriesChart` (uPlot).
+	 */
+	import { formatCost } from '$lib/model/format';
+	import type { DayBucket } from '$lib/model/chart';
+	import type { WidgetBodyProps } from './widget';
+	import { useWidgetData } from './data.svelte';
+	import WidgetCard from './WidgetCard.svelte';
+	import TimeSeriesChart from './TimeSeriesChart.svelte';
+
+	let { widget, filter, refreshToken }: WidgetBodyProps = $props();
+
+	const state = useWidgetData<DayBucket[]>({
+		source: () => widget.source,
+		filter: () => filter,
+		refreshToken: () => refreshToken
+	});
+</script>
+
+<WidgetCard
+	title={widget.title}
+	status={state.status}
+	error={state.error ?? undefined}
+	refreshing={state.refreshing}
+	onRefresh={state.refresh}
+>
+	{#if state.data}
+		<TimeSeriesChart
+			points={state.data}
+			label="Cost"
+			colorVar="--chart-2"
+			formatValue={formatCost}
+		/>
+	{/if}
+</WidgetCard>

@@ -4,15 +4,16 @@
  * Isolated child process. It (1) builds the app, (2) guards the client bundle
  * against server-only references (`bun:sqlite` / `opencode.db` / `OPENCODE_DB`),
  * and (3) boots the real `adapter-node` server against throwaway fixture DBs to
- * assert the tree-only home placeholder, the session header + Gantt page (no
- * turn list), and that the DB-unavailable path returns a non-crashing 503 page
- * for the session route while the shell still renders.
+ * assert the dashboard home shell (task #404: header + grid + skeletons), the
+ * session header + Gantt page (no turn list), and that the DB-unavailable path
+ * returns a non-crashing 503 page for the session route while the shell still
+ * renders.
  *
  * The live opencode DB is never opened or written.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -622,20 +623,24 @@ describe('server-leak guard (build/client/**)', () => {
 	});
 });
 
-describe('SSR #215 — tree-only home + header/Gantt session page', () => {
-	test('/ renders the placeholder with no session list; /sessions/[id] renders header + Gantt only', async () => {
+describe('SSR #215 — dashboard home + header/Gantt session page', () => {
+	test('/ renders the dashboard shell with no session list; /sessions/[id] renders header + Gantt only', async () => {
 		const dir = tempDir('subagentix-m3a-pages-');
 		const dbPath = join(dir, 'fixture.db');
 		buildPopulatedDb(dbPath);
 
 		const server = await startServer(dbPath);
 		try {
-			// Home is a placeholder: the tree (sidebar) is the only navigation, so
-			// the main area carries no session rows, no pager and no empty-state.
+			// Home is the dashboard shell (task #404): header + responsive grid with
+			// one skeleton per selected widget. The tree (sidebar) is still the only
+			// session navigation, so the main area carries no session rows or pager.
 			const list = await getHtml(server.base, '/');
 			expect(list.status).toBe(200);
-			expect(list.body).toContain('class="placeholder');
-			expect(list.body).toContain('Select a session in the tree, then a turn, to view its Gantt.');
+			expect(list.body).toContain('class="dashboard');
+			expect(list.body).toContain('class="widget-grid');
+			expect(list.body).toContain('class="skeleton-widget');
+			// The default selection is seeded from settings.json (absent -> defaults).
+			expect(list.body).toContain('Sessions per day');
 			expect(list.body).not.toContain('href="/sessions/');
 			expect(list.body).not.toContain('aria-label="Session list pages"');
 			expect(list.body).not.toContain('No sessions found.');
@@ -682,7 +687,146 @@ describe('SSR #215 — tree-only home + header/Gantt session page', () => {
 	}, 60_000);
 });
 
-describe('SSR turn Gantt against a crafted fixture (M3b)', () => {
+describe('SSR dashboard picker + scope (tasks #414/#415)', () => {
+		test('/ renders the Widgets button and filter selector in the header actions area', async () => {
+			const dir = tempDir('subagentix-dashboard-picker-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+				// Picker button lives in the header actions slot.
+				expect(page.body).toContain('>Widgets<');
+				// The modal is open=false in SSR, so no dialog markup should appear.
+				expect(page.body).not.toContain('role="dialog"');
+				expect(page.body).not.toContain('aria-modal');
+				expect(page.body).not.toContain('class="widgets-dialog"');
+				// Filter selector: period select + project select.
+				expect(page.body).toMatch(/<select[^>]*aria-label="Period"/);
+				expect(page.body).toMatch(/<select[^>]*aria-label="Project"/);
+				// Default period is 30d, default scope is "all" (every directory).
+				expect(page.body).toContain('value="30d"');
+				expect(page.body).toContain('value="all"');
+				// Default widget selection renders skeletons (6 defaults).
+				expect(countElementClasses(page.body, 'skeleton-widget')).toBe(6);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('zero-selection settings renders the empty state, not the widget grid', async () => {
+			const dir = tempDir('subagentix-dashboard-empty-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			// Persist an explicit empty widget selection (simulates post-Apply with zero widgets).
+			writeFileSync(`${dbPath}.settings.json`, JSON.stringify({ version: 1, dashboardWidgets: [] }), 'utf8');
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+				// No grid, no skeletons.
+				expect(page.body).not.toContain('class="widget-grid');
+				expect(page.body).not.toContain('class="skeleton-widget');
+				// Empty-state paragraph is present.
+				expect(page.body).toContain(
+					'No widgets selected. Use the Widgets button to add widgets to your dashboard.'
+				);
+				// The picker button still renders (the user can open it to add widgets).
+				expect(page.body).toContain('>Widgets<');
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('URL ?period=7d&scope=/repo/a drives the selector values in SSR', async () => {
+			const dir = tempDir('subagentix-dashboard-scope-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/?period=7d&scope=/repo/a');
+				expect(page.status).toBe(200);
+				// The selects reflect the URL-driven values (parser accepts valid inputs).
+				expect(page.body).toContain('value="7d"');
+				expect(page.body).toContain('value="/repo/a"');
+				// Widget grid still renders with the default persisted selection.
+				expect(page.body).toContain('class="widget-grid');
+				expect(countElementClasses(page.body, 'skeleton-widget')).toBe(6);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('URL ?period=invalid&scope=/ghost falls back to defaults', async () => {
+			const dir = tempDir('subagentix-dashboard-fallback-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/?period=invalid&scope=/ghost');
+				expect(page.status).toBe(200);
+				// Unknown period -> DEFAULT_PERIOD (30d); unknown scope -> null (all).
+				expect(page.body).toContain('value="30d"');
+				expect(page.body).toContain('value="all"');
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('custom persisted widget selection renders only those widgets as skeletons', async () => {
+			const dir = tempDir('subagentix-dashboard-custom-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			// Persist a single-widget selection (simulates post-Apply from the picker).
+			writeFileSync(`${dbPath}.settings.json`, JSON.stringify({ version: 1, dashboardWidgets: ['kpi'] }), 'utf8');
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+			// Only the KPI skeleton renders.
+			expect(page.body).toContain('Cost &amp; tokens');
+			expect(page.body).not.toContain('Sessions per day');
+			expect(page.body).not.toContain('Cost per day');
+			expect(page.body).not.toContain('Top tools');
+			expect(page.body).not.toContain('Agent distribution');
+			expect(page.body).not.toContain('Top projects');
+			expect(countElementClasses(page.body, 'skeleton-widget')).toBe(1);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+
+		test('unknown widget ids in settings are dropped silently, known ones rendered', async () => {
+			const dir = tempDir('subagentix-dashboard-mixed-');
+			const dbPath = join(dir, 'fixture.db');
+			buildPopulatedDb(dbPath);
+			// Mix of known and unknown ids — the loader should drop the unknowns.
+			writeFileSync(
+				`${dbPath}.settings.json`,
+				JSON.stringify({ version: 1, dashboardWidgets: ['kpi', 'nonexistent', 'top-tools'] }),
+				'utf8'
+			);
+
+			const server = await startServer(dbPath);
+			try {
+				const page = await getHtml(server.base, '/');
+				expect(page.status).toBe(200);
+				expect(page.body).toContain('Cost &amp; tokens');
+				expect(page.body).toContain('Top tools');
+				expect(countElementClasses(page.body, 'skeleton-widget')).toBe(2);
+			} finally {
+				await server.stop();
+			}
+		}, 60_000);
+	});
+
+	describe('SSR turn Gantt against a crafted fixture (M3b)', () => {
 	test('/sessions/[id]?turn= renders the skeleton in SSR body and resolves the GanttModel async', async () => {
 		const dir = tempDir('subagentix-m3b-gantt-');
 		const dbPath = join(dir, 'fixture.db');
@@ -859,7 +1003,7 @@ describe('SSR #241 — .selected divider removed', () => {
 	});
 
 describe('SSR empty-state', () => {
-	test('/ renders the placeholder for a session-less DB and the sidebar its empty state', async () => {
+	test('/ renders the dashboard shell for a session-less DB and the sidebar its empty state', async () => {
 		const dir = tempDir('subagentix-m3a-empty-');
 		const dbPath = join(dir, 'empty.db');
 		buildEmptyDb(dbPath);
@@ -868,9 +1012,11 @@ describe('SSR empty-state', () => {
 		try {
 			const list = await getHtml(server.base, '/');
 			expect(list.status).toBe(200);
-			expect(list.body).toContain('class="placeholder');
-			expect(list.body).toContain('Select a session in the tree, then a turn, to view its Gantt.');
-			// The old main-area empty state is gone.
+			// The dashboard shell renders regardless of session data (default selection).
+			expect(list.body).toContain('class="dashboard');
+			expect(list.body).toContain('class="widget-grid');
+			expect(list.body).toContain('class="skeleton-widget');
+			// The dashboard main area has no session list/empty-state of its own.
 			expect(list.body).not.toContain('No sessions found.');
 			// The sidebar shows its own empty state (0 seeds, total 0).
 			expect(list.body).toContain('No sessions available.');
@@ -887,11 +1033,11 @@ describe('DB-unavailable error page', () => {
 
 		const server = await startServer(dbPath);
 		try {
-			// `/` has no loader: it renders the placeholder with the sidebar's null
-			// fallback, so the shell still works when the data layer is unavailable.
+			// `/` reads settings.json only (no DB), so the dashboard shell renders with
+			// the sidebar's null fallback even when the data layer is unavailable.
 			const list = await getHtml(server.base, '/');
 			expect(list.status).toBe(200);
-			expect(list.body).toContain('class="placeholder');
+			expect(list.body).toContain('class="dashboard');
 			expect(list.body).toContain('Session list unavailable.');
 
 			const detail = await getHtml(server.base, '/sessions/root1');

@@ -357,6 +357,10 @@ a {
  *   `ui-badge--${action.kind}` → text|reasoning|patch|file|agent|compaction —
  *   so a literal-token grep reports them unused; they are live.
  *
+ * Card
+ *   .ui-card          — widget surface (background, border, radius, column
+ *                       flow); consumed by WidgetCard / SkeletonWidget.
+ *
  * Modal (structure only; focus trap / Escape behaviour lives in the feature
  * components that own it — a ModalShell composite is deferred, ADR §4/§7)
  *   .ui-modal            — fixed full-viewport centering wrapper.
@@ -586,6 +590,19 @@ a {
 .ui-badge--compaction {
 	background: color-mix(in srgb, var(--text-strong) 18%, transparent);
 	color: var(--text-strong);
+}
+
+/* Card ---------------------------------------------------------------- */
+.ui-card {
+	display: flex;
+	flex-direction: column;
+	gap: var(--space-4);
+	min-width: 0;
+	padding: var(--space-4);
+	background: var(--background-strong);
+	color: var(--text-base);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-lg);
 }
 
 /* Modal --------------------------------------------------------------- */

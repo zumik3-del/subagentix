@@ -5,7 +5,16 @@
 	 * stays the tree-only chevron/folder provider.
 	 */
 	interface Props {
-		name: 'gear' | 'menu' | 'close' | 'copy' | 'check' | 'expand' | 'collapse' | 'arrow-up';
+		name:
+			| 'gear'
+			| 'menu'
+			| 'close'
+			| 'copy'
+			| 'check'
+			| 'expand'
+			| 'collapse'
+			| 'arrow-up'
+			| 'refresh';
 		size?: number;
 	}
 
@@ -120,6 +129,23 @@
 		focusable="false"
 	>
 		<path d="M8 13V3.5M3.5 8 8 3.5 12.5 8" />
+	</svg>
+{:else if name === 'refresh'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.4"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M13.66 10a6 6 0 1 1-1.41-6.24L15.33 6.67" />
+		<polyline points="15.33 2.67 15.33 6.67 11.33 6.67" />
 	</svg>
 {:else}
 	<svg

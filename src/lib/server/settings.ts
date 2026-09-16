@@ -10,19 +10,30 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { DEFAULT_WIDGETS, resolveWidgets } from '$lib/widgets/registry';
+import type { WidgetId } from '$lib/widgets/registry';
 
 /** Hardcoded fallback when neither the file nor `OPENCODE_DB` supplies a path. */
 export const DEFAULT_DB_PATH = '/home/opencode/.local/share/opencode/opencode.db';
 
 const MAX_DB_PATH_LENGTH = 4096;
 
-export type SettingsField = 'dbPath' | 'ziptaskBaseUrl' | 'ziptaskEnabled' | 'agentsPath';
+/** Defensive upper bound on a `dashboardWidgets` list (registry has far fewer). */
+const MAX_DASHBOARD_WIDGETS = 24;
+
+export type SettingsField =
+	| 'dbPath'
+	| 'ziptaskBaseUrl'
+	| 'ziptaskEnabled'
+	| 'agentsPath'
+	| 'dashboardWidgets';
 
 export interface StoredSettings {
 	dbPath?: string | null;
 	ziptaskBaseUrl?: string | null;
 	ziptaskEnabled?: boolean | null;
 	agentsPath?: string | null;
+	dashboardWidgets?: string[] | null;
 }
 
 /** Validation failure carrying the offending field for the 400 API contract. */
@@ -117,6 +128,40 @@ export function normaliseAgentsPath(value: unknown): string {
 	return resolve(value);
 }
 
+/**
+ * Validate/normalise a `dashboardWidgets` value; throws `SettingsValidationError`.
+ *
+ * Accepts a `string[]`; unknown ids are dropped, duplicates collapsed and the
+ * survivors returned in widget-registry order (the same order the picker and
+ * grid rely on). A non-array, a non-string entry or an oversized list is
+ * rejected so a malformed payload never reaches disk.
+ */
+export function normaliseDashboardWidgets(value: unknown): WidgetId[] {
+	if (!Array.isArray(value)) {
+		throw new SettingsValidationError(
+			'dashboardWidgets must be an array of widget ids.',
+			'dashboardWidgets'
+		);
+	}
+	if (value.length > MAX_DASHBOARD_WIDGETS) {
+		throw new SettingsValidationError(
+			`dashboardWidgets must contain at most ${MAX_DASHBOARD_WIDGETS} entries.`,
+			'dashboardWidgets'
+		);
+	}
+	const ids: string[] = [];
+	for (const entry of value) {
+		if (typeof entry !== 'string') {
+			throw new SettingsValidationError(
+				'dashboardWidgets must contain only strings.',
+				'dashboardWidgets'
+			);
+		}
+		ids.push(entry);
+	}
+	return resolveWidgets(ids).map((def) => def.id);
+}
+
 /** Pick the known keys off a parsed file, dropping values that fail validation. */
 function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 	const out: StoredSettings = {};
@@ -142,6 +187,13 @@ function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 			out.agentsPath = normaliseAgentsPath(raw.agentsPath);
 		} catch {
 			// Same as above.
+		}
+	}
+	if (Array.isArray(raw.dashboardWidgets)) {
+		try {
+			out.dashboardWidgets = normaliseDashboardWidgets(raw.dashboardWidgets);
+		} catch {
+			// A hand-edited invalid list degrades to the registry defaults.
 		}
 	}
 	return out;
@@ -201,6 +253,7 @@ function writeSettingsFile(settings: StoredSettings): void {
 	if (settings.ziptaskBaseUrl !== undefined) payload.ziptaskBaseUrl = settings.ziptaskBaseUrl;
 	if (settings.ziptaskEnabled !== undefined) payload.ziptaskEnabled = settings.ziptaskEnabled;
 	if (settings.agentsPath !== undefined) payload.agentsPath = settings.agentsPath;
+	if (settings.dashboardWidgets !== undefined) payload.dashboardWidgets = settings.dashboardWidgets;
 	const tmp = `${file}.tmp-${process.pid}`;
 	writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
 	renameSync(tmp, file);
@@ -227,6 +280,10 @@ export function updateStoredSettings(patch: StoredSettings): StoredSettings {
 	}
 	if (Object.prototype.hasOwnProperty.call(patch, 'agentsPath')) {
 		next.agentsPath = patch.agentsPath === null ? null : normaliseAgentsPath(patch.agentsPath);
+	}
+	if (Object.prototype.hasOwnProperty.call(patch, 'dashboardWidgets')) {
+		next.dashboardWidgets =
+			patch.dashboardWidgets === null ? null : normaliseDashboardWidgets(patch.dashboardWidgets);
 	}
 	writeSettingsFile(next);
 	cachedPath = settingsFilePath();
@@ -263,6 +320,18 @@ export function resolveZiptaskEnabled(): boolean {
 /** Effective subagents directory: file override -> env -> `null` (use default scan). */
 export function resolveAgentsPath(): string | null {
 	return getStoredSettings().agentsPath ?? process.env.OPENCODE_AGENTS_DIR ?? null;
+}
+
+/**
+ * Effective dashboard widget ids: stored selection -> {@link DEFAULT_WIDGETS}
+ * (first visit). There is no environment layer — this is UI state. The stored
+ * value was normalised on read, and is re-resolved here so the result is always
+ * deduped and in registry order.
+ */
+export function resolveDashboardWidgets(): WidgetId[] {
+	return resolveWidgets(getStoredSettings().dashboardWidgets ?? DEFAULT_WIDGETS).map(
+		(def) => def.id
+	);
 }
 
 /** Subscribe to successful settings writes; returns an unsubscribe function. */

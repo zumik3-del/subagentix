@@ -64,13 +64,15 @@ describe('GET /api/settings', () => {
 			dbPath: null,
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
-			agentsPath: null
+			agentsPath: null,
+			dashboardWidgets: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'default',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
-			agentsPath: 'none'
+			agentsPath: 'none',
+			dashboardWidgets: 'default'
 		});
 	});
 
@@ -94,13 +96,15 @@ describe('GET /api/settings', () => {
 			dbPath: '/tmp/seeded.db',
 			ziptaskBaseUrl: null,
 			ziptaskEnabled: null,
-			agentsPath: null
+			agentsPath: null,
+			dashboardWidgets: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'file',
 			ziptaskBaseUrl: 'none',
 			ziptaskEnabled: 'default',
-			agentsPath: 'none'
+			agentsPath: 'none',
+			dashboardWidgets: 'default'
 		});
 	});
 });
