@@ -1,10 +1,10 @@
 /**
- * Dashboard widget registry (dashboard Phase 1, task #402).
+ * Dashboard widget registry (dashboard Phase 1, task #402; resizable in #438).
  *
- * The single client-safe source of widget identity, size, aggregation tier and
- * default membership, mirroring spec §2.1. Imported by both SSR and client code
- * (and by the settings store for ordering), so it must stay free of
- * `$lib/server` / DB imports and of any DOM/Svelte dependency. Pure and
+ * The single client-safe source of widget identity, aggregation tier, default
+ * placement and default membership, mirroring spec §2.1. Imported by both SSR
+ * and client code (and by the settings store for ordering), so it must stay
+ * free of `$lib/server` / DB imports and of any DOM/Svelte dependency. Pure and
  * deterministic; no I/O.
  */
 
@@ -18,16 +18,38 @@ export type WidgetId =
 	| 'top-projects';
 
 /**
- * Fixed grid footprint (spec §2.7): `1x1` = 4 of 12 columns, `2x1` = 8,
- * `full` = the whole row. No drag-and-drop in v1.
- */
-export type WidgetSize = '1x1' | '2x1' | 'full';
-
-/**
  * Dominant aggregation source tier (spec §2.3): `S` = `session` scan (cheap),
  * `M` = `message` day buckets (medium), `P` = `part` tool frequency (heavy).
  */
 export type WidgetTier = 'S' | 'M' | 'P';
+
+/** Width is a count of equal quarter-width grid blocks (4 = full row). */
+export const WIDGET_MIN_WIDTH = 1;
+export const WIDGET_MAX_WIDTH = 4;
+/** Height is a count of 6rem grid rows. */
+export const WIDGET_MIN_HEIGHT = 1;
+export const WIDGET_MAX_HEIGHT = 8;
+
+/** Clamp a width to the supported block range (non-finite -> minimum). */
+export function clampWidth(value: number): number {
+	if (!Number.isFinite(value)) return WIDGET_MIN_WIDTH;
+	return Math.min(WIDGET_MAX_WIDTH, Math.max(WIDGET_MIN_WIDTH, Math.round(value)));
+}
+
+/** Clamp a height to the supported row range (non-finite -> minimum). */
+export function clampHeight(value: number): number {
+	if (!Number.isFinite(value)) return WIDGET_MIN_HEIGHT;
+	return Math.min(WIDGET_MAX_HEIGHT, Math.max(WIDGET_MIN_HEIGHT, Math.round(value)));
+}
+
+/** One persisted/grid placement for a widget: id plus its size. */
+export interface WidgetPlacement {
+	id: WidgetId;
+	/** Width in quarter-width blocks (1–4). */
+	width: number;
+	/** Height in 6rem rows (1–8). */
+	height: number;
+}
 
 /** One registrable dashboard widget. */
 export interface WidgetDef {
@@ -35,8 +57,10 @@ export interface WidgetDef {
 	id: WidgetId;
 	/** Human-readable card title. */
 	title: string;
-	/** Grid footprint. */
-	size: WidgetSize;
+	/** Registry-default width in quarter-width blocks (1–4). */
+	width: number;
+	/** Registry-default height in 6rem rows (1–8). */
+	height: number;
 	/** Dominant aggregation source tier (`S` | `M` | `P`). */
 	tier: WidgetTier;
 	/** `true` when the widget is part of the first-visit default selection. */
@@ -48,13 +72,15 @@ export interface WidgetDef {
 /**
  * Every v1 widget, in registry (picker) order. `defaultOn` is `true` for the
  * six first-visit defaults; optional catalog extensions (top models, token
- * mix, activity heatmap) are intentionally not registered here (spec §3).
+ * mix, activity heatmap) are intentionally not registered here (spec §3). The
+ * `width`/`height` are the per-widget registry defaults (task #438).
  */
 export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'kpi',
 		title: 'Cost & tokens',
-		size: 'full',
+		width: 4,
+		height: 2,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/kpi'
@@ -62,7 +88,8 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'sessions-per-day',
 		title: 'Sessions per day',
-		size: '2x1',
+		width: 2,
+		height: 3,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/sessions-per-day'
@@ -70,7 +97,8 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'cost-per-day',
 		title: 'Cost per day',
-		size: '2x1',
+		width: 2,
+		height: 3,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/cost-per-day'
@@ -78,7 +106,8 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'top-tools',
 		title: 'Top tools',
-		size: '2x1',
+		width: 2,
+		height: 3,
 		tier: 'P',
 		defaultOn: true,
 		source: '/api/dashboard/top-tools'
@@ -86,7 +115,8 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'agent-distribution',
 		title: 'Agent distribution',
-		size: '1x1',
+		width: 1,
+		height: 3,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/agent-distribution'
@@ -94,20 +124,33 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'top-projects',
 		title: 'Top projects',
-		size: '2x1',
+		width: 2,
+		height: 3,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/top-projects'
 	}
 ];
 
+const WIDGET_DEF_BY_ID: ReadonlyMap<WidgetId, WidgetDef> = new Map(
+	WIDGET_DEFS.map((def) => [def.id, def] as const)
+);
+
+/** Look up a registry def by id; throws for an id the registry does not define. */
+export function findWidgetDef(id: WidgetId): WidgetDef {
+	const def = WIDGET_DEF_BY_ID.get(id);
+	if (!def) throw new Error(`Unknown widget id: ${id}`);
+	return def;
+}
+
 /**
- * The first-visit default selection, in registry order. Derived from
- * {@link WIDGET_DEFS} so `defaultOn` stays the single source of truth.
+ * The first-visit default placements, in registry order. Derived from
+ * {@link WIDGET_DEFS} so `defaultOn`/default sizes stay the single source of
+ * truth.
  */
-export const DEFAULT_WIDGETS: readonly WidgetId[] = WIDGET_DEFS.filter(
+export const DEFAULT_WIDGETS: readonly WidgetPlacement[] = WIDGET_DEFS.filter(
 	(def) => def.defaultOn
-).map((def) => def.id);
+).map((def) => ({ id: def.id, width: def.width, height: def.height }));
 
 /** Every registered id, in registry order. */
 export const WIDGET_IDS: readonly WidgetId[] = WIDGET_DEFS.map((def) => def.id);
@@ -119,14 +162,45 @@ export function isWidgetId(value: unknown): value is WidgetId {
 	return typeof value === 'string' && WIDGET_ID_SET.has(value);
 }
 
-/**
- * Resolve persisted/raw ids into defs: drop unknown ids, dedupe, and return
- * registry order regardless of input order. Never throws.
- */
-export function resolveWidgets(ids: readonly string[]): WidgetDef[] {
-	const requested = new Set<string>();
-	for (const id of ids) {
-		if (isWidgetId(id)) requested.add(id);
+/** Parse one raw entry into an id plus optional size overrides; unknown -> null. */
+function parsePlacement(entry: unknown): { id: WidgetId; width?: number; height?: number } | null {
+	if (typeof entry === 'string') {
+		return isWidgetId(entry) ? { id: entry } : null;
 	}
-	return WIDGET_DEFS.filter((def) => requested.has(def.id));
+	if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+		const record = entry as Record<string, unknown>;
+		if (!isWidgetId(record.id)) return null;
+		return {
+			id: record.id,
+			width: typeof record.width === 'number' ? record.width : undefined,
+			height: typeof record.height === 'number' ? record.height : undefined
+		};
+	}
+	return null;
+}
+
+/**
+ * Resolve persisted/raw placements: accepts legacy `string[]` ids and
+ * `{id,width,height}` objects, drops unknown ids, collapses duplicates (first
+ * occurrence wins) and returns registry order regardless of input order. A
+ * missing or non-numeric size falls back to the registry default; numeric sizes
+ * are clamped into range. Never throws.
+ */
+export function resolvePlacements(raw: unknown): WidgetPlacement[] {
+	if (!Array.isArray(raw)) return [];
+	const requested = new Map<WidgetId, { width?: number; height?: number }>();
+	for (const entry of raw) {
+		const parsed = parsePlacement(entry);
+		if (parsed && !requested.has(parsed.id)) {
+			requested.set(parsed.id, { width: parsed.width, height: parsed.height });
+		}
+	}
+	return WIDGET_DEFS.filter((def) => requested.has(def.id)).map((def) => {
+		const override = requested.get(def.id);
+		return {
+			id: def.id,
+			width: override?.width === undefined ? def.width : clampWidth(override.width),
+			height: override?.height === undefined ? def.height : clampHeight(override.height)
+		};
+	});
 }

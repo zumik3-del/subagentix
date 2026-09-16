@@ -42,7 +42,8 @@
 		<h2 class="widget-card__title">{title}</h2>
 		{#if onRefresh}
 			<button
-				class="ui-icon-btn"
+				class="ui-icon-btn widget-card__refresh"
+				class:is-spinning={refreshing || status === 'loading'}
 				type="button"
 				onclick={onRefresh}
 				disabled={refreshing || status === 'loading'}
@@ -78,6 +79,8 @@
 
 <style>
 	.widget-card {
+		/* Stretch to the grid cell assigned by `WidgetGrid` (task #438). */
+		height: 100%;
 		min-width: 0;
 	}
 
@@ -98,9 +101,29 @@
 
 	.widget-card__body {
 		display: flex;
+		flex: 1;
 		flex-direction: column;
 		gap: var(--space-3);
+		min-height: 0;
 		min-width: 0;
+	}
+
+	/* Refresh control feedback while a fetch is in flight (task #438): CSS-only
+	   keyframes, no JS timer; suppressed for reduced-motion users. */
+	.widget-card__refresh.is-spinning :global(svg) {
+		animation: widget-refresh-spin 1s linear infinite;
+	}
+
+	@keyframes widget-refresh-spin {
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.widget-card__refresh.is-spinning :global(svg) {
+			animation: none;
+		}
 	}
 
 	.widget-card__placeholder {

@@ -2,6 +2,7 @@ import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { WidgetPlacement } from '$lib/widgets/registry';
 
 /**
  * Unit tests for the runtime settings store (task #257, ADR §4).
@@ -33,23 +34,28 @@ function freshSettingsModule() {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: Array<{ id: string; width: number; height: number }> | null;
 		};
 		updateStoredSettings: (patch: {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: unknown;
 		}) => {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
+			dashboardWidgets?: unknown;
 		};
 		resolveDbPath: () => string;
 		resolveZiptaskBaseUrl: () => string | null;
 		resolveZiptaskEnabled: () => boolean;
+		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number }>;
 		onSettingsChange: (cb: (next: { dbPath?: string | null; ziptaskBaseUrl?: string | null }) => void) => () => void;
 		normaliseDbPath: (value: unknown) => string;
 		normaliseZiptaskBaseUrl: (value: unknown) => string;
 		normaliseZiptaskEnabled: (value: unknown) => boolean;
+		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number }>;
 		SettingsValidationError: new (message: string, field: string) => { message: string; field: string };
 	}>;
 }
@@ -151,7 +157,7 @@ test('updateStoredSettings writes and the next read returns the value', async ()
 	// File actually exists on disk.
 	expect(existsSync(file)).toBe(true);
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-	expect(disk).toHaveProperty('version', 1);
+	expect(disk).toHaveProperty('version', 2);
 	expect(disk.dbPath).toBe('/tmp/a.db');
 });
 
@@ -446,4 +452,124 @@ test('invalid dbPath in the file is ignored; other keys still work', async () =>
 	const stored = mod.getStoredSettings();
 	expect(stored.dbPath).toBeUndefined(); // invalid key dropped
 	expect(stored.ziptaskBaseUrl).toBe('http://127.0.0.1:3005');
+	});
+
+/* ------------------------------------------------------------------ */
+/* dashboardWidgets normalisation & round-trip                          */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardWidgets rejects a non-array', async () => {
+	for (const value of [null, 'kpi', 42, { id: 'kpi' }] as unknown[]) {
+		const mod = await freshSettingsModule();
+		expect(() => mod.normaliseDashboardWidgets(value)).toThrow(/dashboardWidgets/);
+	}
+});
+
+test('normaliseDashboardWidgets rejects an oversized list (>24)', async () => {
+	const mod = await freshSettingsModule();
+	const tooMany = Array.from({ length: 25 }, (_, i) => `widget-${i}`);
+	expect(() => mod.normaliseDashboardWidgets(tooMany)).toThrow(/at most 24/);
+});
+
+test('normaliseDashboardWidgets rejects non-finite width', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: NaN }])).toThrow(
+		/width must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: Infinity }])).toThrow(
+		/width must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets rejects non-finite height', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], height: NaN }])).toThrow(
+		/height must be a finite number/
+	);
+	expect(() => mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], height: -Infinity }])).toThrow(
+		/height must be a finite number/
+	);
+});
+
+test('normaliseDashboardWidgets rejects non-object non-string entries', async () => {
+	const mod = await freshSettingsModule();
+	// Each entry in the array must be either a string id or a plain object.
+	// Arrays, numbers, booleans, and null are rejected.
+	for (const entry of [42, null, true] as unknown[]) {
+		expect(() => mod.normaliseDashboardWidgets([entry])).toThrow(/must contain only ids or/);
+	}
+	// An array nested inside is also rejected.
+	expect(() => mod.normaliseDashboardWidgets([['kpi']])).toThrow(/must contain only ids or/);
+});
+
+test('normaliseDashboardWidgets accepts legacy string[] and resolves registry defaults', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets(['kpi', 'agent-distribution']);
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 4, height: 2 },
+		{ id: 'agent-distribution', width: 1, height: 3 }
+	]);
+});
+
+test('normaliseDashboardWidgets accepts object placements with explicit sizes', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ id: 'kpi', width: 2, height: 5 }
+	] as unknown as unknown[]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5 }]);
+});
+
+test('normaliseDashboardWidgets drops objects without a known id', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgets([
+		{ width: 2, height: 5 },
+		{ id: 'nope', width: 2, height: 5 },
+		{ id: 'kpi', width: 2, height: 5 }
+	] as unknown as unknown[]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 5 }]);
+});
+
+test('dashboardWidgets round-trips through PUT → GET unchanged', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'rt-widgets.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const original: WidgetPlacement[] = [
+		{ id: 'kpi', width: 3, height: 5 },
+		{ id: 'top-tools', width: 2, height: 2 }
+	];
+	mod.updateStoredSettings({ dashboardWidgets: original });
+	const readBack = mod.getStoredSettings().dashboardWidgets;
+	expect(readBack).toEqual(original);
+});
+
+test('legacy string[] file degrades gracefully on read', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'legacy.json');
+	// Write a v1-style string[] file directly to disk.
+	writeFileSync(
+		file,
+		JSON.stringify({ version: 1, dashboardWidgets: ['kpi', 'top-tools'] }),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+	const result = mod.getStoredSettings().dashboardWidgets;
+	// Legacy strings are resolved to placements with registry defaults.
+	expect(result).toEqual<WidgetPlacement[]>([
+		{ id: 'kpi', width: 4, height: 2 },
+		{ id: 'top-tools', width: 2, height: 3 }
+	]);
+});
+
+test('version 2 is written on every updateStoredSettings call', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'v2.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	mod.updateStoredSettings({ dbPath: '/tmp/test.db' });
+	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
+	expect(disk.version).toBe(2);
 });

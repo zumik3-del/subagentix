@@ -93,6 +93,7 @@
 <style>
 	.widget-host {
 		display: block;
+		height: 100%;
 		min-width: 0;
 	}
 </style>

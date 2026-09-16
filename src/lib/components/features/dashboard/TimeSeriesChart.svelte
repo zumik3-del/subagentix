@@ -219,14 +219,19 @@
 
 <style>
 	.ts-chart {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		min-height: 0;
 		margin: 0;
 		min-width: 0;
 	}
 
 	.ts-chart__canvas {
+		flex: 1;
 		width: 100%;
 		min-width: 0;
-		height: var(--ts-chart-height, 11.25rem);
+		min-height: 0;
 	}
 
 	.ts-chart__note {

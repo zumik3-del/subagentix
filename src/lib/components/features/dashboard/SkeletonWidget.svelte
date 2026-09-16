@@ -27,6 +27,8 @@
 
 <style>
 .skeleton-widget {
+	/* Fill the grid cell assigned by `WidgetGrid` (task #438). */
+	height: 100%;
 	min-width: 0;
 }
 

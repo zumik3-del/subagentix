@@ -94,7 +94,10 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		});
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
-		expect(body.dashboardWidgets).toEqual(['kpi', 'top-tools']); // registry order
+		expect(body.dashboardWidgets).toEqual([
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		]); // registry order
 	});
 
 	test('duplicates collapse to a single entry', async () => {
@@ -108,7 +111,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		});
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
-		expect(body.dashboardWidgets).toEqual(['kpi']);
+		expect(body.dashboardWidgets).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
 	});
 
 	test('input reordered → output re-ordered to registry order', async () => {
@@ -123,7 +126,11 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
 		// Registry order: kpi, sessions-per-day, cost-per-day, top-tools, agent-distribution, top-projects.
-		expect(body.dashboardWidgets).toEqual(['sessions-per-day', 'top-tools', 'agent-distribution']);
+		expect(body.dashboardWidgets).toEqual([
+			{ id: 'sessions-per-day', width: 2, height: 3 },
+			{ id: 'top-tools', width: 2, height: 3 },
+			{ id: 'agent-distribution', width: 1, height: 3 }
+		]);
 	});
 
 	test('non-array value → 400 {error, field: "dashboardWidgets"}', async () => {
@@ -225,7 +232,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(getBody.dashboardWidgets).toHaveLength(6);
 	});
 
-	test('on-disk shape: version:1 + dashboardWidgets key present after PUT', async () => {
+	test('on-disk shape: version:2 + dashboardWidgets key present after PUT', async () => {
 		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
 		await settingsRoute.PUT({
 			request: new Request('http://localhost/api/settings', {
@@ -235,8 +242,11 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 			})
 		});
 		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
-		expect(disk.version).toBe(1);
-		expect(disk.dashboardWidgets).toEqual(['kpi', 'top-tools']);
+		expect(disk.version).toBe(2);
+		expect(disk.dashboardWidgets).toEqual([
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		]);
 	});
 
 	test('hand-edited invalid list in the file degrades to defaults on read', async () => {
@@ -276,8 +286,10 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(resp.status).toBe(200);
 		const body = (await resp.json()) as Record<string, unknown>;
 		expect(Array.isArray(body.dashboardWidgets)).toBe(true);
-		for (const id of body.dashboardWidgets as string[]) {
-			expect(typeof id).toBe('string');
+		for (const placement of body.dashboardWidgets as Array<Record<string, unknown>>) {
+			expect(placement.id).toBeTypeOf('string');
+			expect(placement.width).toBeTypeOf('number');
+			expect(placement.height).toBeTypeOf('number');
 		}
 		expect((body.stored as Record<string, unknown>).dashboardWidgets).toBeNull();
 		expect((body.source as Record<string, unknown>).dashboardWidgets).toBe('default');

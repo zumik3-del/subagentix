@@ -214,7 +214,68 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 	});
 });
 
-describe('Pure modules stay server-free and DOM-free', () => {
+	describe('WidgetGrid source: grid rules + clamp breakpoints', () => {
+		const source = readFileSync(
+			new URL('./WidgetGrid.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('has 4-column desktop grid', () => {
+			expect(source).toMatch(/grid-template-columns:\s*repeat\(4/);
+		});
+
+		test('has row-dense auto-flow', () => {
+			expect(source).toMatch(/grid-auto-flow:\s*row\s+dense/);
+		});
+
+		test('has 6rem auto-rows', () => {
+			expect(source).toMatch(/grid-auto-rows:\s*6rem/);
+		});
+
+		test('emits data-w and data-h on grid items', () => {
+			expect(source).toMatch(/data-w=/);
+			expect(source).toMatch(/data-h=/);
+		});
+
+		test('clamps wide widgets at the 64rem breakpoint', () => {
+			expect(source).toMatch(/max-width:\s*63\.99rem/);
+			expect(source).toMatch(/data-w='3']/);
+			expect(source).toMatch(/data-w='4']/);
+		});
+
+		test('full-widths every widget at the 40rem breakpoint', () => {
+			expect(source).toMatch(/max-width:\s*39\.99rem/);
+			expect(source).toMatch(/data-w\]/);
+		});
+	});
+
+	describe('WidgetCard source: refresh spin + reduced-motion guard', () => {
+		const source = readFileSync(
+			new URL('./WidgetCard.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('refresh button gets is-spinning class when refreshing or loading', () => {
+			expect(source).toMatch(/class:is-spinning=\{refreshing \|\| status === 'loading'\}/);
+		});
+
+		test('spinner animation keyframe rotates 360deg', () => {
+			expect(source).toMatch(/@keyframes\s+widget-refresh-spin/);
+			expect(source).toMatch(/transform:\s*rotate\(360deg\)/);
+		});
+
+		test('spinner applies to the refresh icon svg', () => {
+			expect(source).toMatch(/\.widget-card__refresh\.is-spinning/);
+			expect(source).toMatch(/animation:\s*widget-refresh-spin/);
+		});
+
+		test('prefers-reduced-motion suppresses the spinner', () => {
+			expect(source).toMatch(/@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)/);
+			expect(source).toMatch(/animation:\s*none/);
+		});
+	});
+
+	describe('Pure modules stay server-free and DOM-free', () => {
 	const pureModules = [
 		'./top-tools.ts',
 		'./filter.ts',

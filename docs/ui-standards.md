@@ -49,6 +49,37 @@ reviewable.
 - Radii (`--radius-xs … --radius-full`), shadows (`--shadow-xs/md/lg`) and
   `--sidebar-width` are declared in `src/app.css:44-63`.
 
+### Dashboard widget grid
+
+The landing dashboard lays its widgets out on a declarative CSS grid
+(`WidgetGrid.svelte:54-140`); sizing is data, not inline `grid-template`.
+
+- **Desktop: 4 equal columns, 6rem rows.** `grid-template-columns:
+  repeat(4, minmax(0, 1fr))`, `grid-auto-rows: 6rem`, `grid-auto-flow: row
+  dense` (`WidgetGrid.svelte:55-64`). `row dense` lets a short widget backfill
+  the gap beside a taller one.
+- **Per-widget placement.** Each `WidgetPlacement` carries `width` (1–4
+  quarter-width blocks) and `height` (1–8 rows); the grid item emits them as
+  `data-w`/`data-h` (`WidgetGrid.svelte:48`) and numeric attribute selectors
+  map them to `grid-column: span N` / `grid-row: span N`
+  (`WidgetGrid.svelte:71-117`). Width `4` is a full row.
+- **Breakpoint clamps.** `≤64rem` (`max-width: 63.99rem`) drops to 2 columns
+  and clamps `data-w="3"`/`data-w="4"` to `span 2`; `≤40rem`
+  (`max-width: 39.99rem`) drops to 1 column and forces every item to
+  `grid-column: 1 / -1` regardless of `data-w` (`WidgetGrid.svelte:119-140`).
+  Height spans stay valid at every breakpoint.
+- **Bounds and defaults** live in the registry: `WIDGET_MIN_WIDTH`/`MAX_WIDTH`
+  (1/4), `WIDGET_MIN_HEIGHT`/`MAX_HEIGHT` (1/8) and the per-widget default
+  `width`/`height` on each `WidgetDef` (`src/lib/widgets/registry.ts:26-31,78-133`).
+  `clampWidth`/`clampHeight` round and clamp, mapping a non-finite value to the
+  minimum (`registry.ts:33-43`).
+- **Refresh control.** `WidgetCard` renders an optional `.ui-icon-btn` refresh
+  button whose icon spins while a fetch is in flight
+  (`class:is-spinning={refreshing || status === 'loading'}`,
+  `WidgetCard.svelte:43-55`); the spin is CSS-only keyframes
+  (`widget-refresh-spin`, `WidgetCard.svelte:111-121`) and is suppressed under
+  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:123-127`).
+
 ---
 
 ## 2. Color & tokens
@@ -438,7 +469,8 @@ src/
       agent.ts  format.ts  gantt.ts  node.ts  paging.ts  token.ts  tracker.ts
       types.ts  clock.svelte.ts
     widgets/
-      registry.ts                               # WidgetId/WidgetDef/WIDGET_DEFS (client-safe)
+      registry.ts                               # WidgetId/WidgetDef/WidgetPlacement/WIDGET_DEFS (client-safe)
+      registry.test.ts                          # registry + resolvePlacements/clamp units
     components/
       primitives/                               # L1
         Icon.svelte  TreeIcon.svelte  ScrollView.svelte
@@ -460,6 +492,8 @@ src/
           KpiWidget.svelte  TopToolsWidget.svelte
           SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
           TopProjectsWidget.svelte  AgentDistributionWidget.svelte
+          # tests (co-located): dashboard-widgets.suite.ts + .test.ts wrapper,
+          # data/filter/picker/top-tools.test.ts, source-guards.test.ts
         gantt/                                  # L3
           Gantt.svelte                          # feature root (orchestrator)
           GanttHeader.svelte  GanttLabels.svelte  GanttLabelRow.svelte
@@ -486,6 +520,31 @@ src/
   behaviour; extracted children are presentation-only and receive precomputed
   props + callbacks (e.g. `Gantt.svelte` keeps selection/hover/cursor/scroll,
   `NodeDetailPanel.svelte` keeps filters/expanded/copy/scroll).
+
+### Dashboard widget persistence
+
+The dashboard selection and per-widget sizes persist in `settings.json` under
+`dashboardWidgets`, written by the settings store (`src/lib/server/settings.ts`)
+and read back through `resolveDashboardWidgets` (`settings.ts:347-349`).
+
+- **Current shape:** `dashboardWidgets` is a `{ id, width, height }[]` — one
+  `WidgetPlacement` per selected widget (`settings.ts:36`, `registry.ts:46-52`).
+  The file payload carries `version: 2` on every write (`settings.ts:267`).
+- **Legacy `string[]` still loads.** A v1 file whose `dashboardWidgets` is a
+  bare id list (`["kpi","top-tools"]`) is accepted and resolved to placements
+  with the registry-default sizes; unknown ids are dropped, duplicates collapse
+  first-wins and the result is returned in registry order
+  (`normaliseDashboardWidgets`, `settings.ts:142-179`; `resolvePlacements`,
+  `registry.ts:189-206`). The same acceptance applies to a legacy `string[]`
+  `PUT /api/settings` payload (`src/routes/api/settings/+server.ts:113-116`).
+- **Validation.** A non-array, a non-string/non-object entry, a non-finite
+  `width`/`height` or an oversized list (>24 entries) is rejected with
+  `SettingsValidationError('dashboardWidgets')`; a hand-edited invalid list on
+  disk degrades to the registry defaults rather than failing the read
+  (`settings.ts:142-179,208-214`).
+- **First visit.** With no stored override, `resolveDashboardWidgets` falls
+  back to `DEFAULT_WIDGETS` (the `defaultOn` registry entries with their default
+  sizes, `registry.ts:151-153`).
 
 ### Naming & import rules
 
@@ -578,17 +637,23 @@ assertion to the file that now owns the string.
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
-| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback) and `loaders.ts` id→body routing |
-| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, pure modules stay DOM/`$lib/server`-free |
+| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, and `loaders.ts` id→body routing |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, pure modules stay DOM/`$lib/server`-free |
+| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes, `isWidgetId`, `clampWidth`/`clampHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
+| `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (size-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
-source/paths), `src/lib/components/scroll-view.test.ts`,
-`src/routes/pages.test.ts`, `src/routes/m3c-drilldown.test.ts`,
-`src/routes/m4a-tracker.test.ts` (isolated-child-process runners), the dashboard
-helper units `features/dashboard/{data,filter,picker,top-tools}.test.ts`, and the
-unit tests under `src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware
-formatter cases (Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and
-guards that every `.svelte` format call passes `clock.tz`; `node.test.ts` pins
+source/paths), `src/routes/api/settings/settings-dashboard.suite.ts` (the
+`dashboardWidgets` PUT/GET contract: object payloads, `version: 2` on disk, the
+legacy `string[]` echo), `src/lib/server/settings.test.ts` (store round-trip,
+legacy `string[]` read fallback, `version: 2` write),
+`src/lib/components/scroll-view.test.ts`, `src/routes/pages.test.ts`,
+`src/routes/m3c-drilldown.test.ts`, `src/routes/m4a-tracker.test.ts`
+(isolated-child-process runners), the dashboard helper units
+`features/dashboard/{data,filter,top-tools}.test.ts`, and the unit tests under
+`src/lib/model/*.test.ts`: `format.test.ts` pins the tz-aware formatter cases
+(Asia/Kolkata, America/New_York, invalid-zone UTC fallback) and guards that every
+`.svelte` format call passes `clock.tz`; `node.test.ts` pins
 `formatToolCallText`'s tz shift; `gantt.test.ts` pins the exact `MODEL_PALETTE`
 colors.
 

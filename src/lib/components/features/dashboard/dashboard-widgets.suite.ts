@@ -25,6 +25,7 @@ let SkeletonWidget: unknown;
 let BarChart: unknown;
 let DonutChart: unknown;
 let TimeSeriesChart: unknown;
+let WidgetGrid: unknown;
 
 beforeAll(async () => {
 	vite = await createServer({
@@ -60,6 +61,11 @@ beforeAll(async () => {
 			'/src/lib/components/features/dashboard/TimeSeriesChart.svelte'
 		)) as { default: unknown }
 	).default;
+	WidgetGrid = (
+		(await vite.ssrLoadModule(
+			'/src/lib/components/features/dashboard/WidgetGrid.svelte'
+		)) as { default: unknown }
+	).default;
 }, 60_000);
 
 afterAll(async () => {
@@ -89,7 +95,7 @@ function countClass(html: string, token: string): number {
 
 // --- Fixtures ----------------------------------------------------------------
 
-const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', size: 'full', tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' };
+const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' };
 
 function renderWidgetCard(props: Record<string, unknown> = {}): string {
 	return render(WidgetCard, {
@@ -493,5 +499,61 @@ describe('loaders.ts maps widget ids to correct bodies', () => {
 		expect(registeredIds).toContain('agent-distribution');
 		expect(registeredIds).toContain('top-projects');
 		expect(registeredIds.length).toBe(6);
+	});
+});
+
+// --- WidgetGrid SSR ----------------------------------------------------------
+
+describe('WidgetGrid SSR', () => {
+	const placements = [
+		{ id: 'kpi', width: 4, height: 2 },
+		{ id: 'sessions-per-day', width: 2, height: 3 },
+		{ id: 'agent-distribution', width: 1, height: 3 }
+	];
+
+	test('emits data-w and data-h matching each placement', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		expect(html).toContain('data-w="4"');
+		expect(html).toContain('data-h="2"');
+		expect(html).toContain('data-w="2"');
+		expect(html).toContain('data-h="3"');
+		expect(html).toContain('data-w="1"');
+	});
+
+	test('renders one li per placement in registry order', () => {
+		const html = render(WidgetGrid, {
+			props: { placements }
+		}).body;
+		// The grid wraps placements in <li> elements with the widget-grid__item class.
+		expect(countClass(html, 'widget-grid__item')).toBe(3);
+	});
+
+	test('renders the 4-column grid rules in source', async () => {
+		const source = (await vite.ssrLoadModule(
+			'/src/lib/components/features/dashboard/WidgetGrid.svelte'
+		)) as { default: unknown };
+		// Source-level guard: verify the CSS includes the 4-col desktop rule and row dense.
+		const raw = await Bun.file(
+			new URL('./WidgetGrid.svelte', import.meta.url)
+		).text();
+		expect(raw).toMatch(/grid-template-columns:\s*repeat\(4/);
+		expect(raw).toMatch(/grid-auto-flow:\s*row\s+dense/);
+		expect(raw).toMatch(/grid-auto-rows:\s*6rem/);
+	});
+
+	test('source contains clamp media queries for <=64rem and <=40rem', async () => {
+		const raw = await Bun.file(
+			new URL('./WidgetGrid.svelte', import.meta.url)
+		).text();
+		// Both clamp breakpoints must be present.
+		expect(raw).toMatch(/max-width:\s*63\.99rem/);
+		expect(raw).toMatch(/max-width:\s*39\.99rem/);
+		// The 64rem query clamps width-3/4 to span 2.
+		expect(raw).toMatch(/data-w='3']/);
+		expect(raw).toMatch(/data-w='4']/);
+		// The 40rem query makes every widget full-width.
+		expect(raw).toMatch(/data-w\]/);
 	});
 });

@@ -1,79 +1,167 @@
 import { describe, expect, test } from 'bun:test';
-import { toggleWidgetSelection, sameSelection } from './picker';
-import { WIDGET_IDS, type WidgetId } from '$lib/widgets/registry';
+import { toggleWidgetSelection, samePlacements, updatePlacement } from './picker';
+import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
 
 /**
  * Unit tests for the pure dashboard widget-picker selection logic
- * (dashboard Phase 5, task #414).
+ * (dashboard Phase 5, task #414; resizable in #438).
  *
- * Kept in a plain `.ts` module so the toggle/compare rules are testable
+ * Kept in a plain `.ts` module so the toggle/compare/size rules are testable
  * without a renderer or a DOM (docs/ui-standards.md §10).
  */
 
 describe('toggleWidgetSelection()', () => {
-	test('adds a widget id to an empty selection', () => {
+	test('adds a widget placement to an empty selection', () => {
 		const next = toggleWidgetSelection([], 'kpi');
-		expect(next).toEqual(['kpi']);
+		expect(next).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
 	});
 
-	test('removes a widget id that is already selected', () => {
-		const next = toggleWidgetSelection(['kpi'], 'kpi');
+	test('removes a widget placement that is already selected', () => {
+		const next = toggleWidgetSelection([{ id: 'kpi', width: 4, height: 2 }], 'kpi');
 		expect(next).toEqual([]);
 	});
 
-	test('toggles a widget id in a multi-selection', () => {
-		const next = toggleWidgetSelection(['kpi', 'top-tools'], 'kpi');
-		expect(next).toEqual(['top-tools']);
+	test('toggles a widget placement in a multi-selection', () => {
+		const next = toggleWidgetSelection(
+			[{ id: 'kpi', width: 4, height: 2 }, { id: 'top-tools', width: 2, height: 3 }],
+			'kpi'
+		);
+		expect(next).toEqual([{ id: 'top-tools', width: 2, height: 3 }]);
 	});
 
-	test('returns ids in registry order, not input order', () => {
-		const next = toggleWidgetSelection(['top-tools', 'kpi'], 'sessions-per-day');
+	test('returns placements in registry order, not input order', () => {
+		const next = toggleWidgetSelection(
+			[{ id: 'top-tools', width: 2, height: 3 }, { id: 'kpi', width: 4, height: 2 }],
+			'sessions-per-day'
+		);
 		// kpi comes before sessions-per-day in registry order.
-		expect(next).toEqual(['kpi', 'sessions-per-day', 'top-tools']);
+		expect(next.map((p) => p.id)).toEqual(['kpi', 'sessions-per-day', 'top-tools']);
 	});
 
 	test('does not mutate the input array', () => {
-		const input: readonly WidgetId[] = ['kpi', 'top-tools'];
+		const input: readonly WidgetPlacement[] = [
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		];
 		toggleWidgetSelection(input, 'sessions-per-day');
-		expect(input).toEqual(['kpi', 'top-tools']);
+		expect(input).toEqual([
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		]);
+	});
+
+	test('adding a known id restores the registry-default size', () => {
+		const before: WidgetPlacement[] = [{ id: 'top-tools', width: 3, height: 5 }];
+		const next = toggleWidgetSelection(before, 'kpi');
+		// kpi should get its registry default, not a stale size.
+		expect(next.find((p) => p.id === 'kpi')).toEqual({ id: 'kpi', width: 4, height: 2 });
+		// Existing custom size is preserved.
+		expect(next.find((p) => p.id === 'top-tools')).toEqual({ id: 'top-tools', width: 3, height: 5 });
+	});
+
+	test('toggling off then on restores the registry default size', () => {
+		const withCustom: WidgetPlacement[] = [{ id: 'kpi', width: 1, height: 1 }];
+		const toggledOff = toggleWidgetSelection(withCustom, 'kpi');
+		expect(toggledOff).toEqual([]);
+		const toggledOn = toggleWidgetSelection(toggledOff, 'kpi');
+		expect(toggledOn).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
 	});
 
 	test('unknown ids are dropped (not added)', () => {
-		const next = toggleWidgetSelection([], 'kpi' as WidgetId);
-		// A known id is toggled on; we just verify it doesn't crash with edge cases.
-		expect(next).toContain('kpi');
+		const next = toggleWidgetSelection([], 'top-model' as WidgetId);
+		expect(next).toEqual([]);
 	});
 });
 
-describe('sameSelection()', () => {
-	test('two identical selections are equal', () => {
-		expect(sameSelection(['kpi', 'top-tools'], ['kpi', 'top-tools'])).toBe(true);
+describe('samePlacements()', () => {
+	test('two identical placements are equal', () => {
+		const a: WidgetPlacement[] = [
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		];
+		expect(samePlacements(a, a)).toBe(true);
 	});
 
 	test('different lengths are not equal', () => {
-		expect(sameSelection(['kpi'], ['kpi', 'top-tools'])).toBe(false);
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		const b: WidgetPlacement[] = [
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		];
+		expect(samePlacements(a, b)).toBe(false);
 	});
 
 	test('same ids in different order are equal', () => {
-		expect(sameSelection(['top-tools', 'kpi'], ['kpi', 'top-tools'])).toBe(true);
+		const a: WidgetPlacement[] = [
+			{ id: 'top-tools', width: 2, height: 3 },
+			{ id: 'kpi', width: 4, height: 2 }
+		];
+		const b: WidgetPlacement[] = [
+			{ id: 'kpi', width: 4, height: 2 },
+			{ id: 'top-tools', width: 2, height: 3 }
+		];
+		expect(samePlacements(a, b)).toBe(true);
 	});
 
-	test('empty selections are equal', () => {
-		expect(sameSelection([], [])).toBe(true);
+	test('empty placements are equal', () => {
+		expect(samePlacements([], [])).toBe(true);
 	});
 
 	test('all registry ids pairwise compared with themselves are equal', () => {
-		expect(sameSelection(WIDGET_IDS, WIDGET_IDS)).toBe(true);
+		const all: WidgetPlacement[] = WIDGET_IDS.map((id) => ({ id, width: 4, height: 8 }));
+		expect(samePlacements(all, all)).toBe(true);
 	});
 
 	test('a single missing id makes them not equal', () => {
-		const extended = [...WIDGET_IDS, 'top-projects' as unknown as WidgetId];
-		expect(sameSelection(WIDGET_IDS, extended)).toBe(false);
+		const a: WidgetPlacement[] = WIDGET_IDS.map((id) => ({ id, width: 1, height: 1 }));
+		const b: WidgetPlacement[] = [...a, { id: 'top-projects' as WidgetId, width: 1, height: 1 }];
+		expect(samePlacements(a, b)).toBe(false);
 	});
 
-	test('duplicate ids in one selection make lengths differ and return false', () => {
-		// sameSelection checks length first, so duplicates cause a false negative.
-		expect(sameSelection(['kpi', 'kpi'], ['kpi'])).toBe(false);
+	test('size-only change is NOT equal (drives modal dirty state)', () => {
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		const b: WidgetPlacement[] = [{ id: 'kpi', width: 2, height: 2 }];
+		expect(samePlacements(a, b)).toBe(false);
+	});
+
+	test('no-op placement list is equal', () => {
+		const a: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		expect(samePlacements(a, a)).toBe(true);
+	});
+});
+
+describe('updatePlacement()', () => {
+	test('patches width while preserving other fields', () => {
+		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		const next = updatePlacement(input, 'kpi', { width: 2 });
+		expect(next).toEqual([{ id: 'kpi', width: 2, height: 2 }]);
+	});
+
+	test('patches height while preserving other fields', () => {
+		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		const next = updatePlacement(input, 'kpi', { height: 5 });
+		expect(next).toEqual([{ id: 'kpi', width: 4, height: 5 }]);
+	});
+
+	test('patches both width and height', () => {
+		const input: WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		const next = updatePlacement(input, 'kpi', { width: 3, height: 6 });
+		expect(next).toEqual([{ id: 'kpi', width: 3, height: 6 }]);
+	});
+
+	test('does not mutate the input array', () => {
+		const input: readonly WidgetPlacement[] = [{ id: 'kpi', width: 4, height: 2 }];
+		updatePlacement(input, 'kpi', { width: 2 });
+		expect(input).toEqual([{ id: 'kpi', width: 4, height: 2 }]);
+	});
+
+	test('keeps registry order', () => {
+		const input: WidgetPlacement[] = [
+			{ id: 'top-tools', width: 2, height: 3 },
+			{ id: 'kpi', width: 4, height: 2 }
+		];
+		const next = updatePlacement(input, 'top-tools', { width: 3 });
+		expect(next.map((p) => p.id)).toEqual(['kpi', 'top-tools']);
 	});
 });
 

@@ -10,8 +10,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
-import { DEFAULT_WIDGETS, resolveWidgets } from '$lib/widgets/registry';
-import type { WidgetId } from '$lib/widgets/registry';
+import { DEFAULT_WIDGETS, resolvePlacements } from '$lib/widgets/registry';
+import type { WidgetPlacement } from '$lib/widgets/registry';
 
 /** Hardcoded fallback when neither the file nor `OPENCODE_DB` supplies a path. */
 export const DEFAULT_DB_PATH = '/home/opencode/.local/share/opencode/opencode.db';
@@ -33,7 +33,7 @@ export interface StoredSettings {
 	ziptaskBaseUrl?: string | null;
 	ziptaskEnabled?: boolean | null;
 	agentsPath?: string | null;
-	dashboardWidgets?: string[] | null;
+	dashboardWidgets?: WidgetPlacement[] | null;
 }
 
 /** Validation failure carrying the offending field for the 400 API contract. */
@@ -131,15 +131,18 @@ export function normaliseAgentsPath(value: unknown): string {
 /**
  * Validate/normalise a `dashboardWidgets` value; throws `SettingsValidationError`.
  *
- * Accepts a `string[]`; unknown ids are dropped, duplicates collapsed and the
+ * Accepts the current shape (`{id,width,height}` objects) and the legacy
+ * `string[]` ids; unknown ids are dropped, duplicates collapsed and the
  * survivors returned in widget-registry order (the same order the picker and
- * grid rely on). A non-array, a non-string entry or an oversized list is
- * rejected so a malformed payload never reaches disk.
+ * grid rely on). A missing size falls back to the registry default and an
+ * out-of-range size is clamped. A non-array, a non-string/non-object entry, a
+ * non-finite size or an oversized list is rejected so a malformed payload never
+ * reaches disk.
  */
-export function normaliseDashboardWidgets(value: unknown): WidgetId[] {
+export function normaliseDashboardWidgets(value: unknown): WidgetPlacement[] {
 	if (!Array.isArray(value)) {
 		throw new SettingsValidationError(
-			'dashboardWidgets must be an array of widget ids.',
+			'dashboardWidgets must be an array of widget placements.',
 			'dashboardWidgets'
 		);
 	}
@@ -149,17 +152,30 @@ export function normaliseDashboardWidgets(value: unknown): WidgetId[] {
 			'dashboardWidgets'
 		);
 	}
-	const ids: string[] = [];
 	for (const entry of value) {
-		if (typeof entry !== 'string') {
-			throw new SettingsValidationError(
-				'dashboardWidgets must contain only strings.',
-				'dashboardWidgets'
-			);
+		if (typeof entry === 'string') continue;
+		if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+			const record = entry as Record<string, unknown>;
+			if (record.width !== undefined && !Number.isFinite(record.width)) {
+				throw new SettingsValidationError(
+					'dashboardWidgets width must be a finite number.',
+					'dashboardWidgets'
+				);
+			}
+			if (record.height !== undefined && !Number.isFinite(record.height)) {
+				throw new SettingsValidationError(
+					'dashboardWidgets height must be a finite number.',
+					'dashboardWidgets'
+				);
+			}
+			continue;
 		}
-		ids.push(entry);
+		throw new SettingsValidationError(
+			'dashboardWidgets must contain only ids or {id,width,height} objects.',
+			'dashboardWidgets'
+		);
 	}
-	return resolveWidgets(ids).map((def) => def.id);
+	return resolvePlacements(value);
 }
 
 /** Pick the known keys off a parsed file, dropping values that fail validation. */
@@ -248,7 +264,7 @@ function emit(next: StoredSettings): void {
 function writeSettingsFile(settings: StoredSettings): void {
 	const file = settingsFilePath();
 	mkdirSync(dirname(file), { recursive: true });
-	const payload: Record<string, unknown> = { version: 1 };
+	const payload: Record<string, unknown> = { version: 2 };
 	if (settings.dbPath !== undefined) payload.dbPath = settings.dbPath;
 	if (settings.ziptaskBaseUrl !== undefined) payload.ziptaskBaseUrl = settings.ziptaskBaseUrl;
 	if (settings.ziptaskEnabled !== undefined) payload.ziptaskEnabled = settings.ziptaskEnabled;
@@ -323,15 +339,13 @@ export function resolveAgentsPath(): string | null {
 }
 
 /**
- * Effective dashboard widget ids: stored selection -> {@link DEFAULT_WIDGETS}
- * (first visit). There is no environment layer — this is UI state. The stored
- * value was normalised on read, and is re-resolved here so the result is always
- * deduped and in registry order.
+ * Effective dashboard widget placements: stored selection -> {@link
+ * DEFAULT_WIDGETS} (first visit). There is no environment layer — this is UI
+ * state. The stored value was normalised on read, and is re-resolved here so
+ * the result is always deduped, clamped and in registry order.
  */
-export function resolveDashboardWidgets(): WidgetId[] {
-	return resolveWidgets(getStoredSettings().dashboardWidgets ?? DEFAULT_WIDGETS).map(
-		(def) => def.id
-	);
+export function resolveDashboardWidgets(): WidgetPlacement[] {
+	return resolvePlacements(getStoredSettings().dashboardWidgets ?? DEFAULT_WIDGETS);
 }
 
 /** Subscribe to successful settings writes; returns an unsubscribe function. */

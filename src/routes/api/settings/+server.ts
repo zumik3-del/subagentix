@@ -12,6 +12,7 @@ import {
 	SettingsValidationError,
 	updateStoredSettings
 } from '$lib/server/settings';
+import type { WidgetPlacement } from '$lib/widgets/registry';
 
 type Source = 'file' | 'env' | 'default' | 'none';
 
@@ -20,13 +21,13 @@ interface SettingsPayload {
 	ziptaskBaseUrl: string | null;
 	ziptaskEnabled: boolean;
 	agentsPath: string | null;
-	dashboardWidgets: string[];
+	dashboardWidgets: WidgetPlacement[];
 	stored: {
 		dbPath: string | null;
 		ziptaskBaseUrl: string | null;
 		ziptaskEnabled: boolean | null;
 		agentsPath: string | null;
-		dashboardWidgets: string[] | null;
+		dashboardWidgets: WidgetPlacement[] | null;
 	};
 	source: {
 		dbPath: Source;
@@ -95,7 +96,7 @@ export const PUT: RequestHandler = async ({ request }) => {
 		ziptaskBaseUrl?: string | null;
 		ziptaskEnabled?: boolean | null;
 		agentsPath?: string | null;
-		dashboardWidgets?: string[] | null;
+		dashboardWidgets?: WidgetPlacement[] | null;
 	} = {};
 	if (Object.prototype.hasOwnProperty.call(record, 'dbPath')) {
 		patch.dbPath = record.dbPath as string | null;
@@ -110,7 +111,8 @@ export const PUT: RequestHandler = async ({ request }) => {
 		patch.agentsPath = record.agentsPath as string | null;
 	}
 	if (Object.prototype.hasOwnProperty.call(record, 'dashboardWidgets')) {
-		patch.dashboardWidgets = record.dashboardWidgets as string[] | null;
+		// Legacy `string[]` payloads are still accepted and normalised downstream.
+		patch.dashboardWidgets = record.dashboardWidgets as WidgetPlacement[] | null;
 	}
 
 	try {

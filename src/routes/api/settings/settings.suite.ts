@@ -129,7 +129,7 @@ describe('PUT /api/settings', () => {
 		expect(body.stored.dbPath).toBe('/tmp/partial.db');
 		// File on disk reflects the write.
 		expect(JSON.parse(readFileSync(SETTINGS_FILE, 'utf8').trim())).toMatchObject({
-			version: 1,
+			version: 2,
 			dbPath: '/tmp/partial.db'
 		});
 	});
