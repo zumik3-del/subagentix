@@ -20,9 +20,8 @@ reviewable.
 - Components follow the layer rules in [§10](#10-layer--component-conventions).
   Where a rule here and a legacy comment disagree, this file and the guarding
   suite ([§12](#12-verification-map)) win.
-- No Tailwind, no UI library, no new runtime dependency — **one documented
-  exception:** the `uplot` time-series chart library, justified in
-  [§2](#2-color--tokens). Plain CSS custom properties only.
+- No Tailwind, no UI library, no new runtime dependency (`package.json` carries
+  devDependencies only). Plain CSS custom properties only.
 
 ---
 
@@ -146,9 +145,10 @@ card does with content that no longer fits.
   the legend to the rows the ring leaves (`DonutChart.svelte:95,169-177`).
   `KpiWidget` keeps the tiles and drops whole blocks — the mix bar first, then
   the token breakdown — based on measured natural heights
-  (`KpiWidget.svelte:90-117,144-177`). `TimeSeriesChart` drops both axes below
-  `COMPACT_HEIGHT = 120` and rebuilds the instance once at that boundary
-  (`TimeSeriesChart.svelte:54,149,174-179`).
+  (`KpiWidget.svelte:90-117,144-177`). `DayTable` renders the per-day series
+  newest-first (`[...points].reverse()`, `DayTable.svelte:29`) and slices to the
+  measured budget exactly like `BarChart` (`DayTable.svelte:35`), so
+  `sessions-per-day` and `cost-per-day` are tables, not charts.
 
 ---
 
@@ -167,15 +167,10 @@ card does with content that no longer fits.
 - **Chart palette.** `--chart-1 … --chart-7` alias the palette levels 9
   (`src/app.css:185-191`). Legend wording/chips consume the same status tokens
   as the chart.
-- **Accepted dependency exception: `uplot`.** The one runtime dependency after
-  `src/app.css` (`uplot@^1.6.32`, MIT, `package.json:25`), used **only** by the
-  two dense time-series widgets (`sessions-per-day`, `cost-per-day`) through
-  `TimeSeriesChart.svelte`. It is canvas-based and client-only: dynamically
-  imported inside `onMount` (`TimeSeriesChart.svelte:159-160`), so it never
-  enters the SSR graph or the initial bundle. Size (pinned `1.6.32` build):
-  ≈50 KB minified / ≈22 KB gzip; the epic's ADR quotes ≈45 KB min / ≈15 KB gzip.
-  **Every other widget stays hand-rolled inline SVG** over the `--chart-*`
-  tokens (`BarChart`, `DonutChart`, the KPI mix bar) — no second chart library.
+- **No chart library.** Every widget stays hand-rolled over the `--chart-*`
+  tokens (`BarChart`, `DonutChart`, the KPI mix bar); the two per-day widgets
+  (`sessions-per-day`, `cost-per-day`) render a plain newest-first HTML table
+  (`DayTable`) instead of a chart. `package.json` ships no runtime dependency.
 - **No hardcoded legacy hex.** No `.svelte` file may hardcode a hex from the
   pre-theme palette; the guard walks every `.svelte` under `src/` against
   `LEGACY_PALETTE` (`pages.suite.ts`: "no component keeps the legacy hardcoded
@@ -434,7 +429,7 @@ components that own it — a `ModalShell` composite is deferred, see
   expanded, right when collapsed) and `size`, `currentColor`, `aria-hidden`
   (`src/lib/components/primitives/TreeIcon.svelte:7-15,17-50`).
 - **No emoji glyphs anywhere in the UI**; use an `Icon`/`TreeIcon` name.
-- Icons render `display: block; flex: none` (`Icon.svelte:143-147`,
+- Icons render `display: block; flex: none` (`Icon.svelte:174-176`,
   `TreeIcon.svelte:52-56`).
 
 ---
@@ -575,8 +570,8 @@ src/
           filter.ts  picker.ts  top-tools.ts  fit.ts  # pure helpers (unit-tested)
           save.ts                               # shared PUT /api/settings writer (#449)
           fit.svelte.ts                         # useRowFit measurement rune (#444)
-          TimeSeriesChart.svelte                # uPlot time series (§2)
-          BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG (§2)
+          DayTable.svelte                       # per-day table, fit-trimmed (sessions/cost)
+          BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG charts (§2)
           KpiWidget.svelte  TopToolsWidget.svelte
           SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
           TopProjectsWidget.svelte  AgentDistributionWidget.svelte
@@ -752,8 +747,8 @@ assertion to the file that now owns the string.
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
-| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, `WidgetSettings` dialog SSR (closed → no markup; open → `role="dialog"` + label), the `WidgetCard` gear control (present with `onSettings`, absent without), and `loaders.ts` id→body routing |
-| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), pure modules stay DOM/`$lib/server`-free |
+| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `DayTable` newest-first rows + fit wiring), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, `WidgetSettings` dialog SSR (closed → no markup; open → `role="dialog"` + label), the `WidgetCard` gear control (present with `onSettings`, absent without), and `loaders.ts` id→body routing |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | `DayTable` source guards (no chart-library import, `useRowFit` wiring, newest-first `reverse()`, whole-row `slice` trim, sr-only caption/thead, day row headers, value formatter, empty state, `figure` fit host), `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), pure modules stay DOM/`$lib/server`-free |
 | `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
 | `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (size-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
 | `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
