@@ -37,7 +37,7 @@
 	}: Props = $props();
 </script>
 
-<article class="ui-card widget-card" aria-busy={status === 'loading'}>
+<article class="ui-card widget-card" aria-busy={status === 'loading' || refreshing}>
 	<header class="widget-card__head">
 		<h2 class="widget-card__title">{title}</h2>
 		{#if onRefresh}
@@ -55,7 +55,7 @@
 		{/if}
 	</header>
 
-	<div class="widget-card__body">
+	<div class="widget-card__body" class:is-refreshing={refreshing}>
 		{#if status === 'loading'}
 			<div class="widget-card__placeholder" aria-hidden="true">
 				<span class="widget-card__bar"></span>
@@ -112,6 +112,16 @@
 		min-height: 0;
 		min-width: 0;
 		overflow: hidden;
+		transition: opacity 0.15s ease;
+	}
+
+	/* A same-scope re-fetch keeps the last payload on screen (the data hook only
+	   sets `refreshing`), so dim the stale body until the new one lands: the
+	   spinning control in the header then reads as "this content is being
+	   replaced" rather than as a decoration (task #444 follow-up). */
+	.widget-card__body.is-refreshing {
+		opacity: 0.35;
+		pointer-events: none;
 	}
 
 	/* Refresh control feedback while a fetch is in flight (task #438): CSS-only
@@ -129,6 +139,10 @@
 	@media (prefers-reduced-motion: reduce) {
 		.widget-card__refresh.is-spinning :global(svg) {
 			animation: none;
+		}
+
+		.widget-card__body {
+			transition: none;
 		}
 	}
 
