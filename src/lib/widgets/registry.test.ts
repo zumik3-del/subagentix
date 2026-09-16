@@ -68,26 +68,26 @@ describe('WIDGET_DEFS', () => {
 		}
 	});
 
-	test('kpi is 4x2; agent-distribution is 1x3; the rest are 2x3', () => {
+	test('kpi is 6x4; agent-distribution is 2x6; sessions-per-day/cost-per-day/top-tools/top-projects are 3x6', () => {
 		const byId = new Map(WIDGET_DEFS.map((def) => [def.id, def]));
-		expect(byId.get('kpi')?.width).toBe(4);
-		expect(byId.get('kpi')?.height).toBe(2);
-		expect(byId.get('agent-distribution')?.width).toBe(1);
-		expect(byId.get('agent-distribution')?.height).toBe(3);
+		expect(byId.get('kpi')?.width).toBe(6);
+		expect(byId.get('kpi')?.height).toBe(4);
+		expect(byId.get('agent-distribution')?.width).toBe(2);
+		expect(byId.get('agent-distribution')?.height).toBe(6);
 		for (const id of ['sessions-per-day', 'cost-per-day', 'top-tools', 'top-projects'] as const) {
-			expect(byId.get(id)?.width, id).toBe(2);
-			expect(byId.get(id)?.height, id).toBe(3);
+			expect(byId.get(id)?.width, id).toBe(3);
+			expect(byId.get(id)?.height, id).toBe(6);
 		}
 	});
 
 	test('per-widget minHeight matches the spec', () => {
 		const byId = new Map(WIDGET_DEFS.map((def) => [def.id, def]));
-		expect(byId.get('top-projects')?.minHeight).toBe(1);
-		expect(byId.get('top-tools')?.minHeight).toBe(2);
-		expect(byId.get('kpi')?.minHeight).toBe(2);
-		expect(byId.get('agent-distribution')?.minHeight).toBe(2);
-		expect(byId.get('sessions-per-day')?.minHeight).toBe(3);
-		expect(byId.get('cost-per-day')?.minHeight).toBe(3);
+		expect(byId.get('top-projects')?.minHeight).toBe(2);
+		expect(byId.get('top-tools')?.minHeight).toBe(4);
+		expect(byId.get('kpi')?.minHeight).toBe(4);
+		expect(byId.get('agent-distribution')?.minHeight).toBe(4);
+		expect(byId.get('sessions-per-day')?.minHeight).toBe(6);
+		expect(byId.get('cost-per-day')?.minHeight).toBe(6);
 	});
 
 	test('the optional catalog extensions are not v1 registry entries', () => {
@@ -129,18 +129,17 @@ describe('isWidgetId()', () => {
 });
 
 describe('clampWidth()', () => {
-	test('clamps to [1, 4] for in-range integers', () => {
+	test('clamps to [1, 6] for in-range integers', () => {
 		expect(clampWidth(1)).toBe(1);
-		expect(clampWidth(2)).toBe(2);
 		expect(clampWidth(3)).toBe(3);
-		expect(clampWidth(4)).toBe(4);
+		expect(clampWidth(6)).toBe(6);
 	});
 
 	test('clamps out-of-range integers to the nearest bound', () => {
 		expect(clampWidth(0)).toBe(1);
 		expect(clampWidth(-5)).toBe(1);
-		expect(clampWidth(5)).toBe(4);
-		expect(clampWidth(100)).toBe(4);
+		expect(clampWidth(7)).toBe(6);
+		expect(clampWidth(100)).toBe(6);
 	});
 
 	test('rounds floats and clamps', () => {
@@ -159,54 +158,53 @@ describe('clampWidth()', () => {
 
 describe('clampWidgetHeight()', () => {
 	test('below-minimum input clamps up to the widget minimum', () => {
-		// kpi minHeight is 2; height 0 and 1 must both raise to 2.
-		expect(clampWidgetHeight('kpi', 0)).toBe(2);
-		expect(clampWidgetHeight('kpi', 1)).toBe(2);
-		expect(clampWidgetHeight('kpi', -5)).toBe(2);
+		// kpi minHeight is 4; height 0..3 must all raise to 4.
+		expect(clampWidgetHeight('kpi', 0)).toBe(4);
+		expect(clampWidgetHeight('kpi', 1)).toBe(4);
+		expect(clampWidgetHeight('kpi', 3)).toBe(4);
 	});
 
 	test('within the widget range returns the value unchanged', () => {
-		expect(clampWidgetHeight('kpi', 2)).toBe(2);
 		expect(clampWidgetHeight('kpi', 4)).toBe(4);
 		expect(clampWidgetHeight('kpi', 8)).toBe(8);
+		expect(clampWidgetHeight('kpi', 16)).toBe(16);
 	});
 
 	test('above WIDGET_MAX_HEIGHT clamps down to the global maximum', () => {
-		expect(clampWidgetHeight('kpi', 9)).toBe(WIDGET_MAX_HEIGHT);
+		expect(clampWidgetHeight('kpi', 17)).toBe(WIDGET_MAX_HEIGHT);
 		expect(clampWidgetHeight('kpi', 100)).toBe(WIDGET_MAX_HEIGHT);
 	});
 
 	test('non-finite values fall back to the widget minimum', () => {
-		expect(clampWidgetHeight('kpi', NaN)).toBe(2);
-		expect(clampWidgetHeight('kpi', Infinity)).toBe(2);
-		expect(clampWidgetHeight('kpi', -Infinity)).toBe(2);
+		expect(clampWidgetHeight('kpi', NaN)).toBe(4);
+		expect(clampWidgetHeight('kpi', Infinity)).toBe(4);
+		expect(clampWidgetHeight('kpi', -Infinity)).toBe(4);
 	});
 
 	test('each widget uses its own minimum (not a global one)', () => {
-		// top-projects has minHeight=1, so height 0 raises only to 1.
-		expect(clampWidgetHeight('top-projects', 0)).toBe(1);
-		expect(clampWidgetHeight('top-projects', 1)).toBe(1);
-		// sessions-per-day has minHeight=3, so height 1 and 2 raise to 3.
-		expect(clampWidgetHeight('sessions-per-day', 0)).toBe(3);
-		expect(clampWidgetHeight('sessions-per-day', 1)).toBe(3);
-		expect(clampWidgetHeight('sessions-per-day', 2)).toBe(3);
-		// cost-per-day has minHeight=3 as well.
-		expect(clampWidgetHeight('cost-per-day', 1)).toBe(3);
+		// top-projects has minHeight=2, so height 0 raises only to 2.
+		expect(clampWidgetHeight('top-projects', 0)).toBe(2);
+		expect(clampWidgetHeight('top-projects', 1)).toBe(2);
+		// sessions-per-day has minHeight=6, so height 0..5 raise to 6.
+		expect(clampWidgetHeight('sessions-per-day', 0)).toBe(6);
+		expect(clampWidgetHeight('sessions-per-day', 5)).toBe(6);
+		// cost-per-day has minHeight=6 as well.
+		expect(clampWidgetHeight('cost-per-day', 1)).toBe(6);
 	});
 });
 
-describe('clampHeight()', () => {
-	test('clamps to [1, 8] for in-range integers', () => {
+	describe('clampHeight()', () => {
+	test('clamps to [1, 16] for in-range integers', () => {
 		expect(clampHeight(1)).toBe(1);
-		expect(clampHeight(4)).toBe(4);
 		expect(clampHeight(8)).toBe(8);
+		expect(clampHeight(16)).toBe(16);
 	});
 
 	test('clamps out-of-range integers to the nearest bound', () => {
 		expect(clampHeight(0)).toBe(1);
 		expect(clampHeight(-10)).toBe(1);
-		expect(clampHeight(9)).toBe(8);
-		expect(clampHeight(100)).toBe(8);
+		expect(clampHeight(17)).toBe(16);
+		expect(clampHeight(100)).toBe(16);
 	});
 
 	test('non-finite values fall back to minimum', () => {
@@ -246,8 +244,8 @@ describe('resolvePlacements()', () => {
 	test('legacy string[] entries get registry-default sizes and auto-positions', () => {
 		const result = resolvePlacements(['kpi', 'agent-distribution']);
 		expect(result).toEqual([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-			{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 2 }
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+			{ id: 'agent-distribution', width: 2, height: 6, x: 0, y: 4 }
 		]);
 	});
 
@@ -262,20 +260,20 @@ describe('resolvePlacements()', () => {
 			{ id: 'top-tools', width: 3, height: 5 }
 		] as unknown as unknown[]);
 		expect(result).toEqual([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-			{ id: 'top-tools', width: 3, height: 5, x: 0, y: 2 }
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+			{ id: 'top-tools', width: 3, height: 5, x: 0, y: 4 }
 		]);
 	});
 
 	test('missing width/height in object falls back to registry default', () => {
 		const result = resolvePlacements([{ id: 'kpi' }] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('out-of-range sizes are clamped', () => {
 		const result = resolvePlacements([{ id: 'kpi', width: 10, height: 0 }] as unknown as unknown[]);
-		// kpi minHeight is 2, so height 0 clamps up to 2 (not the old global min of 1).
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		// kpi minHeight is 4, so height 0 clamps up to 4 (not the old global min of 1).
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('non-array input returns empty array', () => {
@@ -294,8 +292,8 @@ describe('resolvePlacements()', () => {
 			{ id: 'kpi', width: 1, height: 1 },
 			{ id: 'kpi', width: 4, height: 8 }
 		] as unknown as unknown[]);
-		// First occurrence wins; kpi minHeight is 2, so height 1 clamps up to 2.
-		expect(result).toEqual([{ id: 'kpi', width: 1, height: 2, x: 0, y: 0 }]);
+		// First occurrence wins; kpi minHeight is 4, so height 1 clamps up to 4.
+		expect(result).toEqual([{ id: 'kpi', width: 1, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('result placements are in registry order even when objects override sizes', () => {
@@ -304,85 +302,86 @@ describe('resolvePlacements()', () => {
 			{ id: 'kpi', width: 2, height: 1 }
 		] as unknown as unknown[]);
 		expect(result.map((p) => p.id)).toEqual(['kpi', 'top-projects']);
-		// kpi minHeight is 2, so height 1 is raised to 2.
-		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 2, x: 0, y: 0 });
-		expect(result[1]).toEqual({ id: 'top-projects', width: 3, height: 5, x: 0, y: 2 });
+		// kpi minHeight is 4, so height 1 is raised to 4. kpi(2x4) at (0,0) leaves
+		// cols 2-5 free in rows 0-3; top-tools(3x5) fits at (2,0) rather than below.
+		expect(result[0]).toEqual({ id: 'kpi', width: 2, height: 4, x: 0, y: 0 });
+		expect(result[1]).toEqual({ id: 'top-projects', width: 3, height: 5, x: 2, y: 0 });
 	});
 
 	test('honours a finite x/y pair (explicit position)', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 2, x: 1, y: 3 }
+			{ id: 'kpi', width: 2, height: 4, x: 1, y: 3 }
 		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 1, y: 3 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4, x: 1, y: 3 }]);
 	});
 
 	test('x + width == columns boundary is honoured (right edge)', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }
 		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('x out of range (negative) is clamped to 0', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 2, x: -5, y: 0 }
+			{ id: 'kpi', width: 2, height: 4, x: -5, y: 0 }
 		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('x out of range (too large) is clamped so x+width==columns', () => {
-		// width=2, columns=4; max x=2.
+		// width=2, columns=6; max x=4.
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 2, x: 10, y: 0 }
+			{ id: 'kpi', width: 2, height: 4, x: 10, y: 0 }
 		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 2, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4, x: 4, y: 0 }]);
 	});
 
 	test('y out of range (negative) is clamped to 0', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 2, x: 0, y: -5 }
+			{ id: 'kpi', width: 2, height: 4, x: 0, y: -5 }
 		] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 2, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('partial pair (x only) is treated as unpositioned → auto-positioned', () => {
 		const result = resolvePlacements([{ id: 'kpi', x: 99 } as unknown as WidgetPlacement] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('partial pair (y only) is treated as unpositioned → auto-positioned', () => {
 		const result = resolvePlacements([{ id: 'kpi', y: 99 } as unknown as WidgetPlacement] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('x/y as null is treated as unpositioned → auto-positioned', () => {
 		const result = resolvePlacements([{ id: 'kpi', x: null, y: null }] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('x/y as non-finite (NaN, Infinity) is treated as unpositioned → auto-positioned', () => {
 		const resultNaN = resolvePlacements([{ id: 'kpi', x: NaN, y: 0 }] as unknown as unknown[]);
-		expect(resultNaN).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(resultNaN).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 		const resultInf = resolvePlacements([{ id: 'kpi', x: 0, y: Infinity }] as unknown as unknown[]);
-		expect(resultInf).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(resultInf).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 		const resultNegInf = resolvePlacements([{ id: 'kpi', x: -Infinity, y: 0 }] as unknown as unknown[]);
-		expect(resultNegInf).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(resultNegInf).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('x/y as string is treated as unpositioned → auto-positioned', () => {
 		const result = resolvePlacements([{ id: 'kpi', x: '1' as unknown as number }] as unknown as unknown[]);
-		expect(result).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(result).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
 	test('mixed positioned and unpositioned: positioned reserved, unpositioned auto-filled without overlap', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }, // positioned
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }, // positioned
 			{ id: 'top-tools' } as unknown as WidgetPlacement // unpositioned
 		] as unknown as unknown[]);
 		expect(result.map((p) => p.id)).toEqual(['kpi', 'top-tools']);
-		// kpi occupies row 0-1 cols 0-3; top-tools(2x3) should land at (0,2).
-		expect(result[0]).toEqual({ id: 'kpi', width: 4, height: 2, x: 0, y: 0 });
-		expect(result[1]).toEqual({ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 });
+		// kpi occupies row 0-3 cols 0-5; top-tools(3x6) should land at (0,4).
+		expect(result[0]).toEqual({ id: 'kpi', width: 6, height: 4, x: 0, y: 0 });
+		expect(result[1]).toEqual({ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 });
 	});
 
 	test('determinism: same hostile/partial input resolved twice yields identical layout', () => {
@@ -413,9 +412,9 @@ describe('resolvePlacements()', () => {
 
 	test('no overlap guarantee: same input twice, no two placements share a cell', () => {
 		const result = resolvePlacements([
-			{ id: 'kpi', width: 2, height: 2, x: 0, y: 0 },
+			{ id: 'kpi', width: 2, height: 4, x: 0, y: 0 },
 			{ id: 'sessions-per-day' },
-			{ id: 'cost-per-day', width: 2, height: 2, x: 3, y: 0 },
+			{ id: 'cost-per-day', width: 2, height: 4, x: 4, y: 0 },
 			{ id: 'top-tools' }
 		] as unknown as unknown[]);
 		const cells = new Set<number>();
@@ -452,18 +451,18 @@ describe('registry source stays server-free and DOM-free (spec §2.1)', () => {
 	});
 });
 
-describe('DEFAULT_WIDGETS positions', () => {
-	test('resolves to a packed non-overlapping layout in registry order', () => {
-		const expected: WidgetPlacement[] = [
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-			{ id: 'sessions-per-day', width: 2, height: 3, x: 0, y: 2 },
-			{ id: 'cost-per-day', width: 2, height: 3, x: 2, y: 2 },
-			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 5 },
-			{ id: 'agent-distribution', width: 1, height: 3, x: 2, y: 5 },
-			{ id: 'top-projects', width: 2, height: 3, x: 0, y: 8 }
-		];
-		expect(DEFAULT_WIDGETS).toEqual(expected);
-	});
+	describe('DEFAULT_WIDGETS positions', () => {
+		test('resolves to a packed non-overlapping layout in registry order', () => {
+			const expected: WidgetPlacement[] = [
+				{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+				{ id: 'sessions-per-day', width: 3, height: 6, x: 0, y: 4 },
+				{ id: 'cost-per-day', width: 3, height: 6, x: 3, y: 4 },
+				{ id: 'top-tools', width: 3, height: 6, x: 0, y: 10 },
+				{ id: 'agent-distribution', width: 2, height: 6, x: 3, y: 10 },
+				{ id: 'top-projects', width: 3, height: 6, x: 0, y: 16 }
+			];
+			expect(DEFAULT_WIDGETS).toEqual(expected);
+		});
 
 	test('no two default widgets share a grid cell', () => {
 		const cells = new Set<number>();
@@ -504,15 +503,15 @@ describe('geometry constants match CSS reality', () => {
 	test('ROOT_FONT_SIZE_PX = 14 canary: if CSS root font-size changes, this fails', () => {
 		// Canaries that would catch a root-font-size drift:
 		// - ROOT_FONT_SIZE_PX != 14 means layout.ts was updated but app.css wasn't (or vice versa).
-		// - GRID_ROW_HEIGHT_PX != 84 means the row-height rem × font-size product diverges from CSS.
+		// - GRID_ROW_HEIGHT_PX != 42 means the row-height rem × font-size product diverges from CSS.
 		// - GRID_GAP_PX != 14 means the gap rem × font-size product diverges from CSS.
 		expect(ROOT_FONT_SIZE_PX).toBe(14);
-		expect(GRID_ROW_HEIGHT_PX).toBe(84);
+		expect(GRID_ROW_HEIGHT_PX).toBe(42);
 		expect(GRID_GAP_PX).toBe(14);
 	});
 
-	test('GRID_COLUMNS = 4 canary: diverges from WidgetGrid.svelte grid-template-columns', () => {
+	test('GRID_COLUMNS = 6 canary: diverges from WidgetGrid.svelte grid-template-columns', () => {
 		// If WidgetGrid.svelte changes repeat(N,...) without updating layout.ts, this catches it.
-		expect(GRID_COLUMNS).toBe(4);
+		expect(GRID_COLUMNS).toBe(6);
 	});
 });

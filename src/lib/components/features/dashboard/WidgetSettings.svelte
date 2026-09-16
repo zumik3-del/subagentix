@@ -13,7 +13,7 @@
 	 * gear, and no markup while closed.
 	 */
 	import { tick } from 'svelte';
-	import { WIDGET_MAX_HEIGHT } from '$lib/widgets/registry';
+	import { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH } from '$lib/widgets/registry';
 	import type { WidgetDef, WidgetPlacement } from '$lib/widgets/registry';
 	import type { WidgetSizePatch } from './widget';
 
@@ -45,6 +45,13 @@
 	let dialog = $state<HTMLDivElement | null>(null);
 	let previouslyFocused: HTMLElement | null = null;
 	let wasOpen = false;
+
+	/**
+	 * Width options derived from the shared bound (`WIDGET_MAX_WIDTH`), so the
+	 * select can never disagree with the grid's column count. The last option is
+	 * labelled "(full)" — the row span is `GRID_COLUMNS` sixth-width blocks.
+	 */
+	const widthOptions = Array.from({ length: WIDGET_MAX_WIDTH }, (_, index) => index + 1);
 
 	$effect(() => {
 		const isOpen = open && widget !== undefined && placement !== undefined;
@@ -132,10 +139,13 @@
 								value={String(placement.width)}
 								onchange={(event) => setWidth(event.currentTarget.value)}
 							>
-								<option value="1">1 block</option>
-								<option value="2">2 blocks</option>
-								<option value="3">3 blocks</option>
-								<option value="4">4 blocks (full)</option>
+								{#each widthOptions as option (option)}
+									<option value={String(option)}>
+										{option} block{option === 1 ? '' : 's'}{option === WIDGET_MAX_WIDTH
+											? ' (full)'
+											: ''}
+									</option>
+								{/each}
 							</select>
 						</span>
 

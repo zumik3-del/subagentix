@@ -22,7 +22,7 @@ import {
 
 /**
  * Size bounds re-exported from `layout.ts` (the shared geometry source): width
- * counts quarter-width blocks (4 = full row), height counts 6rem rows. Kept as
+ * counts sixth-width blocks (6 = full row), height counts 3rem rows. Kept as
  * named exports so existing importers are unaffected by the move.
  */
 export { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH, WIDGET_MIN_HEIGHT, WIDGET_MIN_WIDTH };
@@ -74,9 +74,9 @@ export function clampWidgetHeight(id: WidgetId, value: number): number {
  */
 export interface WidgetPlacement {
 	id: WidgetId;
-	/** Width in quarter-width blocks (1–4). */
+	/** Width in sixth-width blocks (1–6). */
 	width: number;
-	/** Height in 6rem rows (1–8). */
+	/** Height in 3rem rows (1–16). */
 	height: number;
 	/** Optional 0-based column index; both `x` and `y` must be present to take effect. */
 	x?: number;
@@ -90,9 +90,9 @@ export interface WidgetDef {
 	id: WidgetId;
 	/** Human-readable card title. */
 	title: string;
-	/** Registry-default width in quarter-width blocks (1–4). */
+	/** Registry-default width in sixth-width blocks (1–6). */
 	width: number;
-	/** Registry-default height in 6rem rows (1–8). */
+	/** Registry-default height in 3rem rows (1–16). */
 	height: number;
 	/** Smallest height (rows) at which this widget's body stays legible. */
 	minHeight: number;
@@ -114,9 +114,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'kpi',
 		title: 'Cost & tokens',
-		width: 4,
-		height: 2,
-		minHeight: 2,
+		width: 6,
+		height: 4,
+		minHeight: 4,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/kpi'
@@ -124,9 +124,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'sessions-per-day',
 		title: 'Sessions per day',
-		width: 2,
-		height: 3,
-		minHeight: 3,
+		width: 3,
+		height: 6,
+		minHeight: 6,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/sessions-per-day'
@@ -134,9 +134,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'cost-per-day',
 		title: 'Cost per day',
-		width: 2,
-		height: 3,
-		minHeight: 3,
+		width: 3,
+		height: 6,
+		minHeight: 6,
 		tier: 'M',
 		defaultOn: true,
 		source: '/api/dashboard/cost-per-day'
@@ -144,9 +144,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'top-tools',
 		title: 'Top tools',
-		width: 2,
-		height: 3,
-		minHeight: 2,
+		width: 3,
+		height: 6,
+		minHeight: 4,
 		tier: 'P',
 		defaultOn: true,
 		source: '/api/dashboard/top-tools'
@@ -154,9 +154,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'agent-distribution',
 		title: 'Agent distribution',
-		width: 1,
-		height: 3,
-		minHeight: 2,
+		width: 2,
+		height: 6,
+		minHeight: 4,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/agent-distribution'
@@ -164,9 +164,9 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
 		id: 'top-projects',
 		title: 'Top projects',
-		width: 2,
-		height: 3,
-		minHeight: 1,
+		width: 3,
+		height: 6,
+		minHeight: 2,
 		tier: 'S',
 		defaultOn: true,
 		source: '/api/dashboard/top-projects'

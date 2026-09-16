@@ -6,16 +6,16 @@
 	 * One markup tree serves two modes, so the page keeps working with
 	 * JavaScript disabled or before the enhancement chunk loads:
 	 *
-	 * - **Fallback (SSR / no JS):** the `<ul>` is a 4-column CSS grid with
-	 *   `6rem` rows and `grid-auto-flow: row dense`, driven entirely by the
+	 * - **Fallback (SSR / no JS):** the `<ul>` is a 6-column CSS grid with
+	 *   `3rem` rows and `grid-auto-flow: row dense`, driven entirely by the
 	 *   `widget-grid` class. Each item's `width`/`height` still feed the
-	 *   `data-w`/`data-h` numeric tables, and its resolved `x`/`y` are exposed as
-	 *   the `--gs-*` custom properties: at `≥64rem` those pin the widget to its
-	 *   exact cell (no overflow, no flow packing), while the `≤63.99rem` (2
-	 *   columns, width capped at 2) and `≤39.99rem` (1 column, full width)
-	 *   blocks keep the old clamp behaviour. The container never carries
-	 *   `grid-stack` here — that class is added only on the enhancement path in
-	 *   a later stage, never during SSR.
+	 *   `data-w` numeric table and the `--gs-h` row span, and its resolved
+	 *   `x`/`y` are exposed as the `--gs-*` custom properties: at `≥64rem`
+	 *   those pin the widget to its exact cell (no overflow, no flow packing),
+	 *   while the `≤63.99rem` (2 columns, width capped at 2) and `≤39.99rem`
+	 *   (1 column, full width) blocks keep the old clamp behaviour. The
+	 *   container never carries `grid-stack` here — that class is added only on
+	 *   the enhancement path in a later stage, never during SSR.
 	 * - **Enhancement (later stage):** the same nodes already carry the
 	 *   gridstack contract — `grid-stack-item` on each item, `gs-x`/`gs-y`/
 	 *   `gs-w`/`gs-h` attributes, and the `grid-stack-item-content` wrapper
@@ -197,6 +197,19 @@
 </ul>
 
 <style>
+	/* Base normalization that must survive BOTH modes. The fallback block below
+	   is scoped to `:not(.grid-stack)`, so the moment the enhancement adds
+	   `grid-stack` the `<ul>` falls back to browser defaults: its list markers
+	   reappear as a small disc at each `<li>`'s top-left (the stray "white
+	   circle"), plus the default list margin/padding. Keep them off
+	   unconditionally — gridstack positions the items itself, so these only
+	   remove native decorations. */
+	.widget-grid {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
 	/* Every fallback rule is scoped to `:not(.grid-stack)` (epic #462, stage 3):
 	   the enhancement adds `grid-stack` to the `<ul>`, and these `display: grid`
 	   / `grid-column` / fixed-row rules must switch off at that point or they
@@ -206,19 +219,22 @@
 	.widget-grid:not(.grid-stack) {
 		display: grid;
 		/* Geometry comes from `layout.ts` via the `--grid-*` custom properties
-		   set on the `<ul>`: `GRID_COLUMNS`, `GRID_ROW_HEIGHT_REM` (6rem),
+		   set on the `<ul>`: `GRID_COLUMNS`, `GRID_ROW_HEIGHT_REM` (3rem),
 		   `GRID_GAP_REM` (1rem, the old `--space-4`). No fresh literals here. */
 		grid-template-columns: repeat(var(--grid-columns), minmax(0, 1fr));
 		grid-auto-rows: var(--grid-row-height);
 		grid-auto-flow: row dense;
 		gap: var(--grid-gap);
-		margin: 0;
-		padding: 0;
-		list-style: none;
 	}
 
 	.widget-grid:not(.grid-stack) .widget-grid__item {
-		grid-row: span 1;
+		/* Height comes from the per-item `--gs-h` custom property (the row span
+		   is a numeric `span var(--gs-h)`, valid CSS) instead of a `data-h`
+		   lookup table: the table would need one rule per height unit up to
+		   `WIDGET_MAX_HEIGHT` (16), the custom property needs none and already
+		   holds the resolved value. Width keeps its `data-w` rules below because
+		   the two narrow modes still clamp the span. */
+		grid-row: span var(--gs-h);
 		min-width: 0;
 	}
 
@@ -250,43 +266,19 @@
 		grid-column: span 4;
 	}
 
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='1'] {
-		grid-row: span 1;
+	.widget-grid:not(.grid-stack) .widget-grid__item[data-w='5'] {
+		grid-column: span 5;
 	}
 
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='2'] {
-		grid-row: span 2;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='3'] {
-		grid-row: span 3;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='4'] {
-		grid-row: span 4;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='5'] {
-		grid-row: span 5;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='6'] {
-		grid-row: span 6;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='7'] {
-		grid-row: span 7;
-	}
-
-	.widget-grid:not(.grid-stack) .widget-grid__item[data-h='8'] {
-		grid-row: span 8;
+	.widget-grid:not(.grid-stack) .widget-grid__item[data-w='6'] {
+		grid-column: span 6;
 	}
 
 	/* Desktop (≥ `layout.ts` `GRID_DESKTOP_MIN_WIDTH_REM` = 64rem): every widget
 	   is pinned to its resolved `x`/`y`/`width`/`height`, so it can never flow
-	   or overlap. Same specificity as the `data-w`/`data-h` tables above, but
-	   later in source, so it wins there; the narrow blocks below are mutually
-	   exclusive with this width and keep their `data-w`/`data-h` behaviour. */
+	   or overlap. Same specificity as the `data-w` table above, but later in
+	   source, so it wins there; the narrow blocks below are mutually exclusive
+	   with this width and keep their `data-w` behaviour. */
 	@media (min-width: 64rem) {
 		.widget-grid:not(.grid-stack) .widget-grid__item.grid-stack-item {
 			grid-column: calc(var(--gs-x) + 1) / span var(--gs-w);
@@ -299,9 +291,12 @@
 			grid-template-columns: repeat(2, minmax(0, 1fr));
 		}
 
-		/* Width clamps to the two available columns. */
+		/* Width clamps to the two available columns: every width above 2 (in the
+		   6-column model: 3–6) collapses to the full 2-column span. */
 		.widget-grid:not(.grid-stack) .widget-grid__item[data-w='3'],
-		.widget-grid:not(.grid-stack) .widget-grid__item[data-w='4'] {
+		.widget-grid:not(.grid-stack) .widget-grid__item[data-w='4'],
+		.widget-grid:not(.grid-stack) .widget-grid__item[data-w='5'],
+		.widget-grid:not(.grid-stack) .widget-grid__item[data-w='6'] {
 			grid-column: span 2;
 		}
 	}

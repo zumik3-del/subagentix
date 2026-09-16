@@ -33,7 +33,8 @@ describe('saveDashboardWidgets()', () => {
 		expect(result).toHaveLength(2);
 		expect(result[0].id).toBe('kpi');
 		expect(result[0].width).toBe(2);
-		expect(result[0].height).toBe(3);
+		// kpi minHeight is 4 (doubled from old 2); height 3 is clamped up to 4.
+		expect(result[0].height).toBe(4);
 		expect(result[0]).not.toHaveProperty('foo');
 	});
 

@@ -524,9 +524,10 @@ test('normaliseDashboardWidgets accepts a partial x/y pair (treated as unpositio
 
 test('normaliseDashboardWidgets accepts a valid positioned object and round-trips it', async () => {
 	const mod = await freshSettingsModule();
+	// kpi minHeight is 4; height 3 is clamped up to 4.
 	const positioned = [{ id: 'kpi' as WidgetPlacement['id'], width: 2, height: 3, x: 1, y: 2 }];
 	const result = mod.normaliseDashboardWidgets(positioned);
-	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 3, x: 1, y: 2 }]);
+	expect(result).toEqual<WidgetPlacement[]>([{ id: 'kpi', width: 2, height: 4, x: 1, y: 2 }]);
 });
 
 test('normaliseDashboardWidgets rejects non-object non-string entries', async () => {
@@ -544,8 +545,8 @@ test('normaliseDashboardWidgets accepts legacy string[] and resolves registry de
 	const mod = await freshSettingsModule();
 	const result = mod.normaliseDashboardWidgets(['kpi', 'agent-distribution']);
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-		{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 2 }
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'agent-distribution', width: 2, height: 6, x: 0, y: 4 }
 	]);
 });
 
@@ -582,7 +583,7 @@ test('dashboardWidgets round-trips through PUT → GET unchanged', async () => {
 	// normaliseDashboardWidgets resolves auto-positions; read-back matches the resolved layout.
 	expect(readBack).toEqual<WidgetPlacement[]>([
 		{ id: 'kpi', width: 3, height: 5, x: 0, y: 0 },
-		{ id: 'top-tools', width: 2, height: 2, x: 0, y: 5 }
+		{ id: 'top-tools', width: 2, height: 4, x: 3, y: 0 }
 	]);
 });
 
@@ -600,8 +601,8 @@ test('legacy string[] file degrades gracefully on read', async () => {
 	const result = mod.getStoredSettings().dashboardWidgets;
 	// Legacy strings are resolved to placements with registry defaults and auto-positions.
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-		{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 }
 	]);
 });
 
@@ -622,19 +623,19 @@ test('version 2 is written on every updateStoredSettings call', async () => {
 
 test('normaliseDashboardWidgets clamps a v2 height below the widget minimum up to it', async () => {
 	const mod = await freshSettingsModule();
-	// kpi minHeight is 2; a persisted height of 0 or 1 must raise to 2.
+	// kpi minHeight is 4; a persisted height of 0..3 must raise to 4.
 	expect(
 		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 0 }])
 		[0].height
-	).toBe(2);
+	).toBe(4);
 	expect(
 		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 1 }])
 		[0].height
-	).toBe(2);
+	).toBe(4);
 	expect(
-		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 2 }])
+		mod.normaliseDashboardWidgets([{ id: 'kpi' as WidgetPlacement['id'], width: 4, height: 3 }])
 		[0].height
-	).toBe(2);
+	).toBe(4);
 });
 
 test('normaliseDashboardWidgets clamps each widget to its own minimum', async () => {
@@ -647,13 +648,13 @@ test('normaliseDashboardWidgets clamps each widget to its own minimum', async ()
 		{ id: 'cost-per-day' as WidgetPlacement['id'], width: 2, height: 0 }
 	] as unknown as unknown[]);
 	const byId = new Map(result.map((p) => [p.id, p]));
-	// top-projects minHeight is 1; top-tools is 2; agent-distribution is 2;
-	// sessions-per-day and cost-per-day are 3.
-	expect(byId.get('top-projects')?.height).toBe(1);
-	expect(byId.get('top-tools')?.height).toBe(2);
-	expect(byId.get('agent-distribution')?.height).toBe(2);
-	expect(byId.get('sessions-per-day')?.height).toBe(3);
-	expect(byId.get('cost-per-day')?.height).toBe(3);
+	// top-projects minHeight is 2; top-tools is 4; agent-distribution is 4;
+	// sessions-per-day and cost-per-day are 6.
+	expect(byId.get('top-projects')?.height).toBe(2);
+	expect(byId.get('top-tools')?.height).toBe(4);
+	expect(byId.get('agent-distribution')?.height).toBe(4);
+	expect(byId.get('sessions-per-day')?.height).toBe(6);
+	expect(byId.get('cost-per-day')?.height).toBe(6);
 });
 
 test('a legacy string[] file resolves registry defaults (no minHeight issue)', async () => {
@@ -668,20 +669,20 @@ test('a legacy string[] file resolves registry defaults (no minHeight issue)', a
 	const mod = await freshSettingsModule();
 	const result = mod.getStoredSettings().dashboardWidgets;
 	expect(result).toEqual<WidgetPlacement[]>([
-		{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-		{ id: 'top-projects', width: 2, height: 3, x: 0, y: 2 }
+		{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+		{ id: 'top-projects', width: 3, height: 6, x: 0, y: 4 }
 	]);
 });
 
 test('resolveDashboardWidgets clamps a persisted v2 height below the widget minimum', async () => {
 	const dir = tempDir();
 	const file = join(dir, 'clamp-persisted.json');
-	// Write a v2 file with a kpi height of 1 (below kpi's minHeight of 2).
+	// Write a v2 file with a kpi height of 3 (below kpi's minHeight of 4).
 	writeFileSync(
 		file,
 		JSON.stringify({
 			version: 2,
-			dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }]
+			dashboardWidgets: [{ id: 'kpi', width: 4, height: 3 }]
 		}),
 		'utf8'
 	);
@@ -690,30 +691,30 @@ test('resolveDashboardWidgets clamps a persisted v2 height below the widget mini
 	const result = mod.resolveDashboardWidgets();
 	expect(result).toHaveLength(1);
 	expect(result[0].id).toBe('kpi');
-	// Persisted height 1 is clamped up to kpi's minHeight of 2 on read.
-	expect(result[0].height).toBe(2);
+	// Persisted height 3 is clamped up to kpi's minHeight of 4 on read.
+	expect(result[0].height).toBe(4);
 });
 
-	test('the update path persists the clamped value (round-trip)', async () => {
-		const dir = tempDir();
-		const file = join(dir, 'clamp-rt.json');
-		process.env.SETTINGS_FILE = file;
-		const mod = await freshSettingsModule();
+test('the update path persists the clamped value (round-trip)', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'clamp-rt.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
 
-		// Write a kpi with height 1; the setter should clamp it to 2 before writing.
-		mod.updateStoredSettings({
-			dashboardWidgets: [{ id: 'kpi', width: 4, height: 1 }] as unknown as unknown[]
-		});
-		const readBack = mod.getStoredSettings().dashboardWidgets;
-		expect(readBack).toHaveLength(1);
-		expect(readBack![0].height).toBe(2);
-
-		// Re-import to simulate a fresh process reading the same file.
-		const mod2 = await freshSettingsModule();
-		const reRead = mod2.getStoredSettings().dashboardWidgets;
-		expect(reRead).toHaveLength(1);
-		expect(reRead![0].height).toBe(2);
+	// Write a kpi with height 3; the setter should clamp it to 4 before writing.
+	mod.updateStoredSettings({
+		dashboardWidgets: [{ id: 'kpi', width: 4, height: 3 }] as unknown as unknown[]
 	});
+	const readBack = mod.getStoredSettings().dashboardWidgets;
+	expect(readBack).toHaveLength(1);
+	expect(readBack![0].height).toBe(4);
+
+	// Re-import to simulate a fresh process reading the same file.
+	const mod2 = await freshSettingsModule();
+	const reRead = mod2.getStoredSettings().dashboardWidgets;
+	expect(reRead).toHaveLength(1);
+	expect(reRead![0].height).toBe(4);
+});
 
 /* ------------------------------------------------------------------ */
 /* dashboardFilter normalisation & round-trip                           */

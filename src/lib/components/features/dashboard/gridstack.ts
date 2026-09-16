@@ -9,7 +9,7 @@
  *
  * Contract:
  * - **Gate.** The enhancement is desktop-only: it starts only when `matchMedia`
- *   matches `layout.ts`'s 4-column breakpoint (`GRID_DESKTOP_MIN_WIDTH_REM`).
+ *   matches `layout.ts`'s 6-column breakpoint (`GRID_DESKTOP_MIN_WIDTH_REM`).
  *   Below it (and on the server) the grid stays the static CSS fallback owned by
  *   `WidgetGrid.svelte`; crossing the breakpoint tears the enhancement down.
  * - **Adopt, don't create.** `GridStack.init` reads the `grid-stack-item` /
@@ -19,9 +19,9 @@
  *   attributes and `--gs-*` inline style), so Svelte never rewrites what
  *   gridstack owns; every later mutation goes through the gridstack API.
  * - **Persist on settle.** A `dragstop`/`resizestop` reads the whole layout back
- *   with `grid.save(false)` and hands it to `onLayoutChange` — exactly one call
- *   per settled gesture. Pointer moves, programmatic syncs and init never call
- *   it (except the one-time overlap repair described below).
+ *   from the live engine nodes and hands it to `onLayoutChange` — exactly one
+ *   call per settled gesture. Pointer moves, programmatic syncs and init never
+ *   call it (except the one-time overlap repair described below).
  * - **Safe fallback.** Any import or init failure is caught here and swallowed:
  *   the DOM is restored to the static fallback and `onActiveChange(false)` keeps
  *   the component's reactive (JS-only) path live. No unhandled rejection.
@@ -41,12 +41,13 @@ import {
 	GRID_ROW_HEIGHT_REM,
 	WIDGET_MAX_HEIGHT,
 	WIDGET_MAX_WIDTH,
+	WIDGET_MIN_HEIGHT,
 	WIDGET_MIN_WIDTH
 } from './layout';
 import { findWidgetDef, resolvePlacements } from '$lib/widgets/registry';
 import type { WidgetId, WidgetPlacement } from '$lib/widgets/registry';
 // Type-only, so the emitted wrapper has no static reference to the library.
-import type { GridItemHTMLElement, GridStack, GridStackWidget } from 'gridstack';
+import type { GridItemHTMLElement, GridStack } from 'gridstack';
 
 /** Desktop-only gate, mirroring the `min-width: 64rem` fallback query. */
 const DESKTOP_QUERY = `(min-width: ${GRID_DESKTOP_MIN_WIDTH_REM}rem)`;
@@ -173,7 +174,14 @@ class GridstackController {
 					// top-gravity packing that would silently compact stored gaps on
 					// load, diverging from the CSS fallback and triggering a repair PUT.
 					float: true,
-					animate: false
+					animate: false,
+					// Resize surface made explicit instead of relying on gridstack's
+					// built-ins: east/south/southeast only. No north-west/north-east/
+					// south-west handle is created, so nothing can paint at an item's
+					// top-left. `alwaysShowResizeHandle: false` keeps the handles
+					// auto-hidden until the item is hovered (its default is `'mobile'`).
+					resizable: { handles: 'e,s,se' },
+					alwaysShowResizeHandle: false
 				},
 				this.#container
 			);
@@ -245,21 +253,35 @@ class GridstackController {
 		this.#onLayoutChange(live);
 	}
 
-	/** Read the live layout back into model placements (full list, x/y included). */
+	/**
+	 * Read the live layout back into model placements (full list, x/y included).
+	 *
+	 * Reads `grid.engine.nodes` directly, deliberately **not** `grid.save(false)`.
+	 * `Utils.removeInternalForSave` (gridstack 13.3, `dist/utils.js:493-496`)
+	 * deletes `w` when `w === 1 || w === minW` and `h` when `h === 1 || h ===
+	 * minH`, so a saved node that shrank to width 1 (or to the widget's
+	 * `minHeight`) comes back without those keys. Compensating with the previous
+	 * model value (as this used to) then reported the *old* size, which was
+	 * persisted and pushed back through `#sync` — the widget snapped back. The
+	 * engine nodes are the source of truth and `prepareNode` guarantees numeric,
+	 * in-bounds `x`/`y`/`w`/`h` (each clamped to ≥ 1), so the `??` floors below
+	 * only cover a type-optional field and can never resurrect a stale size.
+	 * Only model-known ids are reported, so a removed widget is never readded.
+	 */
 	#readLayout(): WidgetPlacement[] {
 		const grid = this.#grid;
 		if (!grid) return [...this.#placements];
-		const known = new Map(this.#placements.map((placement) => [placement.id, placement] as const));
+		const known = new Set(this.#placements.map((placement) => placement.id));
 		const raw: WidgetPlacement[] = [];
-		for (const item of grid.save(false) as GridStackWidget[]) {
-			const id = item.id as WidgetId | undefined;
-			const current = id ? known.get(id) : undefined;
-			if (!id || !current) continue;
+		for (const node of grid.engine.nodes) {
+			const id = node.id as WidgetId | undefined;
+			if (!id || !known.has(id)) continue;
 			raw.push({
 				id,
-				width: item.w ?? current.width,
-				height: item.h ?? current.height,
-				...(item.x !== undefined && item.y !== undefined ? { x: item.x, y: item.y } : {})
+				width: node.w ?? WIDGET_MIN_WIDTH,
+				height: node.h ?? WIDGET_MIN_HEIGHT,
+				x: node.x ?? 0,
+				y: node.y ?? 0
 			});
 		}
 		return resolvePlacements(raw);

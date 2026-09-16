@@ -307,7 +307,10 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			expect(source).toMatch(/from ['"]\.\/gridstack['"]/);
 		});
 
-		test('emits data-w and data-h on grid items', () => {
+		test('emits data-w but not data-h as a CSS consumption hook on grid items', () => {
+			// data-w drives the narrow-mode grid-column clamp rules (≤63.99rem / ≤39.99rem).
+			// data-h is emitted as metadata but is NOT consumed by CSS: row height uses
+			// `grid-row: span var(--gs-h)` instead, making a 16-entry lookup table redundant.
 			expect(source).toMatch(/data-w=/);
 			expect(source).toMatch(/data-h=/);
 		});
@@ -316,6 +319,8 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			expect(source).toMatch(/max-width:\s*63\.99rem/);
 			expect(source).toMatch(/data-w='3']/);
 			expect(source).toMatch(/data-w='4']/);
+			expect(source).toMatch(/data-w='5']/);
+			expect(source).toMatch(/data-w='6']/);
 		});
 
 		test('full-widths every widget at the 40rem breakpoint', () => {
@@ -382,11 +387,12 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 			expect(source).toMatch(/value=\{String\(placement\.width\)\}/);
 		});
 
-		test('width <select> options are the four quoted string literals "1".."4"', () => {
-			expect(source).toMatch(/<option value="1">1 block<\/option>/);
-			expect(source).toMatch(/<option value="2">2 blocks<\/option>/);
-			expect(source).toMatch(/<option value="3">3 blocks<\/option>/);
-			expect(source).toMatch(/<option value="4">4 blocks \(full\)<\/option>/);
+		test('width <select> options are derived from WIDGET_MAX_WIDTH (1..6), not hardcoded literals', () => {
+			// Task #471 replaced the four static `<option value="1">.."4">` literals with
+			// `Array.from({ length: WIDGET_MAX_WIDTH }, ...)`, deriving options from the
+			// shared bound so the select never disagrees with the grid column count.
+			expect(source).toMatch(/WIDGET_MAX_WIDTH/);
+			expect(source).toMatch(/Array\.from\(\{ length: WIDGET_MAX_WIDTH \}/);
 		});
 
 		test('would fail if a numeric value were restored (regression pin)', () => {
@@ -531,9 +537,8 @@ describe('gridstack.ts source: dynamic-import-only contract', () => {
 
 	test('persistence calls onLayoutChange with the full placement list', () => {
 		// After a settled gesture, the whole layout (including x/y) is read
-		// back via grid.save(false) and forwarded — not just ids/sizes.
+		// back via #readLayout and forwarded — not just ids/sizes.
 		expect(source).toMatch(/onLayoutChange\(this\.#readLayout\(\)\)/);
-		expect(source).toMatch(/grid\.save\(false\)/);
 	});
 
 	test('override layout.ts constants are used for grid config, not fresh literals', () => {
@@ -541,5 +546,61 @@ describe('gridstack.ts source: dynamic-import-only contract', () => {
 		expect(source).toMatch(/GRID_COLUMNS/);
 		expect(source).toMatch(/GRID_ROW_HEIGHT_REM/);
 		expect(source).toMatch(/GRID_GAP_REM/);
+	});
+});
+
+describe('gridstack.ts snap-back fix: #readLayout reads live engine nodes', () => {
+	const source = readFileSync(
+		new URL('./gridstack.ts', import.meta.url),
+		'utf8'
+	);
+
+	test('#readLayout iterates grid.engine.nodes, not grid.save(false)', () => {
+		// The snap-back bug (task #471 follow-up) was caused by #readLayout calling
+		// grid.save(false), which runs Utils.removeInternalForSave — that helper
+		// strips `w` when w===1||w===minW and `h` when h===1||h===minH, so the
+		// old code fell back to the stale model size and persisted the previous
+		// value, which sync pushed back into the live node → snap-back.
+		// The fix reads grid.engine.nodes directly (prepareNode guarantees numeric
+		// in-bounds x/y/w/h) and only reports placements for model-known ids.
+		expect(source).toMatch(/grid\.engine\.nodes/);
+		// The old fall-through path (grid.save(false) → stale model fallback) must
+		// not appear as a code path in #readLayout. The comment explicitly calls out
+		// "deliberately **not** grid.save(false)" to prevent regression.
+		expect(source).toMatch(/deliberately \*\*not\*\* \`grid\.save\(false\)\`/);
+	});
+
+	test('#readLayout falls back to WIDGET_MIN_WIDTH/HIGH via ??, not a stale placement', () => {
+		// The ?? floors are there to satisfy TypeScript's optional typing on the
+		// node fields; they can never resurrect a stale size because prepareNode
+		// in gridstack always writes numeric x/y/w/h before a node enters engine.nodes.
+		// A regression that re-introduces a stale-model fallback would lose the ??
+		// or add a second lookup — this assertion pins the ??-only pattern.
+		expect(source).toMatch(/node\.w \?\? WIDGET_MIN_WIDTH/);
+		expect(source).toMatch(/node\.h \?\? WIDGET_MIN_HEIGHT/);
+	});
+});
+
+describe('WidgetGrid list-style regression guard', () => {
+	const source = readFileSync(
+		new URL('./WidgetGrid.svelte', import.meta.url),
+		'utf8'
+	);
+
+	test('list-style:none is unconditional, not scoped to :not(.grid-stack)', () => {
+		// Bug found in task #471: list-style:none lived inside
+		// `.widget-grid:not(.grid-stack)`. Once the gridstack enhancement adds the
+		// `grid-stack` class to the <ul>, that rule stops matching, so every <li>
+		// fell back to display:list-item and painted its default disc marker at the
+		// top-left of the card (the "stray white circle"). Moving the declaration to
+		// an unconditional `.widget-grid` rule eliminates the mode-dependency.
+		// This test would fail if the rule were ever scoped back under :not(.grid-stack).
+		expect(source).toMatch(/\.widget-grid\s*\{[^}]*list-style:\s*none/);
+		// No :not(.grid-stack) block should contain list-style:none. The negative
+		// lookahead via split+join is safer than a single regex across multiline CSS.
+		const notBlock = source.match(/:not\(\.grid-stack\)\s*\{[^}]*\}/g) ?? [];
+		for (const block of notBlock) {
+			expect(block).not.toMatch(/list-style:\s*none/);
+		}
 	});
 });

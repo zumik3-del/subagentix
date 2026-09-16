@@ -83,7 +83,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(source.dashboardWidgets).toBe('file');
 	});
 
-	test('unknown ids are dropped, known ids preserved in registry order', async () => {
+		test('unknown ids are dropped, known ids preserved in registry order', async () => {
 		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
 		const putResp = await settingsRoute.PUT({
 			request: new Request('http://localhost/api/settings', {
@@ -94,13 +94,14 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		});
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
+		// kpi is 6×4 (full width); top-tools(3×6) auto-fills below → (0,4).
 		expect(body.dashboardWidgets).toEqual([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+			{ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 }
 		]); // registry order
 	});
 
-	test('duplicates collapse to a single entry', async () => {
+		test('duplicates collapse to a single entry', async () => {
 		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
 		const putResp = await settingsRoute.PUT({
 			request: new Request('http://localhost/api/settings', {
@@ -111,10 +112,10 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		});
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
-		expect(body.dashboardWidgets).toEqual([{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 }]);
+		expect(body.dashboardWidgets).toEqual([{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }]);
 	});
 
-	test('input reordered → output re-ordered to registry order', async () => {
+		test('input reordered → output re-ordered to registry order', async () => {
 		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
 		const putResp = await settingsRoute.PUT({
 			request: new Request('http://localhost/api/settings', {
@@ -126,12 +127,12 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(putResp.status).toBe(200);
 		const body = (await putResp.json()) as Record<string, unknown>;
 		// Registry order: kpi, sessions-per-day, cost-per-day, top-tools, agent-distribution, top-projects.
-		// Only sessions-per-day, top-tools, agent-distribution are requested.
-		// sessions-per-day(2x3) at (0,0); top-tools(2x3) at (2,0); agent-distribution(1x3) auto-fills below → (0,3).
+		// Only sessions-per-day(3x6), top-tools(3x6), agent-distribution(2x6) are requested.
+		// sessions-per-day at (0,0); top-tools(3x6) at (3,0); agent-distribution(2x6) auto-fills below → (0,6).
 		expect(body.dashboardWidgets).toEqual([
-			{ id: 'sessions-per-day', width: 2, height: 3, x: 0, y: 0 },
-			{ id: 'top-tools', width: 2, height: 3, x: 2, y: 0 },
-			{ id: 'agent-distribution', width: 1, height: 3, x: 0, y: 3 }
+			{ id: 'sessions-per-day', width: 3, height: 6, x: 0, y: 0 },
+			{ id: 'top-tools', width: 3, height: 6, x: 3, y: 0 },
+			{ id: 'agent-distribution', width: 2, height: 6, x: 0, y: 6 }
 		]);
 	});
 
@@ -234,7 +235,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		expect(getBody.dashboardWidgets).toHaveLength(6);
 	});
 
-	test('on-disk shape: version:2 + dashboardWidgets key present after PUT', async () => {
+		test('on-disk shape: version:2 + dashboardWidgets key present after PUT', async () => {
 		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
 		await settingsRoute.PUT({
 			request: new Request('http://localhost/api/settings', {
@@ -246,8 +247,8 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
 		expect(disk.version).toBe(2);
 		expect(disk.dashboardWidgets).toEqual([
-			{ id: 'kpi', width: 4, height: 2, x: 0, y: 0 },
-			{ id: 'top-tools', width: 2, height: 3, x: 0, y: 2 }
+			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
+			{ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 }
 		]);
 	});
 
