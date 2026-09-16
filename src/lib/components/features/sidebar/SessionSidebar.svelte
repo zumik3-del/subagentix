@@ -4,7 +4,7 @@
 	 *
 	 * A three-level, file-tree-v2-styled tree: directory
 	 * (`GET /api/sessions?directory=&limit=&offset=`) → session
-	 * (`GET /api/sessions/[id]` turns) → turn leaf. Directory and session
+	 * (`GET /api/sessions/[id]/turns`) → turn leaf. Directory and session
 	 * children load lazily on first expand and are cached per node. A non-empty
 	 * search `q` collapses the tree to a flat list of matching root sessions.
 	 *
@@ -232,11 +232,11 @@
 		turnsLoading = { ...turnsLoading, [id]: true };
 		turnsError = { ...turnsError, [id]: '' };
 		try {
-			const response = await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+			const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/turns`);
 			if (!response.ok) throw new Error(`Could not load turns (${response.status}).`);
-			const detail = (await response.json()) as { turns: TurnSummary[] };
+			const loaded = (await response.json()) as TurnSummary[];
 			if (requestSeq.get(key) !== seq) return;
-			turns = { ...turns, [id]: detail.turns };
+			turns = { ...turns, [id]: loaded };
 		} catch (cause) {
 			if (requestSeq.get(key) !== seq) return;
 			turnsError = {

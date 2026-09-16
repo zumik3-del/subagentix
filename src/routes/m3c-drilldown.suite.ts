@@ -760,7 +760,7 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 	test('Gantt marks the selected row/node and renders the panel from the selection', () => {
 		// Task #282: the node group `class:active` hook moved to GanttNodeRow.
 		expect(ganttNodeRow).toContain('class:active={row.active}');
-		expect(gantt).toContain('{#if selectedDetail}');
+		expect(gantt).toContain('{#if selectedNodeId !== null}');
 		expect(gantt).toContain('<NodeDetailPanel');
 	});
 

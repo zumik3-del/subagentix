@@ -11,10 +11,9 @@
 	 *
 	 * Imports only `$lib/model/**`, so it is safe in the client bundle.
 	 */
-	import type { Edge, GanttModel, Marker, Node } from '$lib/model/types';
+	import type { Edge, GanttOutline, Marker, Node, NodeDetail } from '$lib/model/types';
 	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock, formatCost, formatDuration } from '$lib/model/format';
-	import { selectNodeDetail } from '$lib/model/node';
 	import GanttChart from './GanttChart.svelte';
 	import GanttCursor from './GanttCursor.svelte';
 	import GanttEdges, { type ConnectorView, type MarkerEdgeView } from './GanttEdges.svelte';
@@ -43,7 +42,7 @@
 		ziptaskBaseUrl = null,
 		agentColors = {}
 	}: {
-		model: GanttModel;
+		model: GanttOutline;
 		/** 1-based turn order within the session, for the header label. */
 		turnIndex?: number | null;
 		/** Feature toggle: when false no tracker UI renders. */
@@ -107,10 +106,61 @@
 		}
 	}
 
-	// Drill-down panel data: sliced from the already-loaded model (no fetch).
+	// --- Per-node detail (Phase 4 / task #387) ---------------------------------
+	// The streamed model is a lightweight outline: a node's steps/tool calls/
+	// actions are fetched on demand and cached by session id. `detailRequest`
+	// tracks the in-flight/failed status of the *selected* node only, so switching
+	// rows can never surface a previous node's detail. `detailSeq` drops a late
+	// response that a newer selection has superseded.
+	let detailCache = $state<Record<string, NodeDetail>>({});
+	let detailRequest = $state<{ nodeId: string; status: 'loading' | 'error' } | null>(null);
+	let detailSeq = 0;
+
+	async function loadNodeDetail(nodeId: string) {
+		const seq = ++detailSeq;
+		detailRequest = { nodeId, status: 'loading' };
+		try {
+			const root = encodeURIComponent(model.rootSessionId);
+			const node = encodeURIComponent(nodeId);
+			const turn = model.triggerMessageId;
+			const query = turn === undefined ? '' : `?turn=${encodeURIComponent(turn)}`;
+			const response = await fetch(`/api/sessions/${root}/nodes/${node}${query}`);
+			if (!response.ok) throw new Error(`HTTP ${response.status}`);
+			const detail = (await response.json()) as NodeDetail;
+			if (seq !== detailSeq) return;
+			detailCache = { ...detailCache, [nodeId]: detail };
+			detailRequest = null;
+		} catch {
+			if (seq !== detailSeq) return;
+			detailRequest = { nodeId, status: 'error' };
+		}
+	}
+
 	const selectedDetail = $derived(
-		selectedNodeId === null ? null : selectNodeDetail(model, selectedNodeId)
+		selectedNodeId === null ? null : (detailCache[selectedNodeId] ?? null)
 	);
+	const selectedLoading = $derived(
+		selectedNodeId !== null &&
+			selectedDetail === null &&
+			detailRequest?.nodeId === selectedNodeId &&
+			detailRequest.status === 'loading'
+	);
+	const selectedError = $derived(
+		selectedNodeId !== null &&
+			selectedDetail === null &&
+			detailRequest?.nodeId === selectedNodeId &&
+			detailRequest.status === 'error'
+			? 'Could not load node detail.'
+			: null
+	);
+
+	// Fetch the selected node's detail once per selection, unless already cached.
+	// `$effect` is client-only, so SSR never issues a request.
+	$effect(() => {
+		const nodeId = selectedNodeId;
+		if (nodeId === null || detailCache[nodeId] !== undefined) return;
+		void loadNodeDetail(nodeId);
+	});
 
 	// --- Time cursor -----------------------------------------------------------
 	let cursorX = $state<number | null>(null);
@@ -164,10 +214,15 @@
 	// the browser (SSR leaves the inspector collapsed); tracking the model
 	// object — not the selection — keeps a manual row choice until the model
 	// actually changes.
-	let lastAutoOpenedModel: GanttModel | null = null;
+	let lastAutoOpenedModel: GanttOutline | null = null;
 	$effect(() => {
 		if (model === lastAutoOpenedModel) return;
 		lastAutoOpenedModel = model;
+		// A new turn invalidates every cached node detail (session ids recur
+		// across turns, so a stale entry would leak another turn's data).
+		detailCache = {};
+		detailRequest = null;
+		detailSeq++;
 		selectedNodeId = rows[0]?.sessionId ?? null;
 	});
 	const extent = $derived(turnExtent(model));
@@ -332,9 +387,13 @@
 	}
 
 	const rowViews = $derived.by((): RowView[] => {
-		const stepsByNode = groupByNode(model.steps);
-		const toolsByNode = groupByNode(model.toolCalls);
-		const markersByNode = groupByNode(model.markers);
+		// The outline omits the heavy detail, so any node whose detail has been
+		// loaded (Phase 4) contributes its step/tool/marker lanes back to the chart
+		// — the selected node progressively fills in.
+		const loaded = Object.values(detailCache);
+		const stepsByNode = groupByNode([...(model.steps ?? []), ...loaded.flatMap((d) => d.steps)]);
+		const toolsByNode = groupByNode([...(model.toolCalls ?? []), ...loaded.flatMap((d) => d.toolCalls)]);
+		const markersByNode = groupByNode([...(model.markers ?? []), ...loaded.flatMap((d) => d.markers)]);
 		// `activeNodeId` (hover ?? selection) drives only purely visual emphasis
 		// (dimming/edges); `row.active` below is selection-only so `aria-pressed`
 		// and the selected styling never follow hover.
@@ -420,7 +479,7 @@
 						: 'Removed content marker (no timestamp)'
 			}));
 
-			const trackerRefs = nodeTrackerRefs(node, model.toolCalls, model.edges);
+			const trackerRefs = nodeTrackerRefs(node, model.toolCalls ?? [], model.edges);
 
 			return {
 				node,
@@ -601,10 +660,12 @@
 		<GanttLegend />
 		</div>
 
-		{#if selectedDetail}
+		{#if selectedNodeId !== null}
 			<aside class="side-col" aria-label="Node inspector">
 				<NodeDetailPanel
 					detail={selectedDetail}
+					loading={selectedLoading}
+					error={selectedError}
 					{ziptaskEnabled}
 					{ziptaskBaseUrl}
 					onOpenTask={openTask}

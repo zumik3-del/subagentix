@@ -3,7 +3,6 @@
  * observes, and the overlap/orphan flags derived after the raw spans are known.
  */
 import type { Node } from '../../../model/types';
-import { getDelegationEdges } from '../../queries/sessions';
 import type { SessionSubtreeRecord } from '../../queries/sessions';
 import type { DelegationRecord, MessageRecord } from '../../schema';
 import { edgeSortTime, turnIndexOf, type SessionData } from './shared';
@@ -57,12 +56,15 @@ export function selectTurnSessions(
 
 /**
  * Edge records observed by the turn: this turn's root edges plus every edge of a
- * subagent node in the turn. Root edges with a spawned child are counted in
- * `onSubEdge`-free order; sub edges are passed to `onSubEdge` as they are
- * collected so callers can roll up spawn counts without re-querying.
+ * subagent node in the turn. `subtreeEdges` is the pre-fetched subtree-wide edge
+ * list (task #386) — grouped by session in one pass, so no per-session query is
+ * issued here. Root edges with a spawned child are counted in `onSubEdge`-free
+ * order; sub edges are passed to `onSubEdge` as they are collected so callers
+ * can roll up spawn counts without re-querying.
  */
 export function selectEdgeRecords(
 	rootEdges: DelegationRecord[],
+	subtreeEdges: DelegationRecord[],
 	sessionDataList: SessionData[],
 	rootSessionId: string,
 	triggers: MessageRecord[],
@@ -77,9 +79,15 @@ export function selectEdgeRecords(
 			edge.childSessionId !== null && turnOfSession.get(edge.childSessionId) === triggerIndex;
 		if (inWindow || childInTurn) edgeRecords.set(edge.id, edge);
 	}
+	const edgesBySession = new Map<string, DelegationRecord[]>();
+	for (const edge of subtreeEdges) {
+		const list = edgesBySession.get(edge.sessionId);
+		if (list) list.push(edge);
+		else edgesBySession.set(edge.sessionId, [edge]);
+	}
 	for (const data of sessionDataList) {
 		if (data.session.id === rootSessionId) continue;
-		for (const edge of getDelegationEdges(data.session.id)) {
+		for (const edge of edgesBySession.get(data.session.id) ?? []) {
 			edgeRecords.set(edge.id, edge);
 			onSubEdge?.(edge);
 		}

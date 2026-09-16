@@ -21,7 +21,7 @@ import {
 	getStepParts,
 	getToolParts
 } from '../../queries/parts';
-import { getDelegationEdges, getSessionSubtree } from '../../queries/sessions';
+import { loadSessionGraph } from '../../queries/session-graph';
 import type { DelegationRecord } from '../../schema';
 import { buildEdge } from './edge';
 import { buildSessionNode } from './node';
@@ -45,7 +45,9 @@ export function buildTurnModel(
 ): GanttModel | null {
 	const now = Date.now();
 	const permissionIndex = buildPermissionIndex();
-	const subtree = getSessionSubtree(rootSessionId);
+	// One cached query returns the subtree and every delegation edge in it; the
+	// root edges are the subset owned by the root session (task #386).
+	const { subtree, edges: subtreeEdges } = loadSessionGraph(rootSessionId);
 	const rootSession = subtree.find((session) => session.id === rootSessionId);
 	if (!rootSession) return null;
 
@@ -56,7 +58,7 @@ export function buildTurnModel(
 	const trigger = triggers[triggerIndex];
 	const nextTrigger = triggers[triggerIndex + 1] ?? null;
 
-	const rootEdges = getDelegationEdges(rootSessionId);
+	const rootEdges = subtreeEdges.filter((edge) => edge.sessionId === rootSessionId);
 
 	// Node -> turn: earliest spawn edge assigns the node (spec R3).
 	const turnOfSession = computeTurnOfSession(subtree, rootEdges, triggers);
@@ -67,6 +69,11 @@ export function buildTurnModel(
 			.filter((message) => message.role === 'assistant' && message.parentId === triggerMessageId)
 			.map((message) => message.id)
 	);
+	// The root's part reads are scoped to this turn's messages in SQL, so another
+	// turn's parts never reach JS (task #386). Compaction/removed markers stay
+	// session-scoped: the assembler intentionally mirrors every compaction and
+	// the removed markers are event-sourced, not message-scoped.
+	const turnMessageIdList = [...turnMessageIds];
 
 	// Spawn counts / fallback agent names across every edge in the turn.
 	const spawnCounts = new Map<string, number>();
@@ -80,19 +87,24 @@ export function buildTurnModel(
 	};
 	for (const edge of rootEdges) countEdge(edge);
 
-	const sessionDataList: SessionData[] = turnSessions.map((session) => ({
-		session,
-		messages: session.id === rootSessionId ? rootMessages : getMessages(session.id),
-		stepParts: getStepParts(session.id),
-		toolParts: getToolParts(session.id),
-		actionParts: getActionParts(session.id),
-		compaction: getCompactionParts(session.id),
-		removed: getRemovedMarkers(session.id)
-	}));
+	const sessionDataList: SessionData[] = turnSessions.map((session) => {
+		const isRoot = session.id === rootSessionId;
+		const scope = isRoot ? turnMessageIdList : undefined;
+		return {
+			session,
+			messages: isRoot ? rootMessages : getMessages(session.id),
+			stepParts: getStepParts(session.id, scope),
+			toolParts: getToolParts(session.id, scope),
+			actionParts: getActionParts(session.id, scope),
+			compaction: getCompactionParts(session.id),
+			removed: getRemovedMarkers(session.id)
+		};
+	});
 
 	// Edge records: this turn's root edges plus every edge of a subagent node.
 	const edgeRecords = selectEdgeRecords(
 		rootEdges,
+		subtreeEdges,
 		sessionDataList,
 		rootSessionId,
 		triggers,
@@ -146,6 +158,7 @@ export function buildTurnModel(
 
 	return {
 		turnId: `${rootSessionId}_${triggerMessageId}`,
+		triggerMessageId,
 		rootSessionId,
 		agent: rootSession.agent ?? 'unknown',
 		t0: trigger.startedAt,

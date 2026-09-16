@@ -10,7 +10,7 @@
  * History therefore starts when the collector first runs; earlier prompts were
  * never recorded anywhere and cannot be recovered.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PermissionInfo } from '../model/types';
 import { settingsFilePath } from './settings';
@@ -62,6 +62,30 @@ export function permissionsFilePath(): string {
 let loaded = false;
 const requests = new Map<string, StoredRequest>();
 
+/**
+ * Memoized `buildPermissionIndex()` result plus the file version it was built
+ * from (task #386). Dropped by every `apply()` (so an in-memory ask/reply — even
+ * one whose append failed — can never serve a stale index) and by
+ * {@link resetPermissionStoreForTests}.
+ */
+let indexCache: Map<string, PermissionInfo> | null = null;
+let indexCacheVersion: string | null = null;
+
+/**
+ * Cheap change key for the permissions file: its path plus `mtimeMs:size`, or
+ * `missing`. A collector append from another process moves it, so the next
+ * `buildPermissionIndex()` rebuilds instead of serving the previous map.
+ */
+function permissionsVersion(): string {
+	const file = permissionsFilePath();
+	try {
+		const stats = statSync(file);
+		return `${file}|${Math.trunc(stats.mtimeMs)}:${stats.size}`;
+	} catch {
+		return `${file}|missing`;
+	}
+}
+
 function appendRecord(record: PermissionRecord): void {
 	const file = permissionsFilePath();
 	try {
@@ -103,6 +127,9 @@ function apply(record: PermissionRecord, persist: boolean): void {
 		}
 	}
 	if (persist) appendRecord(record);
+	// Any mutation (recorded ask/reply or JSONL replay) invalidates the memo.
+	indexCache = null;
+	indexCacheVersion = null;
 }
 
 /** Replay the JSONL file once; corrupt lines are skipped, never fatal. */
@@ -166,9 +193,15 @@ function toPermissionInfo(requestId: string, request: StoredRequest): Permission
  * built in one `O(requests)` pass; `callId === null` gets no entry. Earliest
  * `askedAt` wins; ties keep the first inserted request (skip when `askedAt` is
  * not strictly earlier), matching {@link lookupPermission}.
+ *
+ * Memoized against the permissions file version (task #386): the index is
+ * rebuilt only after a recorded mutation or an external file change, never per
+ * request. The returned map is shared — callers must not mutate it.
  */
 export function buildPermissionIndex(): Map<string, PermissionInfo> {
 	ensureLoaded();
+	const version = permissionsVersion();
+	if (indexCache !== null && indexCacheVersion === version) return indexCache;
 	const index = new Map<string, PermissionInfo>();
 	for (const [requestId, request] of requests) {
 		if (request.callId === null) continue;
@@ -177,6 +210,8 @@ export function buildPermissionIndex(): Map<string, PermissionInfo> {
 		if (current !== undefined && current.askedAt <= request.askedAt) continue;
 		index.set(key, toPermissionInfo(requestId, request));
 	}
+	indexCache = index;
+	indexCacheVersion = version;
 	return index;
 }
 
@@ -194,4 +229,6 @@ export function lookupPermission(sessionId: string, callId: string | null): Perm
 export function resetPermissionStoreForTests(): void {
 	loaded = false;
 	requests.clear();
+	indexCache = null;
+	indexCacheVersion = null;
 }

@@ -192,8 +192,17 @@ export interface Marker {
 	at: number | null;
 }
 
-/** The full reconstructed turn, ready for the SVG Gantt. */
-export interface GanttModel {
+/**
+ * Lightweight turn payload (Phase 4 / task #387): the node/edge skeleton plus
+ * the turn metadata needed to draw the Gantt rows, bars and delegation edges.
+ *
+ * The heavy per-node detail (`steps`/`toolCalls`/`markers`/`actions`) is omitted
+ * from the streamed payload and fetched lazily per selected node as a
+ * {@link NodeDetail} from `/api/sessions/[id]/nodes/[nodeId]`. The four arrays
+ * stay optional so a full {@link GanttModel} (and partial test literals) remains
+ * assignable to it.
+ */
+export interface GanttOutline {
 	turnId: string;
 	rootSessionId: string;
 	agent: string;
@@ -203,6 +212,33 @@ export interface GanttModel {
 	t1: number;
 	nodes: Node[];
 	edges: Edge[];
+	/**
+	 * Every tracker reference inferred in the turn, deduplicated in first-seen
+	 * order. Populated by `buildTurnModel`; optional so partial DTO literals
+	 * (tests, incremental construction) stay valid.
+	 */
+	trackerRefs?: string[];
+	/**
+	 * Trigger message id of the turn (the `?turn=` value): lets the client fetch
+	 * one node's detail without a turn re-scan. Set by the outline builder only.
+	 */
+	triggerMessageId?: string;
+	/**
+	 * Non-tool actions (text, reasoning, patches, files, agent mentions,
+	 * compaction) for the unified drill-down timeline. Populated by
+	 * `buildTurnModel`; omitted from the streamed outline.
+	 */
+	actions?: Action[];
+	/** LLM steps of the turn; omitted from the streamed outline (Phase 4). */
+	steps?: Step[];
+	/** Tool / MCP calls of the turn; omitted from the streamed outline. */
+	toolCalls?: ToolCall[];
+	/** Compaction / removed markers; omitted from the streamed outline. */
+	markers?: Marker[];
+}
+
+/** The full reconstructed turn, ready for the SVG Gantt. */
+export interface GanttModel extends GanttOutline {
 	steps: Step[];
 	toolCalls: ToolCall[];
 	markers: Marker[];
@@ -212,12 +248,6 @@ export interface GanttModel {
 	 * `buildTurnModel`; optional so partial DTO literals stay valid.
 	 */
 	actions?: Action[];
-	/**
-	 * Every tracker reference inferred in the turn, deduplicated in first-seen
-	 * order. Populated by `buildTurnModel`; optional so partial DTO literals
-	 * (tests, incremental construction) stay valid.
-	 */
-	trackerRefs?: string[];
 }
 
 /**

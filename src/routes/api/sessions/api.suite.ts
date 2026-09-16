@@ -125,12 +125,14 @@ function buildFixture(path: string): void {
 	addSession({ id: 'grandchild1', parentId: 'child1', dir: '/repo/a', title: 'Grandchild', agent: 'tester', created: T + 2000, updated: T + 2500, cost: 0.1, input: 5, output: 3, reasoning: 1, model: MODEL });
 	addSession({ id: 'root2', dir: '/repo/b', title: 'Root two', agent: null, created: T + 3000, updated: T + 3100 });
 
-	// root1: two turns (u1 with two assistant messages, u2 with one).
+	// root1: three turns (u1 with two assistants, u2 with one, u3 with zero).
 	addMessage('u1', 'root1', T + 1100, { role: 'user', time: { created: T + 1100 } });
 	addMessage('a1', 'root1', T + 1200, { role: 'assistant', parentID: 'u1', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 2, tokens: { input: 300, output: 120, reasoning: 40, cache: { read: 20, write: 10 } }, time: { created: T + 1200, completed: T + 1500 } });
 	addMessage('a1b', 'root1', T + 1300, { role: 'assistant', parentID: 'u1', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 10, output: 5, reasoning: 0 }, time: { created: T + 1300, completed: T + 1400 } });
 	addMessage('u2', 'root1', T + 4000, { role: 'user', time: { created: T + 4000 } });
 	addMessage('a2', 'root1', T + 4100, { role: 'assistant', parentID: 'u2', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 20, output: 10, reasoning: 5 }, time: { created: T + 4100, completed: T + 4200 } });
+	// u3 has no assistant reply — exercises the LEFT JOIN / count = 0 path.
+	addMessage('u3', 'root1', T + 5000, { role: 'user', time: { created: T + 5000 } });
 	// child1: one synthetic spawn turn (must not surface in root1's turn list).
 	addMessage('cu1', 'child1', T + 1600, { role: 'user', time: { created: T + 1600 } });
 	addMessage('ca1', 'child1', T + 1700, { role: 'assistant', parentID: 'cu1', agent: 'developer', modelID: 'gpt-5', providerID: 'openai', cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 }, time: { created: T + 1700, completed: T + 4500 } });
@@ -168,14 +170,46 @@ const listRoute = (await import(spec('./+server.ts'))) as {
 const detailRoute = (await import(spec('./[id]/+server.ts'))) as {
 	GET: (event: { params: { id: string } }) => Response;
 };
+const turnsRoute = (await import(spec('./[id]/turns/+server.ts'))) as {
+	GET: (event: { params: { id: string } }) => Response;
+};
 const turnRoute = (await import(spec('./[id]/turns/[turnId]/+server.ts'))) as {
 	GET: (event: { params: { id: string; turnId: string } }) => Response;
 };
 const nodeRoute = (await import(spec('./[id]/nodes/[nodeId]/+server.ts'))) as {
 	GET: (event: { params: { id: string; nodeId: string }; url: URL }) => Response;
 };
+const { buildNodeDetail } = (await import(spec('../../../lib/server/services/nodes'))) as {
+	buildNodeDetail: (rootSessionId: string, nodeId: string, turnId?: string) => {
+		node: Record<string, unknown>;
+		steps: Array<Record<string, unknown>>;
+		toolCalls: Array<Record<string, unknown>>;
+		markers: unknown[];
+		actions?: unknown[];
+	};
+};
+const { buildTurnModel } = (await import(spec('../../../lib/server/services/turn'))) as {
+	buildTurnModel: (rootSessionId: string, triggerMessageId: string) => {
+		turnId: string;
+		rootSessionId: string;
+		nodes: Array<Record<string, unknown>>;
+		steps: Array<Record<string, unknown>>;
+		toolCalls: Array<Record<string, unknown>>;
+		markers: unknown[];
+		actions?: unknown[];
+	} | null;
+};
+const { selectNodeDetail } = (await import(spec('../../../lib/model/node'))) as {
+	selectNodeDetail: (model: Record<string, unknown>, nodeId: string) => {
+		node: Record<string, unknown>;
+		steps: Array<Record<string, unknown>>;
+		toolCalls: Array<Record<string, unknown>>;
+		markers: unknown[];
+		actions?: unknown[];
+	} | null;
+};
 const detailPage = (await import(spec('../../sessions/[id]/+page.server.ts'))) as {
-	load: (event: { params: { id: string }; url?: URL }) => unknown;
+	load: (event: { params: { id: string }; url?: URL }) => Promise<unknown>;
 };
 const { listRecentRootSessions, countRecentRootSessions } = (await import(
 	spec('../../../lib/server/queries/sessions.ts')
@@ -193,6 +227,12 @@ const { getDb, resolveDbPath: resolveFixtureDbPath } = (await import(
 )) as {
 	getDb: () => { query: (sql: string) => { get: () => unknown }; exec: (sql: string) => void };
 	resolveDbPath: () => string;
+};
+const { listTurns, getSessionDetail } = (await import(
+	spec('../../../lib/server/services/sessions.ts')
+)) as {
+	listTurns: (rootSessionId: string) => Array<{ turnId: string; index: number; startedAt: number; assistantCount: number }> | null;
+	getSessionDetail: (rootSessionId: string) => { turns: Array<{ turnId: string; index: number; startedAt: number; assistantCount: number }> } | null;
 };
 
 afterAll(() => {
@@ -461,7 +501,8 @@ describe('GET /api/sessions/[id] — detail + 404', () => {
 
 		expect(detail.turns).toEqual([
 			{ turnId: 'u1', index: 1, startedAt: T + 1100, assistantCount: 2 },
-			{ turnId: 'u2', index: 2, startedAt: T + 4000, assistantCount: 1 }
+			{ turnId: 'u2', index: 2, startedAt: T + 4000, assistantCount: 1 },
+			{ turnId: 'u3', index: 3, startedAt: T + 5000, assistantCount: 0 }
 		]);
 	});
 
@@ -474,7 +515,66 @@ describe('GET /api/sessions/[id] — detail + 404', () => {
 	});
 });
 
-describe('GET /api/sessions/[id]/turns/[turnId] — GanttModel + 404', () => {
+	describe('GET /api/sessions/[id]/turns — TurnSummary[] + 404 (task #388)', () => {
+		test('returns HTTP 200 with the expected TurnSummary[] for a fixture root session', async () => {
+			const response = turnsRoute.GET({ params: { id: 'root1' } });
+			expect(response.status).toBe(200);
+			const turns = (await response.json()) as Array<Record<string, unknown>>;
+			expect(turns).toHaveLength(3);
+			expect(turns.map((t) => t.turnId)).toEqual(['u1', 'u2', 'u3']);
+			expect(turns.map((t) => t.index)).toEqual([1, 2, 3]);
+			expect(turns.map((t) => t.startedAt)).toEqual([T + 1100, T + 4000, T + 5000]);
+			expect(turns.map((t) => t.assistantCount)).toEqual([2, 1, 0]);
+			expect(Object.keys(turns[0]).sort()).toEqual(['assistantCount', 'index', 'startedAt', 'turnId']);
+		});
+
+		test('returns an empty TurnSummary[] for a root with no user triggers', async () => {
+			// root2 has no messages at all in the fixture.
+			const response = turnsRoute.GET({ params: { id: 'root2' } });
+			expect(response.status).toBe(200);
+			const turns = (await response.json()) as unknown[];
+			expect(turns).toEqual([]);
+		});
+
+		test('unknown session returns 404 JSON error', async () => {
+			const response = turnsRoute.GET({ params: { id: 'does-not-exist' } });
+			expect(response.status).toBe(404);
+			const payload = await body(response);
+			expect(typeof payload.error).toBe('string');
+			expect(payload.error).toContain('does-not-exist');
+		});
+	});
+
+	describe('listTurns — service contract (task #388)', () => {
+		test('user-trigger counts and assistantCount match the fixture', () => {
+			const turns = listTurns('root1');
+			expect(turns).not.toBeNull();
+			expect(turns).toHaveLength(3);
+			expect(turns![0]).toEqual({ turnId: 'u1', index: 1, startedAt: T + 1100, assistantCount: 2 });
+			expect(turns![1]).toEqual({ turnId: 'u2', index: 2, startedAt: T + 4000, assistantCount: 1 });
+			expect(turns![2]).toEqual({ turnId: 'u3', index: 3, startedAt: T + 5000, assistantCount: 0 });
+		});
+
+		test('a session with no messages returns an empty array, not null', () => {
+			const turns = listTurns('root2');
+			expect(turns).toEqual([]);
+		});
+
+		test('unknown session returns null', () => {
+			expect(listTurns('does-not-exist')).toBeNull();
+		});
+	});
+
+	describe('regression — endpoint equals getSessionDetail.turns (task #388)', () => {
+		test('the /turns endpoint and getSessionDetail return identical turn lists for the fixture root', async () => {
+			const turnsResponse = await turnsRoute.GET({ params: { id: 'root1' } }).json();
+			const detail = getSessionDetail('root1');
+			expect(detail).not.toBeNull();
+			expect(turnsResponse).toEqual(detail!.turns);
+		});
+	});
+
+	describe('GET /api/sessions/[id]/turns/[turnId] — GanttModel + 404', () => {
 	test('returns the GanttModel for a valid root + trigger', async () => {
 		const response = turnRoute.GET({ params: { id: 'root1', turnId: 'u1' } });
 		expect(response.status).toBe(200);
@@ -633,6 +733,160 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		// The connection itself stays query_only.
 		expect(db.query('PRAGMA query_only').get()).toEqual({ query_only: 1 });
 	});
+
+	/**
+	 * Progressive per-node detail — fetch-on-select, cache parity, no-leak, and
+	 * error path (task #392).
+	 *
+	 * The Gantt component's in-browser detailCache is not testable without a DOM
+	 * runtime; instead we cover the two pure data paths that feed it:
+	 *
+	 *   - The server `buildNodeDetail` used by the route above.
+	 *   - The client `selectNodeDetail` used by the already-loaded `GanttModel`.
+	 *
+	 * A parity assertion verifies both return the same shape for root / child /
+	 * grandchild, and the no-leak assertions confirm a node's detail only carries
+	 * that node's own steps/toolCalls/markers/actions.
+	 */
+
+	// Strip time-sensitive, non-semantic fields so the comparison is stable
+	// across the two builders (buildNodeDetail vs buildTurnModel + selectNodeDetail).
+	function normalizeForParity(
+		detail: Record<string, unknown>
+	): Record<string, unknown> {
+		const node = detail.node as Record<string, unknown>;
+		const strippedNode = Object.fromEntries(
+			Object.entries(node).filter(([k]) => !['flags', 'trackerRefs'].includes(k))
+		);
+		return {
+			node: strippedNode,
+			steps: (detail.steps as Record<string, unknown>[]).map((s) =>
+				Object.fromEntries(Object.entries(s).filter(([k]) => !['flags'].includes(k)))
+			),
+			toolCalls: (detail.toolCalls as Record<string, unknown>[]).map((t) =>
+				Object.fromEntries(Object.entries(t).filter(([k]) => !['flags', 'permission'].includes(k)))
+			),
+			markers: detail.markers,
+			actions: detail.actions
+		};
+	}
+
+	test('root detail: correct DTO shape, all steps/tools scoped to root', async () => {
+		const response = nodeResponse('root1', 'root1', '?turn=u1');
+		expect(response.status).toBe(200);
+		const detail = await body(response);
+		expect(Object.keys(detail).sort()).toEqual([
+			'actions',
+			'markers',
+			'node',
+			'steps',
+			'toolCalls'
+		]);
+		const d = detail as Record<string, unknown>;
+		// Root owns its own steps and tools; nothing from child/grandchild leaks in.
+		const steps = d.steps as Array<Record<string, unknown>>;
+		const tools = d.toolCalls as Array<Record<string, unknown>>;
+		expect(steps.every((s) => s.nodeId === 'root1')).toBe(true);
+		expect(tools.every((t) => t.nodeId === 'root1')).toBe(true);
+		// Step ids for turn u1 on root: f1a only (a1b has no step parts in this fixture).
+		expect(steps.map((s) => s.id).sort()).toEqual(['f1a']);
+	});
+
+	test('child detail: correct DTO shape, all steps/tools scoped to child', async () => {
+		const response = nodeResponse('root1', 'child1', '?turn=u1');
+		expect(response.status).toBe(200);
+		const detail = await body(response);
+		const d = detail as Record<string, unknown>;
+		expect((d.node as Record<string, unknown>).sessionId).toBe('child1');
+		const steps = d.steps as Array<Record<string, unknown>>;
+		const tools = d.toolCalls as Array<Record<string, unknown>>;
+		expect(steps.every((s) => s.nodeId === 'child1')).toBe(true);
+		expect(tools.every((t) => t.nodeId === 'child1')).toBe(true);
+		expect(steps.map((s) => s.id)).toEqual(['f1d']);
+		// child1's own tool: the delegation to grandchild1 (d2).
+		expect(tools.map((t) => t.id)).toEqual(['d2']);
+	});
+
+	test('grandchild detail: correct DTO shape, all steps/tools scoped to grandchild', async () => {
+		const response = nodeResponse('root1', 'grandchild1', '?turn=u1');
+		expect(response.status).toBe(200);
+		const detail = await body(response);
+		const d = detail as Record<string, unknown>;
+		expect((d.node as Record<string, unknown>).sessionId).toBe('grandchild1');
+		expect((d.steps as Array<Record<string, unknown>>)
+			.every((s) => s.nodeId === 'grandchild1')).toBe(true);
+		expect((d.toolCalls as Array<Record<string, unknown>>)
+			.every((t) => t.nodeId === 'grandchild1')).toBe(true);
+	});
+
+	test('switching nodes never shows a previous node\'s steps/tools/markers', async () => {
+		const rootDetail = (await body(nodeResponse('root1', 'root1', '?turn=u1'))) as Record<string, unknown>;
+		const childDetail = (await body(nodeResponse('root1', 'child1', '?turn=u1'))) as Record<string, unknown>;
+		const gcDetail = (await body(nodeResponse('root1', 'grandchild1', '?turn=u1'))) as Record<string, unknown>;
+
+		// Each node's detail contains only its own data.
+		for (const [label, d] of [['root', rootDetail], ['child', childDetail], ['gc', gcDetail]] as const) {
+			const sid = (d.node as Record<string, unknown>).sessionId as string;
+			const steps = d.steps as Array<Record<string, unknown>>;
+			const tools = d.toolCalls as Array<Record<string, unknown>>;
+			const markers = d.markers as Array<Record<string, unknown>>;
+			expect(steps.every((s) => s.nodeId === sid), `${label} steps leak`).toBe(true);
+			expect(tools.every((t) => t.nodeId === sid), `${label} tools leak`).toBe(true);
+			expect(markers.every((m) => m.nodeId === sid), `${label} markers leak`).toBe(true);
+		}
+
+		// Cross-node containment: root steps are NOT in child detail and vice versa.
+		const rootStepIds = new Set((rootDetail.steps as Array<Record<string, unknown>>).map((s) => s.id));
+		const childStepIds = new Set((childDetail.steps as Array<Record<string, unknown>>).map((s) => s.id));
+		expect(rootStepIds.has('f1d')).toBe(false); // root must not have child's step
+		expect(childStepIds.has('f1a')).toBe(false); // child must not have root's step
+	});
+
+	test('server parity: buildNodeDetail matches selectNodeDetail(buildTurnModel) for root', async () => {
+		const direct = buildNodeDetail('root1', 'root1', 'u1');
+		expect(direct).not.toBeNull();
+		const fullModel = buildTurnModel('root1', 'u1');
+		expect(fullModel).not.toBeNull();
+		const selected = selectNodeDetail(fullModel as Record<string, unknown>, 'root1');
+		expect(selected).not.toBeNull();
+		expect(normalizeForParity(direct!)).toEqual(normalizeForParity(selected!));
+	});
+
+	test('server parity: buildNodeDetail matches selectNodeDetail(buildTurnModel) for child', async () => {
+		const direct = buildNodeDetail('root1', 'child1', 'u1');
+		expect(direct).not.toBeNull();
+		const fullModel = buildTurnModel('root1', 'u1');
+		expect(fullModel).not.toBeNull();
+		const selected = selectNodeDetail(fullModel as Record<string, unknown>, 'child1');
+		expect(selected).not.toBeNull();
+		expect(normalizeForParity(direct!)).toEqual(normalizeForParity(selected!));
+	});
+
+	test('server parity: buildNodeDetail matches selectNodeDetail(buildTurnModel) for grandchild', async () => {
+		const direct = buildNodeDetail('root1', 'grandchild1', 'u1');
+		expect(direct).not.toBeNull();
+		const fullModel = buildTurnModel('root1', 'u1');
+		expect(fullModel).not.toBeNull();
+		const selected = selectNodeDetail(fullModel as Record<string, unknown>, 'grandchild1');
+		expect(selected).not.toBeNull();
+		expect(normalizeForParity(direct!)).toEqual(normalizeForParity(selected!));
+	});
+
+	test('404 parity: both builders return null for an unknown node', async () => {
+		expect(buildNodeDetail('root1', 'does-not-exist', 'u1')).toBeNull();
+		const fullModel = buildTurnModel('root1', 'u1');
+		expect(selectNodeDetail(fullModel as Record<string, unknown>, 'does-not-exist')).toBeNull();
+	});
+
+	test('404 parity: both builders return null for an unknown root', async () => {
+		expect(buildNodeDetail('does-not-exist', 'root1', 'u1')).toBeNull();
+		expect(buildTurnModel('does-not-exist', 'u1')).toBeNull();
+	});
+
+	test('404 parity: unknown turn gives null from both paths', async () => {
+		expect(buildNodeDetail('root1', 'root1', 'nope')).toBeNull();
+		expect(buildTurnModel('root1', 'nope')).toBeNull();
+	});
 });
 
 describe('session page — load() data', () => {
@@ -641,19 +895,19 @@ describe('session page — load() data', () => {
 	// removed with it. The `/api/sessions` list contract is still fully covered
 	// above, and the session detail page loader is covered below.
 
-	test('/sessions/[id] loads the session detail and 404s when unknown', () => {
-		const data = detailPage.load({ params: { id: 'root1' } }) as {
+	test('/sessions/[id] loads the session detail and 404s when unknown', async () => {
+		const data = (await detailPage.load({ params: { id: 'root1' } })) as {
 			session: { id: string };
 			turns: unknown[];
 			gantt: unknown;
 		};
 		expect(data.session.id).toBe('root1');
-		expect(data.turns).toHaveLength(2);
+		expect(data.turns).toHaveLength(3);
 		// No `?turn=` query -> the server never builds a Gantt model.
 		expect(data.gantt).toBeNull();
 
 		try {
-			detailPage.load({ params: { id: 'does-not-exist' } });
+			await detailPage.load({ params: { id: 'does-not-exist' } });
 			throw new Error('expected load() to throw');
 		} catch (error) {
 			expect(isHttpError(error)).toBe(true);
@@ -661,33 +915,36 @@ describe('session page — load() data', () => {
 		}
 	});
 
-	test('/sessions/[id]?turn= loads the GanttModel for a valid trigger', () => {
-		const data = detailPage.load({
+	test('/sessions/[id]?turn= loads the GanttModel for a valid trigger', async () => {
+		const data = (await detailPage.load({
 			params: { id: 'root1' },
 			url: new URL('http://localhost/sessions/root1?turn=u1')
-		}) as {
+		})) as {
 			session: { id: string };
-			gantt: {
+			// The Gantt is streamed: the loader returns the header synchronously
+			// and defers the model behind this promise (task #385).
+			gantt: Promise<{
 				turnId: string;
 				rootSessionId: string;
 				t0: number;
 				nodes: Array<{ sessionId: string }>;
 				edges: Array<{ id: string }>;
-			} | null;
+			}> | null;
 		};
 		expect(data.session.id).toBe('root1');
 		expect(data.gantt).not.toBeNull();
-		expect(data.gantt?.turnId).toBe('root1_u1');
-		expect(data.gantt?.rootSessionId).toBe('root1');
-		expect(data.gantt?.t0).toBe(T + 1100);
-		expect(data.gantt?.nodes.map((node) => node.sessionId)).toContain('root1');
-		expect(data.gantt?.edges.map((edge) => edge.id).sort()).toEqual(['d1', 'd2', 'd3']);
+		const gantt = await data.gantt;
+		expect(gantt?.turnId).toBe('root1_u1');
+		expect(gantt?.rootSessionId).toBe('root1');
+		expect(gantt?.t0).toBe(T + 1100);
+		expect(gantt?.nodes.map((node) => node.sessionId)).toContain('root1');
+		expect(gantt?.edges.map((edge) => edge.id).sort()).toEqual(['d1', 'd2', 'd3']);
 	});
 
-	test('/sessions/[id]?turn= 404s for an unknown / non-user / empty trigger', () => {
+	test('/sessions/[id]?turn= 404s for an unknown / non-user / empty trigger', async () => {
 		for (const turn of ['does-not-exist', 'a1', '']) {
 			try {
-				detailPage.load({
+				await detailPage.load({
 					params: { id: 'root1' },
 					url: new URL(`http://localhost/sessions/root1?turn=${turn}`)
 				});
@@ -722,7 +979,7 @@ describe('read-only guard', () => {
 		expect(() => db.exec("INSERT INTO session (id) VALUES ('nope')")).toThrow(/readonly/i);
 	});
 
-	test('the list route and session page load perform no writes', () => {
+	test('the list route and session page load perform no writes', async () => {
 		const db = getDb();
 		const count = (table: string): number =>
 			(db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
@@ -750,7 +1007,12 @@ describe('read-only guard', () => {
 		// The session detail page loader (with and without ?turn=) also reads only.
 		for (const query of ['', '?turn=u1', '?turn=does-not-exist']) {
 			try {
-				detailPage.load({ params: { id: 'root1' }, url: new URL(`http://localhost/sessions/root1${query}`) });
+				const result = (await detailPage.load({
+					params: { id: 'root1' },
+					url: new URL(`http://localhost/sessions/root1${query}`)
+				})) as { gantt: Promise<unknown> | null };
+				// Resolve the streamed model so its reads happen inside this probe.
+				await result.gantt;
 			} catch {
 				// A 404 for the unknown turn is still a read attempt, not a write.
 			}

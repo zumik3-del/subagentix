@@ -321,6 +321,27 @@ export function mapMessageRow(row: Row): MessageRecord {
 	};
 }
 
+/**
+ * A `message`-derived turn projection (task #383): one trigger row plus the
+ * number of assistant messages parented to it. No payload columns are read.
+ */
+export interface TurnSummaryRecord {
+	/** Trigger (`role='user'`) message id. */
+	id: string;
+	/** Trigger `message.time_created`, epoch-ms. */
+	startedAt: number;
+	/** Assistant messages whose `data.parentID` is the trigger. */
+	assistantCount: number;
+}
+
+export function mapTurnSummaryRow(row: Row): TurnSummaryRecord {
+	return {
+		id: String(row.id),
+		startedAt: numberOr(row.started_at, 0),
+		assistantCount: numberOr(row.assistant_count, 0)
+	};
+}
+
 export interface PartRecord {
 	id: string;
 	messageId: string;

@@ -5,7 +5,7 @@
  * free of `$lib/server` / DB imports and of any DOM access. Every function is
  * deterministic and side-effect free, which keeps the SVG render testable.
  */
-import type { GanttModel, Node } from './types';
+import type { GanttOutline, Node } from './types';
 
 /**
  * Distinct, pastel, blue/cyan-free (task #218) colors assigned to models in
@@ -107,22 +107,25 @@ export interface TurnExtent {
 }
 
 /**
- * Axis domain: the model's turn window (`t0..t1`) widened by every node, step
- * and tool span actually present, so running nodes (`end=null`) still reach the
- * right edge. Degenerate windows are padded so the scale is never zero-width.
+ * Axis domain: the turn window (`t0..t1`) widened by every node, step and tool
+ * span actually present, so running nodes (`end=null`) still reach the right
+ * edge. Degenerate windows are padded so the scale is never zero-width.
+ *
+ * Accepts a {@link GanttOutline}: the streamed payload omits `steps`/`toolCalls`
+ * (Phase 4), so those passes are skipped rather than read as empty.
  */
-export function turnExtent(model: GanttModel): TurnExtent {
+export function turnExtent(model: GanttOutline): TurnExtent {
 	let start = model.t0;
 	let end = model.t1;
 	for (const node of model.nodes) {
 		start = Math.min(start, node.startedAt);
 		if (node.endedAt !== null) end = Math.max(end, node.endedAt);
 	}
-	for (const step of model.steps) {
+	for (const step of model.steps ?? []) {
 		start = Math.min(start, step.startedAt);
 		if (step.endedAt !== null) end = Math.max(end, step.endedAt);
 	}
-	for (const call of model.toolCalls) {
+	for (const call of model.toolCalls ?? []) {
 		if (call.startedAt !== null) start = Math.min(start, call.startedAt);
 		if (call.endedAt !== null) end = Math.max(end, call.endedAt);
 	}

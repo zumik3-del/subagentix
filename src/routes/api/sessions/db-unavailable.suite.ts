@@ -29,12 +29,15 @@ const listRoute = (await import(spec('./+server.ts'))) as {
 const directoriesRoute = (await import(spec('../directories/+server.ts'))) as {
 	GET: (event?: unknown) => Response;
 };
-const detailRoute = (await import(spec('./[id]/+server.ts'))) as {
-	GET: (event: { params: { id: string } }) => Response;
-};
-const turnRoute = (await import(spec('./[id]/turns/[turnId]/+server.ts'))) as {
-	GET: (event: { params: { id: string; turnId: string } }) => Response;
-};
+	const detailRoute = (await import(spec('./[id]/+server.ts'))) as {
+		GET: (event: { params: { id: string } }) => Response;
+	};
+	const turnsRoute = (await import(spec('./[id]/turns/+server.ts'))) as {
+		GET: (event: { params: { id: string } }) => Response;
+	};
+	const turnRoute = (await import(spec('./[id]/turns/[turnId]/+server.ts'))) as {
+		GET: (event: { params: { id: string; turnId: string } }) => Response;
+	};
 const nodeRoute = (await import(spec('./[id]/nodes/[nodeId]/+server.ts'))) as {
 	GET: (event: { params: { id: string; nodeId: string }; url: URL }) => Response;
 };
@@ -87,6 +90,10 @@ describe('DB unavailable (OPENCODE_DB points at a missing file)', () => {
 
 	test('GET /api/sessions/[id] -> 503 JSON', async () => {
 		await expect503(detailRoute.GET({ params: { id: 'root1' } }));
+	});
+
+	test('GET /api/sessions/[id]/turns -> 503 JSON', async () => {
+		await expect503(turnsRoute.GET({ params: { id: 'root1' } }));
 	});
 
 	test('GET /api/sessions/[id]/turns/[turnId] -> 503 JSON', async () => {
