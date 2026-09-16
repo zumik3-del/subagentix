@@ -32,6 +32,17 @@ reviewable.
 - **4px spacing scale.** Spacing tokens `--space-1 … --space-12` are a 4px
   scale (`0.25rem … 3rem`), declared in `src/app.css:33-42`. Use the tokens, not
   raw `px`/`rem` values.
+- **Standard block spacing.** The gap between sibling blocks and the page insets
+  come from the spacing tokens: `--space-4` (`1rem` = 16px) is the default block
+  gutter and page side inset, and `--space-6` (`1.5rem` = 24px) separates a
+  page's major sections (`src/app.css:37,39`). A component uses a different value
+  **only when a task or the user explicitly asks for it**, and then states the
+  deviation and its reason at the call site. Real call sites: the dashboard's
+  column gap and top/bottom padding are `--space-6` while its side inset is
+  `--space-4` (`src/lib/components/features/dashboard/Dashboard.svelte:185-186`);
+  the turn page keeps `--space-4` sides
+  (`src/routes/sessions/[id]/+page.svelte:103`); `.ui-card` pads with `--space-4`
+  (`src/app.css:601`).
 - **Full-viewport shell.** The app shell is a two-column grid
   (`grid-template-columns: var(--sidebar-width) minmax(0, 1fr)`) with
   `height`/`min-height: 100dvh`; the sidebar column is `position: sticky`
@@ -90,17 +101,19 @@ and the shell owns persistence ([§10](#10-layer--component-conventions)).
   deriving its options from the shared constant rather than hardcoded literals
   (`WidgetSettings.svelte:54,142-149`).
 
-**Geometry — 14px root, 42px rows, 14px gaps.** Columns, row height, gap and
+**Geometry — 16px root, 48px rows, 16px gaps.** Columns, row height, gap and
 breakpoints come from the pure `layout.ts` module; `WidgetGrid.svelte` surfaces
 them as inline `--grid-*` custom properties (`WidgetGrid.svelte:78`) consumed by
-the fallback CSS (`WidgetGrid.svelte:219-228`). Six columns, `3rem` rows,
-`--space-4` (`1rem`) gap. `src/app.css` sets the root font size to
-`--font-size-base: 14px` (`src/app.css:24`, applied on `body`,
-`src/app.css:239`), so a row is **42px** and the gap **14px** — the JS and CSS
-sides must not be read as if `1rem` were 16px. `layout.ts` carries both units
-and their products (`ROOT_FONT_SIZE_PX = 14`, `GRID_ROW_HEIGHT_PX = 42`,
-`GRID_GAP_PX = 14`, `layout.ts:26,42,48`) plus every breakpoint
-(`layout.ts:50-62`). The `min-width: 64rem` media query is the one literal CSS
+the fallback CSS (`WidgetGrid.svelte:232-241`). Six columns, `3rem` rows,
+`--space-4` (`1rem`) gap — the grid's gutter is the standard block gutter and
+page inset, not a local choice ([§1](#1-layout--spacing)). `html` carries no
+`font-size` rule, so `rem` resolves against the **browser default 16px**;
+`--font-size-base: 14px` (`src/app.css:24`) is applied to `body` only
+(`src/app.css:239`) and sets body text without scaling `rem`. A row is therefore
+**48px** and the gap **16px**. `layout.ts` carries both units and their products
+(`ROOT_FONT_SIZE_PX = 16`, `GRID_ROW_HEIGHT_PX = 48`, `GRID_GAP_PX = 16`,
+`layout.ts:34,50,67`) plus every breakpoint (`layout.ts:70-81`). The
+`min-width: 64rem` media query is the one literal CSS
 keeps, because a media query cannot read a custom property.
 
 **Progressive enhancement is a contract, not a tactic.** The client-only
@@ -122,6 +135,22 @@ wrapper (`gridstack.ts`) owns everything gridstack-related.
   (`gridstack.ts:53,156-166`). Crossing below the breakpoint tears the
   enhancement down, stripping every class and inline style it added
   (`gridstack.ts:299-315`).
+- **The 16px gutter is a two-mode invariant.** Card-to-card and page-edge
+  spacing are the same `--space-4` (16px) whether gridstack owns the grid or the
+  CSS fallback does. The fallback gets it from `gap: var(--grid-gap)`
+  (`WidgetGrid.svelte:240`); in the enhanced mode gridstack insets
+  `.grid-stack-item-content` by its `margin` *inside* the cell (the
+  `--gs-item-margin-*` variables set in
+  `node_modules/gridstack/dist/gridstack.js:2100-2145` and applied in
+  `node_modules/gridstack/dist/gridstack.css:43-48`), so a full-gap margin would
+  leave `2 × GRID_GAP_REM` between neighbours but only one at the outer edge. The
+  code therefore passes `GRID_GAP_HALF_REM` as that margin (`gridstack.ts:179`)
+  and pulls the grid container out by the same half under `.grid-stack` only
+  (`.widget-grid.grid-stack { margin: calc(-1 * var(--grid-gap-half)) }`,
+  `WidgetGrid.svelte:222-223`), which lands the outer card edge on the page's own
+  `--space-4` gutter. Both halves stay derived from the gap
+  (`GRID_GAP_HALF_REM = GRID_GAP_REM / 2`, `layout.ts:64`); doubling either one
+  re-doubles the gutter.
 - **Persist the live layout, never a stale model size.** `#readLayout` reads
   `grid.engine.nodes` directly (`gridstack.ts:271-288`) and must never fall back
   to the previous model value. gridstack's `Utils.removeInternalForSave` deletes
@@ -160,14 +189,15 @@ The contract the grid, the registry and the widget bodies share (task #444):
 how tall a body actually is, how far a widget may shrink, and what a too-small
 card does with content that no longer fits.
 
-- **Row geometry.** Rows are `3rem` (42px at the 14px root, see the grid above)
-  and the column gap is `--space-4` (1rem, 14px) (`WidgetGrid.svelte:224-227`),
+- **Row geometry.** Rows are `3rem` (48px at the 16px root, see the grid above)
+  and the column gap is `--space-4` (1rem, 16px) (`WidgetGrid.svelte:240`),
   so a placement of `h` rows spans `3h + (h − 1)` = `4h − 1rem`. The card chrome
   consumes `4.25rem`: the
   `--space-4` (1rem) padding top + bottom (`src/app.css:601`), the `--space-6`
   (1.5rem) header (`WidgetCard.svelte:116`) and the `--space-3` (0.75rem)
   header↔body gap (`WidgetCard.svelte:106`). The usable body height for a
-  placement of `h` rows is therefore **`4h − 5.25rem`**.
+  placement of `h` rows is therefore **`4h − 5.25rem`** — the budget is
+  `rem`-only, so the root-base correction does not move it.
 - **Per-widget minimum heights.** `minHeight` is part of each `WidgetDef`
   (`registry.ts:97-98,113-174`); a short widget is never rendered broken, its
   persisted height is raised instead.
@@ -893,8 +923,8 @@ assertion to the file that now owns the string.
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
 | `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `DayTable` newest-first rows + fit wiring), `WidgetGrid` dual-mode markup (per placement `data-w`/`data-h`, `grid-stack-item`, `gs-x`/`gs-y`/`gs-w`/`gs-h`, the inline `--gs-*` fallback pair, the `grid-stack-item-content` wrapper order, registry order, and the negative that the container never carries `grid-stack` in SSR), the `layout.ts`-derived custom properties replacing the 6-col/3rem literals, the `data-w` clamp selectors up to `data-w='6'`, and both clamp breakpoints, `WidgetSettings` dialog SSR (closed → no markup; open → `role="dialog"` + label), the `WidgetCard` gear control (present with `onSettings`, absent without), and `loaders.ts` id→body routing |
-| `src/lib/components/features/dashboard/source-guards.test.ts` | `DayTable` source guards (no chart-library import, `useRowFit` wiring, newest-first `reverse()`, whole-row `slice` trim, sr-only caption/thead, day row headers, value formatter, empty state, `figure` fit host), `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules (gridstack never statically or type-only imported — the client-only wrapper owns the dynamic import), the `gridstack.ts` dynamic-import-only contract (dynamic `import('gridstack')` plus its stylesheet, no static/type-only import, desktop gate read from `layout.ts` rather than a fresh literal, `grid-stack` class added at enhancement and removed on teardown, the `try`/`catch` failure path calling teardown, `onActiveChange(false)` on teardown, `#readLayout` → `onLayoutChange` persistence hop, layout constants in the config), the snap-back guard (`#readLayout` iterates the live `grid.engine.nodes` and must never fall back to `grid.save(false)` or a stale model size — the comment names the `removeInternalForSave` stripping, and the `?? WIDGET_MIN_WIDTH`/`HEIGHT` floors are typing-only), the unconditional-`list-style: none` guard (the declaration lives outside `:not(.grid-stack)` in every such block), `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), pure modules stay DOM/`$lib/server`-free |
-| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), the optional `x`/`y` placement model (honoured pair, the `x + width == columns` boundary, out-of-range clamping, partial/`null`/non-finite/string treated as unpositioned, mixed positioned+unpositioned input, determinism across repeated and reordered input, a cell-by-cell no-overlap assertion, the exact packed `DEFAULT_WIDGETS` layout), the `layout.ts` geometry canaries (14px root → 42px row → 14px gap → 6 columns, pinning the CSS and JS sides in sync), registry source stays server/DOM-free |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | `DayTable` source guards (no chart-library import, `useRowFit` wiring, newest-first `reverse()`, whole-row `slice` trim, sr-only caption/thead, day row headers, value formatter, empty state, `figure` fit host), `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules (gridstack never statically or type-only imported — the client-only wrapper owns the dynamic import), the `gridstack.ts` dynamic-import-only contract (dynamic `import('gridstack')` plus its stylesheet, no static/type-only import, desktop gate read from `layout.ts` rather than a fresh literal, `grid-stack` class added at enhancement and removed on teardown, the `try`/`catch` failure path calling teardown, `onActiveChange(false)` on teardown, `#readLayout` → `onLayoutChange` persistence hop, layout constants in the config), the snap-back guard (`#readLayout` iterates the live `grid.engine.nodes` and must never fall back to `grid.save(false)` or a stale model size — the comment names the `removeInternalForSave` stripping, and the `?? WIDGET_MIN_WIDTH`/`HEIGHT` floors are typing-only), the unconditional-`list-style: none` guard (the declaration lives outside `:not(.grid-stack)` in every such block), `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), the 16px gutter invariant guards (the gridstack init `margin` uses `GRID_GAP_HALF_REM` — not `GRID_GAP_REM`; the container pull-out applies only under `.grid-stack` and uses the same half; `--grid-gap-half` is present in the SSR inline var string; the fallback still sizes from `gap: var(--grid-gap)`; and `src/app.css` declares no `font-size` on `html` or `:root`, since the 16px rem base is the browser default), pure modules stay DOM/`$lib/server`-free |
+| `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), the optional `x`/`y` placement model (honoured pair, the `x + width == columns` boundary, out-of-range clamping, partial/`null`/non-finite/string treated as unpositioned, mixed positioned+unpositioned input, determinism across repeated and reordered input, a cell-by-cell no-overlap assertion, the exact packed `DEFAULT_WIDGETS` layout), the `layout.ts` geometry canaries (16px root → 48px row → 16px gap → 6 columns, plus the `GRID_GAP_HALF_REM === GRID_GAP_REM / 2` and `GRID_GAP_REM * ROOT_FONT_SIZE_PX === GRID_GAP_PX` derivation canaries, pinning the CSS and JS sides in sync), registry source stays server/DOM-free |
 | `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (a size-only, a position-only or a y-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
 | `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
 | `src/lib/components/features/dashboard/save.test.ts` | `saveDashboardWidgets` (full-list `dashboardWidgets` PUT, response re-normalised through `resolvePlacements`, non-OK → `Error` carrying the server message or the HTTP status), `saveDashboardFilter` (full `dashboardFilter` PUT re-normalised server-side, response fallbacks, non-OK → `Error`), and `createCoalescingWriter` (pushes during an in-flight save collapse into one latest-wins trailing save, a rejected save is tolerated and later pushes proceed, an idle writer issues nothing; the filter case pushes `DashboardFilter` values through the same writer) |
