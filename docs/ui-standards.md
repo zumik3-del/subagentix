@@ -52,22 +52,22 @@ reviewable.
 ### Dashboard widget grid
 
 The landing dashboard lays its widgets out on a declarative CSS grid
-(`WidgetGrid.svelte:54-140`); sizing is data, not inline `grid-template`.
+(`WidgetGrid.svelte:58-157`); sizing is data, not inline `grid-template`.
 
 - **Desktop: 4 equal columns, 6rem rows.** `grid-template-columns:
   repeat(4, minmax(0, 1fr))`, `grid-auto-rows: 6rem`, `grid-auto-flow: row
-  dense` (`WidgetGrid.svelte:55-64`). `row dense` lets a short widget backfill
+  dense` (`WidgetGrid.svelte:74-76`). `row dense` lets a short widget backfill
   the gap beside a taller one.
 - **Per-widget placement.** Each `WidgetPlacement` carries `width` (1–4
   quarter-width blocks) and `height` (`minHeight`–8 rows, see
   [Widget sizing & overflow](#widget-sizing--overflow)); the grid item emits them as
-  `data-w`/`data-h` (`WidgetGrid.svelte:48`) and numeric attribute selectors
+  `data-w`/`data-h` (`WidgetGrid.svelte:61`) and numeric attribute selectors
   map them to `grid-column: span N` / `grid-row: span N`
-  (`WidgetGrid.svelte:71-117`). Width `4` is a full row.
+  (`WidgetGrid.svelte:88-134`). Width `4` is a full row.
 - **Breakpoint clamps.** `≤64rem` (`max-width: 63.99rem`) drops to 2 columns
   and clamps `data-w="3"`/`data-w="4"` to `span 2`; `≤40rem`
   (`max-width: 39.99rem`) drops to 1 column and forces every item to
-  `grid-column: 1 / -1` regardless of `data-w` (`WidgetGrid.svelte:119-140`).
+  `grid-column: 1 / -1` regardless of `data-w` (`WidgetGrid.svelte:136-157`).
   Height spans stay valid at every breakpoint.
 - **Bounds and defaults** live in the registry: `WIDGET_MIN_WIDTH`/`MAX_WIDTH`
   (1/4) and `WIDGET_MIN_HEIGHT`/`MAX_HEIGHT` (1/8)
@@ -81,9 +81,9 @@ The landing dashboard lays its widgets out on a declarative CSS grid
 - **Refresh control.** `WidgetCard` renders an optional `.ui-icon-btn` refresh
   button whose icon spins while a fetch is in flight
   (`class:is-spinning={refreshing || status === 'loading'}`,
-  `WidgetCard.svelte:43-55`); the spin is CSS-only keyframes
-  (`widget-refresh-spin`, `WidgetCard.svelte:119-127`) and is suppressed under
-  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:129-133`).
+  `WidgetCard.svelte:48-60`); the spin is CSS-only keyframes
+  (`widget-refresh-spin`, `WidgetCard.svelte:155-163`) and is suppressed under
+  `prefers-reduced-motion: reduce` (`WidgetCard.svelte:165-173`).
 
 ### Widget sizing & overflow
 
@@ -92,11 +92,11 @@ how tall a body actually is, how far a widget may shrink, and what a too-small
 card does with content that no longer fits.
 
 - **Row geometry.** Rows are `6rem` and the column gap is `--space-4` (1rem)
-  (`WidgetGrid.svelte:57-60`), so a placement of `h` rows spans
+  (`WidgetGrid.svelte:74-77`), so a placement of `h` rows spans
   `6h + (h − 1)` = `7h − 1rem`. The card chrome consumes `4.25rem`: the
   `--space-4` (1rem) padding top + bottom (`src/app.css:601`), the `--space-6`
-  (1.5rem) header (`WidgetCard.svelte:97`) and the `--space-3` (0.75rem)
-  header↔body gap (`WidgetCard.svelte:87`). The usable body height for a
+  (1.5rem) header (`WidgetCard.svelte:116`) and the `--space-3` (0.75rem)
+  header↔body gap (`WidgetCard.svelte:106`). The usable body height for a
   placement of `h` rows is therefore **`7h − 5.25rem`**.
 - **Per-widget minimum heights.** `minHeight` is part of each `WidgetDef`
   (`registry.ts:74,89-150`); a short widget is never rendered broken, its
@@ -116,13 +116,16 @@ card does with content that no longer fits.
   (`registry.ts:50-52`) and is applied wherever placements are resolved: the
   registry `resolvePlacements` (`registry.ts:207-223`), the settings API
   `normaliseDashboardWidgets` → `resolvePlacements` (`settings.ts:142-179`) and
-  the picker `toggleWidgetSelection`/`updatePlacement`
-  (`picker.ts:18-39`). The picker's height stepper disables `−` at `minHeight`
-  and `+` at `WIDGET_MAX_HEIGHT` (`WidgetsModal.svelte:208,220`).
+  the pure placement helpers `toggleWidgetSelection` (picker) and
+  `updatePlacement` (gear apply) (`picker.ts:18-39`). The per-widget height
+  stepper now lives in `WidgetSettings`: it disables `−` at `minHeight` and `+`
+  at `WIDGET_MAX_HEIGHT` (`WidgetSettings.svelte:149,159`); the picker only
+  toggles visibility and no longer edits sizes (see
+  [§10](#10-layer--component-conventions)).
 - **Silent whole-row truncation.** A body that does not fit drops whole rows —
   no `+N more` affordance, no fade, no inner scrollbar. Truncation is silent by
   design; the card body's `overflow: hidden` (on both the card and the body,
-  `WidgetCard.svelte:89,114`) is the hard guarantee that a body can never paint
+  `WidgetCard.svelte:108,140`) is the hard guarantee that a body can never paint
   past the rounded contour, even mid-measurement.
 - **Row budget = what the measured height holds.** `rowsThatFit` returns
   `floor(available / rowHeight)`, clamped to `[min, total]`, and returns the
@@ -138,12 +141,12 @@ card does with content that no longer fits.
   computed from the untrimmed rows so resizing never re-scales the bars
   (`BarChart.svelte:54,60-72`). `TopProjectsWidget` leaves `limit` unset and
   `TopToolsWidget` passes `limit={bars.length}`, so both feed all API rows
-  (`TopProjectsWidget.svelte:51`, `TopToolsWidget.svelte:51`). `DonutChart`
+  (`TopProjectsWidget.svelte:52`, `TopToolsWidget.svelte:52`). `DonutChart`
   shrinks the ring via `flex-basis: 0` + `aspect-ratio` (max `10rem`) and trims
   the legend to the rows the ring leaves (`DonutChart.svelte:95,169-177`).
   `KpiWidget` keeps the tiles and drops whole blocks — the mix bar first, then
   the token breakdown — based on measured natural heights
-  (`KpiWidget.svelte:90-117,143-176`). `TimeSeriesChart` drops both axes below
+  (`KpiWidget.svelte:90-117,144-177`). `TimeSeriesChart` drops both axes below
   `COMPACT_HEIGHT = 120` and rebuilds the instance once at that boundary
   (`TimeSeriesChart.svelte:54,149,174-179`).
 
@@ -330,8 +333,8 @@ adopt (do not delete).
 - `.ui-btn--danger` — destructive tone (danger border/text, danger hover
   surface). **unused.**
 - `.ui-btn--block` — full-width button.
-- `.ui-icon-btn` — square, borderless icon-only control (gear, copy…); hover
-  uses the neutral overlay.
+- `.ui-icon-btn` — square, borderless icon-only control (card refresh + settings
+  gear, sidebar settings gear, copy…); hover uses the neutral overlay.
 - `.ui-link-btn` — borderless inline text action; `:hover` underlines and
   brightens to `--text-strong`.
 - `.ui-swatch` — fixed 8px agent colour chip; geometry is standard, the
@@ -474,23 +477,33 @@ components that own it — a `ModalShell` composite is deferred, see
 
 - **Structure is the `.ui-modal*` classes** in `src/app.css` (see
   [§6](#6-shared-primitives-ui-)); a component adds sizing only
-  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`).
+  (`TaskModal.svelte:143-149`, `SettingsModal.svelte:623`,
+  `WidgetsModal.svelte:179-183`, `WidgetSettings.svelte:179-181`).
 - **Dialog semantics:** `role="dialog"`, `aria-modal="true"`, `tabindex="-1"`,
   and a label (`aria-label` or `aria-labelledby`), on the
   `.ui-modal__dialog` element (`TaskModal.svelte:110-118`;
-  `SettingsModal.svelte:467-475`). The backdrop is a button with a close
-  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`).
+  `SettingsModal.svelte:467-475`; `WidgetsModal.svelte:117-125`;
+  `WidgetSettings.svelte:105-113`). The backdrop is a button with a close
+  `aria-label` (`TaskModal.svelte:104-109`, `SettingsModal.svelte:460-465`;
+  `WidgetsModal.svelte:111-116`, `WidgetSettings.svelte:99-104`).
 - **Behaviour owned by the component** (a `ModalShell` composite is **not**
   landed):
   - **Escape** closes (`TaskModal.svelte:77-82`;
-    `SettingsModal.svelte:205`).
+    `SettingsModal.svelte:205`; `WidgetsModal.svelte:70-75`;
+    `WidgetSettings.svelte:71-76`).
   - **Focus trap:** Tab/Shift+Tab cycle within the dialog
-    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`).
+    (`TaskModal.svelte:83-100`; `SettingsModal.svelte:211-225`;
+    `WidgetsModal.svelte:76-93`; `WidgetSettings.svelte:77-94`).
   - **Initial focus and focus return:** the dialog is focused on mount and the
     previously focused element is restored on unmount
-    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`).
+    (`TaskModal.svelte:72-75`; `SettingsModal.svelte:163-176`;
+    `WidgetsModal.svelte:46-60`; `WidgetSettings.svelte:49-60` — the latter
+    restores focus to the opener, i.e. the card's gear).
 - The panel body hosts a `ScrollView` (`.ui-modal__body` + `.ui-modal__content`,
-  e.g. `TaskModal.svelte:125-137`).
+  e.g. `TaskModal.svelte:125-137`, `WidgetsModal.svelte:130-157`).
+  `WidgetSettings` is a two-field form whose content never scrolls, so its body
+  is the plain `.ui-modal__body`/`.ui-modal__content` pair with no `ScrollView`
+  (`WidgetSettings.svelte:121-168`).
 - **Detail payload is validated, not re-normalised.** The modal fetches
   subagentix's own `/api/tracker/task/:id` proxy, whose server layer already
   mapped ziptask's snake_case fields to the camelCase `TrackerTaskDetail`; the
@@ -500,8 +513,12 @@ components that own it — a `ModalShell` composite is deferred, see
   (`TaskModal.svelte:49-55`; `src/routes/api/tracker/task/[id]/+server.ts:53`;
   `src/lib/model/tracker.ts:116-149,151-176`).
 - **SSR:** a closed modal renders no dialog markup (guarded by `pages.suite.ts`,
-  "SSR closed-modal: settings button present, no dialog markup"); an open
-  `TaskModal` renders the accessible loading dialog
+  "SSR closed-modal: settings button present, no dialog markup"; the size
+  dialog adds `dashboard-widgets.suite.ts`, "closed dialog (open=false) emits
+  no dialog markup at all"); the open size dialog carries `role="dialog"`,
+  `aria-modal` and its label (`dashboard-widgets.suite.ts`, "opened dialog
+  carries role=dialog, aria-modal and labelled-by"); an open `TaskModal`
+  renders the accessible loading dialog
   (`m3c-drilldown.suite.ts`, "TaskModal SSR — dialog shell and loading state").
 
 ---
@@ -546,14 +563,17 @@ src/
         IoBlock.svelte  BackToTableButton.svelte
       features/
         dashboard/                              # L3 shell + its L2 card pieces
-          Dashboard.svelte                      # shell root (owns selection)
+          Dashboard.svelte                      # shell root (selection + settings target)
           DashboardHeader.svelte  WidgetGrid.svelte  FilterSelector.svelte
           WidgetHost.svelte                     # lazy mount boundary (#409)
-          WidgetCard.svelte  SkeletonWidget.svelte  WidgetsModal.svelte
-          widget.ts                             # loader/status contract (#409)
+          WidgetCard.svelte  SkeletonWidget.svelte
+          WidgetsModal.svelte                   # global picker (visibility draft + Apply)
+          WidgetSettings.svelte                 # per-widget size dialog, gear-opened (#449)
+          widget.ts                             # loader/status contract + WidgetSizePatch (#409/#449)
           data.svelte.ts                        # useWidgetData rune hook (#410)
           loaders.ts                            # per-widget code-split loaders
           filter.ts  picker.ts  top-tools.ts  fit.ts  # pure helpers (unit-tested)
+          save.ts                               # shared PUT /api/settings writer (#449)
           fit.svelte.ts                         # useRowFit measurement rune (#444)
           TimeSeriesChart.svelte                # uPlot time series (§2)
           BarChart.svelte  DonutChart.svelte    # hand-rolled inline SVG (§2)
@@ -561,7 +581,7 @@ src/
           SessionsPerDayWidget.svelte  CostPerDayWidget.svelte
           TopProjectsWidget.svelte  AgentDistributionWidget.svelte
           # tests (co-located): dashboard-widgets.suite.ts + .test.ts wrapper,
-          # data/filter/picker/top-tools/fit.test.ts, source-guards.test.ts
+          # data/filter/picker/top-tools/fit/save.test.ts, source-guards.test.ts
         gantt/                                  # L3
           Gantt.svelte                          # feature root (orchestrator)
           GanttHeader.svelte  GanttLabels.svelte  GanttLabelRow.svelte
@@ -613,6 +633,33 @@ and read back through `resolveDashboardWidgets` (`settings.ts:347-349`).
 - **First visit.** With no stored override, `resolveDashboardWidgets` falls
   back to `DEFAULT_WIDGETS` (the `defaultOn` registry entries with their default
   sizes, `registry.ts:151-153`).
+- **Two write paths, one helper.** `save.ts` owns the single
+  `PUT /api/settings` call: `saveDashboardWidgets` sends the full placement list
+  as `{ dashboardWidgets: placements }` and returns the server-normalised
+  placements (`save.ts:27-42`). The picker (`WidgetsModal`) drafts visibility
+  locally and calls it once on Apply (`WidgetsModal.svelte:95-106`); the
+  per-card gear applies immediately through the same helper. One payload shape,
+  two call sites.
+- **The gear writes through explicit callback props, not context.**
+  `WidgetCard` renders the gear only when `onSettings` is supplied
+  (`WidgetCard.svelte:61-72`, `aria-haspopup="dialog"`). `Dashboard` owns the
+  single settings target (`settingsId`) and mounts exactly one `WidgetSettings`
+  (`Dashboard.svelte:68,152-160`); the callback travels as an explicit
+  `WidgetBodyProps.onSettings` field (`widget.ts:28-32`) through `WidgetGrid`
+  (`WidgetGrid.svelte:33-34,52-55`) and `WidgetHost` (`{...widgetProps}`,
+  `WidgetHost.svelte:80`) into each body, which forwards it to its `WidgetCard`
+  — no context or store carries it.
+- **Immediate apply, optimistically.** A Width/Height change calls `onChange` at
+  once — no draft, no Apply (`WidgetSettings.svelte:62-69`). The shell patches
+  the grid state with `updatePlacement` first, so the card re-lays out
+  instantly, then pushes the list to the coalescing writer
+  (`Dashboard.svelte:106-114`; `createCoalescingWriter`, `save.ts:44-91`): the
+  size controls stay enabled while a save is in flight, so rapid `+`/`−` clicks
+  collapse into one trailing save and a stale size is never persisted. A failed
+  save reverts the grid to the last server-confirmed placements (`lastSaved`,
+  the loader baseline until the first successful write) and shows the error
+  inside the dialog with `aria-live="polite"` (`Dashboard.svelte:81-93`;
+  `WidgetSettings.svelte:123-125`).
 
 ### Naming & import rules
 
@@ -705,11 +752,12 @@ assertion to the file that now owns the string.
 | `src/lib/components/scroll-view.suite.ts` | `ScrollView` wrapper / viewport / thumb CSS, client behaviour (visibility, auto-hide, drag), adoption (every scroll region wrapped), no native overflow outside `ScrollView`, sidebar/gantt layout contracts |
 | `src/routes/m4a-tracker.suite.ts` | Gantt inferred-task refs: open the modal, feature toggle, the unified `>=2` collapse into an `N tasks` toggle + disclosure list, no-link/unconfigured bases, escaping / raw-HTML hygiene, the node-column contract (full-bleed label selection, tracker controls excepted), and the `TrackerChipList` pointer-leave close wiring (`scheduleLeave`/`cancelLeave`, `150ms` grace timer, client-only dropdown) |
 | `src/lib/components/characterization.suite.ts` | render-level SSR structure fingerprint of `Gantt` and `NodeDetailPanel` |
-| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, and `loaders.ts` id→body routing |
-| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), pure modules stay DOM/`$lib/server`-free |
+| `src/lib/components/features/dashboard/dashboard-widgets.suite.ts` | SSR structure of the widget primitives (`WidgetCard` status branches, `SkeletonWidget`, `BarChart`, `DonutChart`, `TimeSeriesChart` sr-only table + visible fallback), `WidgetGrid` `data-w`/`data-h` per placement + the 4-col/`row dense`/6rem grid rules and both clamp breakpoints, `WidgetSettings` dialog SSR (closed → no markup; open → `role="dialog"` + label), the `WidgetCard` gear control (present with `onSettings`, absent without), and `loaders.ts` id→body routing |
+| `src/lib/components/features/dashboard/source-guards.test.ts` | uPlot reached only via dynamic `import('uplot')` inside `onMount` (no static/type import), cleanup destroys the instance, `WidgetHost` `IntersectionObserver` guard, `WidgetGrid` grid/clamp source rules, `WidgetCard` refresh-spin + reduced-motion guard, `BarChart` row cap is fit-driven (no hardcoded default), the `WidgetSettings` width-select string guard with its `WidgetsModal` inverse (the picker owns no size control), pure modules stay DOM/`$lib/server`-free |
 | `src/lib/widgets/registry.test.ts` | `WIDGET_DEFS` catalog/order + default sizes + per-widget `minHeight`, `isWidgetId`, `clampWidth`/`clampHeight`/`clampWidgetHeight`, `resolvePlacements` (legacy `string[]`, `{id,width,height}` objects, mixed, dedupe first-wins, clamp, registry order, non-array), registry source stays server/DOM-free |
 | `src/lib/components/features/dashboard/picker.test.ts` | `toggleWidgetSelection` (registry-default size on add), `samePlacements` (size-only change is dirty), `updatePlacement`, picker source stays DOM/`$lib/server`-free |
 | `src/lib/components/features/dashboard/fit.test.ts` | `rowsThatFit` whole-row budget: floor/ceiling clamps, `total` cap, non-finite/zero box → floor (never `NaN`/`Infinity`/fractional) |
+| `src/lib/components/features/dashboard/save.test.ts` | `saveDashboardWidgets` (full-list `dashboardWidgets` PUT, response re-normalised through `resolvePlacements`, non-OK → `Error` carrying the server message or the HTTP status) and `createCoalescingWriter` (pushes during an in-flight save collapse into one latest-wins trailing save, a rejected save is tolerated and later pushes proceed, an idle writer issues nothing) |
 
 Additional guards: `src/routes/api/settings/settings.suite.ts` (settings modal
 source/paths), `src/routes/api/settings/settings-dashboard.suite.ts` (the
