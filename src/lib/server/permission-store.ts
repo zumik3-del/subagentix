@@ -10,7 +10,7 @@
  * History therefore starts when the collector first runs; earlier prompts were
  * never recorded anywhere and cannot be recovered.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { PermissionInfo } from '../model/types';
 import { settingsFilePath } from './settings';
@@ -62,6 +62,30 @@ export function permissionsFilePath(): string {
 let loaded = false;
 const requests = new Map<string, StoredRequest>();
 
+/**
+ * Memoized `buildPermissionIndex()` result plus the file version it was built
+ * from (task #386). Dropped by every `apply()` (so an in-memory ask/reply — even
+ * one whose append failed — can never serve a stale index) and by
+ * {@link resetPermissionStoreForTests}.
+ */
+let indexCache: Map<string, PermissionInfo> | null = null;
+let indexCacheVersion: string | null = null;
+
+/**
+ * Cheap change key for the permissions file: its path plus `mtimeMs:size`, or
+ * `missing`. A collector append from another process moves it, so the next
+ * `buildPermissionIndex()` rebuilds instead of serving the previous map.
+ */
+function permissionsVersion(): string {
+	const file = permissionsFilePath();
+	try {
+		const stats = statSync(file);
+		return `${file}|${Math.trunc(stats.mtimeMs)}:${stats.size}`;
+	} catch {
+		return `${file}|missing`;
+	}
+}
+
 function appendRecord(record: PermissionRecord): void {
 	const file = permissionsFilePath();
 	try {
@@ -103,6 +127,9 @@ function apply(record: PermissionRecord, persist: boolean): void {
 		}
 	}
 	if (persist) appendRecord(record);
+	// Any mutation (recorded ask/reply or JSONL replay) invalidates the memo.
+	indexCache = null;
+	indexCacheVersion = null;
 }
 
 /** Replay the JSONL file once; corrupt lines are skipped, never fatal. */
@@ -142,42 +169,66 @@ export function listPermissions(): PermissionInfo[] {
 	ensureLoaded();
 	return [...requests.entries()]
 		.sort((a, b) => a[1].askedAt - b[1].askedAt)
-		.map(([requestId, request]) => ({
-			requestId,
-			permission: request.permission,
-			patterns: request.patterns,
-			reply: request.reply,
-			askedAt: request.askedAt,
-			repliedAt: request.repliedAt
-		}));
+		.map(([requestId, request]) => toPermissionInfo(requestId, request));
+}
+
+/** Shared join key; `'\0'` cannot occur in session or call ids, so it cannot collide. */
+export function permissionKey(sessionId: string, callId: string): string {
+	return `${sessionId}\0${callId}`;
+}
+
+function toPermissionInfo(requestId: string, request: StoredRequest): PermissionInfo {
+	return {
+		requestId,
+		permission: request.permission,
+		patterns: request.patterns,
+		reply: request.reply,
+		askedAt: request.askedAt,
+		repliedAt: request.repliedAt
+	};
+}
+
+/**
+ * The winning prompt per `(sessionId, callId)`, keyed by {@link permissionKey},
+ * built in one `O(requests)` pass; `callId === null` gets no entry. Earliest
+ * `askedAt` wins; ties keep the first inserted request (skip when `askedAt` is
+ * not strictly earlier), matching {@link lookupPermission}.
+ *
+ * Memoized against the permissions file version (task #386): the index is
+ * rebuilt only after a recorded mutation or an external file change, never per
+ * request. The returned map is shared — callers must not mutate it.
+ */
+export function buildPermissionIndex(): Map<string, PermissionInfo> {
+	ensureLoaded();
+	const version = permissionsVersion();
+	if (indexCache !== null && indexCacheVersion === version) return indexCache;
+	const index = new Map<string, PermissionInfo>();
+	for (const [requestId, request] of requests) {
+		if (request.callId === null) continue;
+		const key = permissionKey(request.sessionId, request.callId);
+		const current = index.get(key);
+		if (current !== undefined && current.askedAt <= request.askedAt) continue;
+		index.set(key, toPermissionInfo(requestId, request));
+	}
+	indexCache = index;
+	indexCacheVersion = version;
+	return index;
 }
 
 /**
  * The prompt that a tool call triggered, matched by `(sessionId, callId)`.
- * When several asks share a call id (rare), the earliest one wins so the badge
- * points at the first prompt the user saw.
+ * When several asks share a call id (rare), the earliest one wins. Implemented
+ * on top of {@link buildPermissionIndex} so the paths cannot drift.
  */
 export function lookupPermission(sessionId: string, callId: string | null): PermissionInfo | null {
 	if (callId === null) return null;
-	ensureLoaded();
-	let best: { requestId: string; request: StoredRequest } | null = null;
-	for (const [requestId, request] of requests) {
-		if (request.sessionId !== sessionId || request.callId !== callId) continue;
-		if (best === null || request.askedAt < best.request.askedAt) best = { requestId, request };
-	}
-	if (best === null) return null;
-	return {
-		requestId: best.requestId,
-		permission: best.request.permission,
-		patterns: best.request.patterns,
-		reply: best.request.reply,
-		askedAt: best.request.askedAt,
-		repliedAt: best.request.repliedAt
-	};
+	return buildPermissionIndex().get(permissionKey(sessionId, callId)) ?? null;
 }
 
 /** Test-only: drop the in-memory index so a fresh file is replayed. */
 export function resetPermissionStoreForTests(): void {
 	loaded = false;
 	requests.clear();
+	indexCache = null;
+	indexCacheVersion = null;
 }

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
 import { countSessions } from './queries/health';
 import { onSettingsChange, resolveDbPath } from './settings';
@@ -9,8 +9,40 @@ let conn: Database | null = null;
 let connPath: string | null = null;
 
 /**
+ * Monotonic handle generation, bumped on every reset. Read caches fold it into
+ * their key, so a path swap or explicit reset can never reuse an old snapshot.
+ */
+let generation = 0;
+const resetListeners = new Set<() => void>();
+
+/**
+ * Subscribe to DB-handle resets (path change or explicit `resetDbConnection`).
+ * Listeners must be cheap and must NOT call `getDb()`: a reset can run while
+ * `getDb()` is mid-open, and re-entering it would leak a second handle.
+ */
+export function onDbReset(listener: () => void): () => void {
+	resetListeners.add(listener);
+	return () => {
+		resetListeners.delete(listener);
+	};
+}
+
+function notifyDbReset(): void {
+	generation++;
+	for (const listener of [...resetListeners]) {
+		try {
+			listener();
+		} catch (error) {
+			// A subscriber must never break a successful reset.
+			console.warn('[db] reset listener failed:', error);
+		}
+	}
+}
+
+/**
  * Drop the cached connection (if any). `close()` on a read-only WAL handle
- * cannot checkpoint, so this is not a write.
+ * cannot checkpoint, so this is not a write. Resets notify subscribers so
+ * read-through caches drop snapshots tied to the closed handle.
  */
 export function resetDbConnection(): void {
 	if (conn) {
@@ -22,6 +54,38 @@ export function resetDbConnection(): void {
 	}
 	conn = null;
 	connPath = null;
+	notifyDbReset();
+}
+
+/**
+ * `mtimeMs:size` of a file, or `missing` when it does not exist. Used only for
+ * read-cache invalidation, never to open or modify anything.
+ */
+function fileState(path: string): string {
+	try {
+		const stats = statSync(path);
+		return `${Math.trunc(stats.mtimeMs)}:${stats.size}`;
+	} catch {
+		return 'missing';
+	}
+}
+
+/**
+ * Opaque snapshot token for read-through caches (task #386). It changes when
+ * the resolved path changes, the handle is reset, the DB or its `-wal` sidecar
+ * advances, or another connection commits.
+ *
+ * In WAL mode a commit does NOT touch the main file's mtime/size, so the file
+ * state alone is not enough: `PRAGMA data_version` is the reliable signal — it
+ * is a read-only pragma that flips when any other connection commits. Reads
+ * and `stat` only; never a write, checkpoint or VACUUM.
+ */
+export function dbStateToken(): string {
+	const path = resolveDbPath();
+	const db = getDb();
+	const row = db.query('PRAGMA data_version').get() as { data_version?: number } | null;
+	const dataVersion = row?.data_version ?? 0;
+	return `${generation}|${path}|${fileState(path)}|${fileState(`${path}-wal`)}|${dataVersion}`;
 }
 
 /**

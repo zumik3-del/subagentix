@@ -13,6 +13,19 @@
 	} from '$lib/model/format';
 
 	let { data }: PageProps = $props();
+
+	/**
+	 * Message for the streamed-model error state. SvelteKit rejects a streamed
+	 * load promise with a normalised `{ message }` object; fall back to a generic
+	 * message for anything else so the UI never renders `undefined`.
+	 */
+	function ganttErrorMessage(reason: unknown): string {
+		if (reason !== null && typeof reason === 'object' && 'message' in reason) {
+			const message = (reason as { message?: unknown }).message;
+			if (typeof message === 'string' && message !== '') return message;
+		}
+		return 'Could not load the turn Gantt.';
+	}
 </script>
 
 <main>
@@ -52,13 +65,32 @@
 
 	{#if data.gantt}
 		<section class="selected">
-			<Gantt
-				model={data.gantt}
-				turnIndex={data.turns.find((turn) => turn.turnId === data.gantt?.turnId)?.index ?? null}
-				ziptaskEnabled={data.ziptaskEnabled}
-				ziptaskBaseUrl={data.ziptaskBaseUrl}
-				agentColors={data.agentColors}
-			/>
+			<!-- Non-blocking (task #385): the model streams in as a promise, so the
+			     header above renders immediately and this section shows a skeleton
+			     until it resolves. SSR renders the pending branch and hydration
+			     matches it (the promise is still pending at first client render). -->
+			{#await data.gantt}
+				<div class="gantt-loading" role="status" aria-live="polite">
+					<span class="sr-only">Loading turn Gantt…</span>
+					<div class="gantt-skeleton" aria-hidden="true">
+						<span class="sk sk-head"></span>
+						<span class="sk sk-row"></span>
+						<span class="sk sk-row sk-row--short"></span>
+						<span class="sk sk-row"></span>
+						<span class="sk sk-row sk-row--short"></span>
+					</div>
+				</div>
+			{:then model}
+				<Gantt
+					model={model}
+					turnIndex={data.turns.find((turn) => turn.turnId === model.triggerMessageId)?.index ?? null}
+					ziptaskEnabled={data.ziptaskEnabled}
+					ziptaskBaseUrl={data.ziptaskBaseUrl}
+					agentColors={data.agentColors}
+				/>
+			{:catch reason}
+				<p class="load-error" role="alert">{ganttErrorMessage(reason)}</p>
+			{/await}
 		</section>
 	{:else}
 		<p class="empty">Select a turn in the session tree to view its Gantt.</p>
@@ -159,6 +191,67 @@
 		   `margin-bottom`. */
 		margin-top: 0;
 		padding-top: 0;
+	}
+
+	/* Loading skeleton for the streamed Gantt model (task #385). It mirrors the
+	   chart card surface so the swap to the real chart does not shift layout. */
+	.gantt-loading {
+		background: var(--background-strong);
+		border: 1px solid var(--border-weak-base);
+		border-radius: var(--radius-lg);
+		padding: var(--space-4);
+	}
+
+	.gantt-skeleton {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+
+	.sk {
+		display: block;
+		height: var(--space-4);
+		border-radius: var(--radius-sm);
+		background: var(--surface-raised-base);
+		animation: gantt-skeleton-pulse 1.2s ease-in-out infinite;
+	}
+
+	.sk-head {
+		height: var(--space-6);
+		width: 40%;
+	}
+
+	.sk-row {
+		width: 100%;
+	}
+
+	.sk-row--short {
+		width: 70%;
+	}
+
+	@keyframes gantt-skeleton-pulse {
+		0%,
+		100% {
+			opacity: 1;
+		}
+		50% {
+			opacity: 0.55;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.sk {
+			animation: none;
+		}
+	}
+
+	.load-error {
+		margin: 0;
+		padding: var(--space-4);
+		color: var(--color-danger-strong);
+		background: var(--color-danger-surface);
+		border: 1px solid var(--color-danger-border);
+		border-radius: var(--radius-lg);
 	}
 
 	.empty {

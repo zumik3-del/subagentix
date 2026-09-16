@@ -9,6 +9,7 @@
 	 */
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { navigating } from '$app/state';
 	import SessionSidebar from '$lib/components/features/sidebar/SessionSidebar.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import SettingsModal from '$lib/components/features/settings/SettingsModal.svelte';
@@ -19,6 +20,14 @@
 	let { data, children }: LayoutProps = $props();
 	let sidebarOpen = $state(false);
 	let settingsOpen = $state(false);
+
+	/*
+	 * Global navigation indicator (task #384). `navigating` is an always-present
+	 * object on both server and client, so the active check reads `.to` (null
+	 * when idle) — SSR and the first client render agree on "idle", keeping
+	 * hydration safe.
+	 */
+	let navigatingActive = $derived(navigating.to !== null);
 
 	// Swap timestamps to the visitor's zone after hydration; SSR keeps the UTC
 	// default, so the first client render still matches the server DOM.
@@ -88,6 +97,15 @@
 		></button>
 	{/if}
 </div>
+
+{#if navigatingActive}
+	<!-- Top progress bar: fixed, so it never shifts layout, and
+	     `pointer-events: none` keeps clicks on the page below it. -->
+	<div class="nav-progress" role="status">
+		<span class="sr-only">Loading…</span>
+		<span class="nav-progress__bar"></span>
+	</div>
+{/if}
 
 <SettingsModal open={settingsOpen} onClose={() => (settingsOpen = false)} />
 
@@ -178,6 +196,45 @@
 			padding: 0;
 			background: rgba(0, 0, 0, 0.5);
 			cursor: pointer;
+		}
+	}
+
+	/* Global navigation indicator (task #384). An indeterminate top bar:
+	   fixed + pointer-events: none, so pages below stay usable and nothing
+	   reflows. Track and fill use semantic tokens only. */
+	.nav-progress {
+		position: fixed;
+		top: 0;
+		left: 0;
+		right: 0;
+		height: var(--space-1);
+		z-index: 40;
+		pointer-events: none;
+		overflow: hidden;
+		background: var(--surface-raised-base);
+	}
+
+	.nav-progress__bar {
+		display: block;
+		width: 40%;
+		height: 100%;
+		background: var(--color-accent-base);
+		animation: nav-progress-sweep 1.1s ease-in-out infinite;
+	}
+
+	@keyframes nav-progress-sweep {
+		from {
+			transform: translateX(-100%);
+		}
+		to {
+			transform: translateX(350%);
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.nav-progress__bar {
+			width: 100%;
+			animation: none;
 		}
 	}
 </style>

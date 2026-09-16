@@ -165,11 +165,12 @@ const { mergeTrackerRefs } = await import('../model/tracker');
 /** Absolute path so the bracketed `[id]` route segment and `.ts` survive Vite. */
 const detailPageSpec = new URL('../../routes/sessions/[id]/+page.server.ts', import.meta.url).pathname;
 const { load: loadDetailPage } = (await import(detailPageSpec)) as {
-	load: (event: { params: { id: string }; url: URL }) => {
+	load: (event: { params: { id: string }; url: URL }) => Promise<{
 		ziptaskEnabled: boolean;
 		ziptaskBaseUrl: string | null;
-		gantt: { trackerRefs?: string[] } | null;
-	};
+		// The Gantt is streamed (task #385): the model arrives behind a promise.
+		gantt: Promise<{ trackerRefs?: string[] }> | null;
+	}>;
 };
 
 afterAll(() => {
@@ -275,7 +276,7 @@ describe('node vs turn aggregation (M4a DTO fields)', () => {
 });
 
 describe('session page loader wiring (ZIPTASK_BASE_URL)', () => {
-	test('surfaces the configured base to the Gantt prop and null when unset', () => {
+	test('surfaces the configured base to the Gantt prop and null when unset', async () => {
 		const previous = process.env.ZIPTASK_BASE_URL;
 		const event = () => ({
 			params: { id: 'root1' },
@@ -285,21 +286,22 @@ describe('session page loader wiring (ZIPTASK_BASE_URL)', () => {
 		try {
 			process.env.ZIPTASK_BASE_URL = 'https://zt.example/';
 			delete process.env.ZIPTASK_ENABLED;
-			const withBase = loadDetailPage(event());
+			const withBase = await loadDetailPage(event());
 			expect(withBase.ziptaskEnabled).toBe(true);
 			expect(withBase.ziptaskBaseUrl).toBe('https://zt.example/');
 			// The same turn refs the service computed reach the client DTO.
-			expect(withBase.gantt?.trackerRefs).toEqual(model.trackerRefs);
+			const gantt = await withBase.gantt;
+			expect(gantt?.trackerRefs).toEqual(model.trackerRefs);
 
 			// The feature toggle hides the integration even with a base URL set.
 			process.env.ZIPTASK_ENABLED = '0';
-			const disabled = loadDetailPage(event());
+			const disabled = await loadDetailPage(event());
 			expect(disabled.ziptaskEnabled).toBe(false);
 			expect(disabled.ziptaskBaseUrl).toBeNull();
 
 			delete process.env.ZIPTASK_ENABLED;
 			delete process.env.ZIPTASK_BASE_URL;
-			const unset = loadDetailPage(event());
+			const unset = await loadDetailPage(event());
 			expect(unset.ziptaskEnabled).toBe(false);
 			expect(unset.ziptaskBaseUrl).toBeNull();
 		} finally {

@@ -40,6 +40,14 @@ function sanitizeOffset(offset: number): number {
 	return Math.max(0, Math.floor(offset));
 }
 
+/** Whether a session id exists (`session` primary-key lookup). */
+export function sessionExists(sessionId: string): boolean {
+	const row = getDb()
+		.query('SELECT 1 AS present FROM session WHERE session.id = :sid')
+		.get({ ':sid': sessionId }) as Row | null;
+	return row !== null;
+}
+
 /** Escape LIKE wildcards so a raw search term matches literally (`ESCAPE '\'`). */
 function escapeLike(value: string): string {
 	return value.replace(/[\\%_]/g, (char) => `\\${char}`);
@@ -258,5 +266,34 @@ export function getDelegationEdges(sessionId: string): DelegationRecord[] {
 		WHERE part.session_id = :sid AND ${typeFilter} AND ${toolFilter}
 		ORDER BY part.time_created, part.id`;
 	const rows = getDb().query(sql).all({ ':sid': sessionId }) as Row[];
+	return rows.map(mapDelegationRow);
+}
+
+/**
+ * Delegation edges (`tool='task'`) of a root session's whole subtree in ONE
+ * query (task #386): the recursive CTE walks `session_parent_idx` and the join
+ * resolves each subtree id through `part_session_idx`, replacing the
+ * per-session N+1. Ordered by session then time so callers can group without
+ * re-sorting. The `path` guard terminates a corrupt `parent_id` cycle exactly
+ * like {@link getSessionSubtree}.
+ */
+export function getSubtreeDelegationEdges(rootId: string): DelegationRecord[] {
+	const typeFilter = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
+	const toolFilter = jsonEquals('part.data', JSON_PATH.part.tool, 'task');
+	const sql = `
+		WITH RECURSIVE subtree(id, path) AS (
+			SELECT :rootId, '/' || :rootId || '/'
+			UNION ALL
+			SELECT child.id, parent.path || child.id || '/'
+			FROM session child
+			JOIN subtree parent ON child.parent_id = parent.id
+			WHERE instr(parent.path, '/' || child.id || '/') = 0
+		)
+		SELECT ${partColumns('part')}
+		FROM part
+		JOIN subtree ON subtree.id = part.session_id
+		WHERE ${typeFilter} AND ${toolFilter}
+		ORDER BY part.session_id, part.time_created, part.id`;
+	const rows = getDb().query(sql).all({ ':rootId': rootId }) as Row[];
 	return rows.map(mapDelegationRow);
 }

@@ -33,11 +33,21 @@
 
 	let {
 		detail,
+		loading = false,
+		error = null,
 		ziptaskEnabled = true,
 		ziptaskBaseUrl = null,
 		onOpenTask
 	}: {
-		detail: NodeDetail;
+		/**
+		 * The node slice, or `null` while it loads / after a load failure (Phase 4
+		 * / task #387). `loading`/`error` describe that empty state.
+		 */
+		detail: NodeDetail | null;
+		/** The selected node's detail is in flight. */
+		loading?: boolean;
+		/** The selected node's detail could not be loaded. */
+		error?: string | null;
 		/** Feature toggle: when false the tracker column is hidden. */
 		ziptaskEnabled?: boolean;
 		ziptaskBaseUrl?: string | null;
@@ -70,20 +80,22 @@
 	let flashId = $state<string | null>(null);
 	let flashTimer: ReturnType<typeof setTimeout> | null = null;
 
-	const retryGroups = $derived(groupToolRetries(detail.toolCalls));
+	const retryGroups = $derived(detail ? groupToolRetries(detail.toolCalls) : []);
 	// Prefer the service-computed node refs (tool calls + `task` edges it
 	// spawned); fall back to the raw tool-call refs for partial DTOs.
 	const trackerRefs = $derived(
-		detail.node.trackerRefs && detail.node.trackerRefs.length > 0
-			? detail.node.trackerRefs
-			: collectTrackerRefs(detail.toolCalls)
+		detail
+			? detail.node.trackerRefs && detail.node.trackerRefs.length > 0
+				? detail.node.trackerRefs
+				: collectTrackerRefs(detail.toolCalls)
+			: []
 	);
 	const refBase = $derived(ziptaskBaseUrl ? ziptaskBaseUrl.replace(/\/+$/, '') : null);
 
 	// Hierarchical Steps & actions timeline: a start marker, the numbered LLM
 	// steps, and (nested, collapsed by default) each step's tool calls and
 	// non-tool actions. Filters: row kind, permission-only, free-text search.
-	const rows = $derived(buildNodeRows(detail));
+	const rows = $derived(detail ? buildNodeRows(detail) : []);
 	const stepCount = $derived(rows.filter((row) => row.kind === 'step').length);
 	const itemCount = $derived(
 		rows.reduce(
@@ -92,13 +104,13 @@
 		)
 	);
 	const permissionRows = $derived(
-		detail.toolCalls.filter((call) => call.permission).map((call) => call.permission!)
+		(detail?.toolCalls ?? []).filter((call) => call.permission).map((call) => call.permission!)
 	);
 	/** Whether the node recorded anything at all (drives the empty state). */
 	const hasContent = $derived(
 		stepCount > 0 ||
-			detail.toolCalls.length > 0 ||
-			(detail.actions !== undefined && detail.actions.length > 0)
+			(detail?.toolCalls.length ?? 0) > 0 ||
+			(detail?.actions !== undefined && detail.actions.length > 0)
 	);
 	/** When a filter/search is active, matching steps expand so hits are visible. */
 	const forceOpen = $derived(actionSearch.trim() !== '' || kindFilter !== 'all');
@@ -174,7 +186,7 @@
 
 	// Unified details list below the table: tool calls + non-tool actions,
 	// chronologically, each with a stable DOM anchor the table rows scroll to.
-	const detailEntries = $derived(buildDetailEntries(detail));
+	const detailEntries = $derived(detail ? buildDetailEntries(detail) : []);
 
 	function toggleExpanded(key: string) {
 		expanded[key] = !expanded[key];
@@ -244,46 +256,52 @@
 </script>
 
 <section class="panel" aria-label="Node detail">
-	<NodeSummaryStrip
-		{detail}
-		{retryGroups}
-		{trackerRefs}
-		{refBase}
-		{permissionRows}
-		{ziptaskEnabled}
-		{onOpenTask}
-	/>
+	{#if detail}
+		<NodeSummaryStrip
+			{detail}
+			{retryGroups}
+			{trackerRefs}
+			{refBase}
+			{permissionRows}
+			{ziptaskEnabled}
+			{onOpenTask}
+		/>
 
-	<NodeActionsTable
-		{visibleRows}
-		{stepCount}
-		{itemCount}
-		{hasContent}
-		{usageColumns}
-		{kindFilter}
-		{permissionOnly}
-		{actionSearch}
-		{allExpanded}
-		onSearch={(value) => (actionSearch = value)}
-		onFilter={(value) => (kindFilter = value)}
-		onTogglePermission={() => (permissionOnly = !permissionOnly)}
-		onToggleAll={toggleAll}
-		onToggleRow={toggleRow}
-		onFocusCall={focusCall}
-		onFocusAction={focusAction}
-	/>
+		<NodeActionsTable
+			{visibleRows}
+			{stepCount}
+			{itemCount}
+			{hasContent}
+			{usageColumns}
+			{kindFilter}
+			{permissionOnly}
+			{actionSearch}
+			{allExpanded}
+			onSearch={(value) => (actionSearch = value)}
+			onFilter={(value) => (kindFilter = value)}
+			onTogglePermission={() => (permissionOnly = !permissionOnly)}
+			onToggleAll={toggleAll}
+			onToggleRow={toggleRow}
+			onFocusCall={focusCall}
+			onFocusAction={focusAction}
+		/>
 
-	<NodeDetailsList
-		{detailEntries}
-		{expanded}
-		{copiedCallId}
-		{flashId}
-		nodeStartedAt={detail.node.startedAt}
-		onCopy={copyCall}
-		onToggleExpanded={toggleExpanded}
-	/>
+		<NodeDetailsList
+			{detailEntries}
+			{expanded}
+			{copiedCallId}
+			{flashId}
+			nodeStartedAt={detail.node.startedAt}
+			onCopy={copyCall}
+			onToggleExpanded={toggleExpanded}
+		/>
 
-	<RawJsonBlock {detail} />
+		<RawJsonBlock {detail} />
+	{:else if loading}
+		<p class="panel-status" role="status" aria-live="polite">Loading node detail…</p>
+	{:else if error}
+		<p class="panel-status panel-status--error" role="alert">{error}</p>
+	{/if}
 </section>
 
 <style>
@@ -295,5 +313,17 @@
 		background: var(--background-strong);
 		padding: var(--space-4);
 		color: var(--text-base);
+	}
+
+	/* Lazy-detail states (Phase 4 / task #387): the node body is fetched on
+	   selection, so the panel announces the wait rather than rendering emptily. */
+	.panel-status {
+		margin: 0;
+		padding: var(--space-4);
+		color: var(--text-weak);
+	}
+
+	.panel-status--error {
+		color: var(--color-danger-strong);
 	}
 </style>
