@@ -277,7 +277,7 @@
 			<label class="tool-errors__field">
 				<span class="tool-errors__label">Period</span>
 				<select
-					class="tool-errors__select"
+					class="ui-select tool-errors__select"
 					value={period}
 					onchange={(event) => setPeriod(event.currentTarget.value)}
 				>
@@ -289,7 +289,7 @@
 			<label class="tool-errors__field">
 				<span class="tool-errors__label">Project</span>
 				<select
-					class="tool-errors__select"
+					class="ui-select tool-errors__select"
 					value={scope ?? SCOPE_ALL}
 					onchange={(event) => setScope(event.currentTarget.value)}
 				>
@@ -301,7 +301,7 @@
 			<label class="tool-errors__field">
 				<span class="tool-errors__label">Agent</span>
 				<select
-					class="tool-errors__select"
+					class="ui-select tool-errors__select"
 					value={agent}
 					onchange={(event) => (agent = event.currentTarget.value)}
 				>
@@ -458,21 +458,10 @@
 		color: var(--text-weak);
 	}
 
+	/* Sizing only — the control box comes from .ui-input / .ui-select. */
 	.tool-errors__input,
 	.tool-errors__select {
 		min-width: 8rem;
-	}
-
-	.tool-errors__select {
-		padding: var(--space-1) var(--space-2);
-		background: var(--surface-base);
-		color: var(--text-base);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		font-size: var(--font-size-small);
-		line-height: var(--line-height-normal);
-		cursor: pointer;
 	}
 
 	.tool-errors__total {

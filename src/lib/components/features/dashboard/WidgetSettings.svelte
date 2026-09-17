@@ -142,7 +142,7 @@
 							<label class="widget-field__label" for={`width-${widget.id}`}>Width</label>
 							<select
 								id={`width-${widget.id}`}
-								class="widget-select"
+								class="ui-select"
 								value={String(placement.width)}
 								onchange={(event) => setWidth(event.currentTarget.value)}
 							>
@@ -229,16 +229,6 @@
 	.widget-field__label {
 		font-size: var(--font-size-small);
 		color: var(--text-weak);
-	}
-
-	.widget-select {
-		padding: var(--space-1) var(--space-2);
-		background: var(--surface-base);
-		color: var(--text-strong);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		font-size: var(--font-size-small);
 	}
 
 	.widget-stepper {

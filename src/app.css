@@ -41,6 +41,9 @@
 	--space-10: 2.5rem;
 	--space-12: 3rem;
 
+	/* Control height — one height for every form control (docs/ui-standards.md §1/§10) */
+	--control-height: 2rem;
+
 	/* Radii -------------------------------------------------------------- */
 	--radius-xs: 0.125rem;
 	--radius-sm: 0.25rem;
@@ -314,7 +317,8 @@ a {
  *                       clip an outward outline); defined above.
  *
  * Buttons
- *   .ui-btn           — default bordered action button; states :hover,
+ *   .ui-btn           — default bordered action button sharing the
+ *                       --control-height box (see Inputs); states :hover,
  *                       :active, :disabled.
  *   .ui-btn--primary  — raised emphasis (surface-raised-* tokens).
  *   .ui-btn--danger   — destructive tone (danger border/text, danger hover
@@ -329,6 +333,14 @@ a {
  *
  * Inputs
  *   .ui-input         — full-width text input; ::placeholder uses --text-weak.
+ *   .ui-select        — select sharing .ui-input's control box (height, padding,
+ *                       border, radius, background, color, font-size) plus
+ *                       cursor:pointer; the native arrow is left untouched.
+ *                       Both size from --control-height (docs/ui-standards.md §1).
+ *
+ * The control box is owned by .ui-input / .ui-select / .ui-btn; a call site
+ * adds sizing only (width / min-width / max-width) and never re-declares the
+ * box.
  *
  * Chips and badges (pills; no wrapper components by the rule above)
  *   .ui-chip              — pill container for tracker refs / filters.
@@ -384,14 +396,15 @@ a {
 	align-items: center;
 	justify-content: center;
 	gap: var(--space-1);
-	padding: var(--space-1) var(--space-2);
+	height: var(--control-height);
+	padding: 0 var(--space-2);
 	background: var(--surface-base);
 	color: var(--text-base);
 	border: 1px solid var(--border-weak-base);
 	border-radius: var(--radius-sm);
 	font: inherit;
 	font-size: var(--font-size-small);
-	line-height: var(--line-height-normal);
+	line-height: 1;
 	white-space: nowrap;
 	cursor: pointer;
 }
@@ -484,13 +497,28 @@ a {
 /* Inputs -------------------------------------------------------------- */
 .ui-input {
 	width: 100%;
-	padding: var(--space-1) var(--space-2);
+	height: var(--control-height);
+	padding: 0 var(--space-2);
 	background: var(--surface-base);
 	color: var(--text-strong);
 	border: 1px solid var(--border-weak-base);
 	border-radius: var(--radius-sm);
 	font: inherit;
 	font-size: var(--font-size-small);
+	line-height: 1;
+}
+
+.ui-select {
+	height: var(--control-height);
+	padding: 0 var(--space-2);
+	background: var(--surface-base);
+	color: var(--text-strong);
+	border: 1px solid var(--border-weak-base);
+	border-radius: var(--radius-sm);
+	font: inherit;
+	font-size: var(--font-size-small);
+	line-height: 1;
+	cursor: pointer;
 }
 
 .ui-input::placeholder {
