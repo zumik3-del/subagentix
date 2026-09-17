@@ -602,8 +602,8 @@ describe('Gantt #239/#247 — agent swatch, neutral tube, legend contract', () =
 		expect(barRule).toContain('fill: color-mix(in srgb, var(--agent) 30%, var(--background-strong))');
 		expect(barRule).toContain('stroke: color-mix(in srgb, var(--agent) 65%, var(--background-strong))');
 		expect(barRule).toContain('stroke-width: 0.75');
-		// Neutral tokens are fine; model-driven palette vars (mint/ember/amber/lilac/icon/*-dark-*) are not.
-		expect(barRule).not.toMatch(/var\(--(?:mint|ember|amber|lilac|icon|solaris)-/);
+		// Neutral tokens are fine; model-driven palette vars (sage/ember/amber/lilac/icon/*-dark-*) are not.
+		expect(barRule).not.toMatch(/var\(--(?:sage|ember|amber|lilac|icon|solaris)-/);
 	});
 
 	test('a running node keeps the url(#running-hatch) fill', () => {

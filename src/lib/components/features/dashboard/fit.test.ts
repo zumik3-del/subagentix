@@ -6,7 +6,7 @@ import { rowsThatFit } from './fit';
  *
  * Kept as a plain `.ts` module — no DOM, no Svelte, no `$lib/server` — so the
  * budget rule is exercisable headlessly. Mirrors the `top-tools.ts` split
- * pattern (docs/ui-standards.md §10).
+ * pattern.
  */
 
 describe('rowsThatFit()', () => {

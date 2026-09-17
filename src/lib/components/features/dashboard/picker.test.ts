@@ -6,7 +6,7 @@ import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/re
  * (dashboard Phase 5, task #414; resizable in #438).
  *
  * Kept in a plain `.ts` module so the toggle/compare/size rules are testable
- * without a renderer or a DOM (docs/ui-standards.md §10).
+ * without a renderer or a DOM.
  */
 
 	describe('toggleWidgetSelection()', () => {

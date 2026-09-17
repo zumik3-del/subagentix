@@ -5,7 +5,7 @@
  * scrolled into view. The loader is the Vite dynamic-import boundary, so no
  * widget module is pulled into the SSR graph or the initial client bundle
  * until then. Kept free of `$lib/server` / DOM so both SSR and client import
- * it (docs/ui-standards.md §10).
+ * it.
  */
 import type { Component } from 'svelte';
 import type { DashboardFilter } from '$lib/model/dashboard';

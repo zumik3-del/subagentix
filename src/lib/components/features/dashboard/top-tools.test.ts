@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { errorShareLabel, topToolBars, topToolsNote } from './top-tools';
+import { errorPercent, topToolRows, topToolsNote } from './top-tools';
 import { MAX_TOOL_SESSIONS } from '$lib/model/dashboard';
 import type { ToolUsage } from '$lib/model/dashboard';
 
@@ -8,52 +8,52 @@ import type { ToolUsage } from '$lib/model/dashboard';
  *
  * Kept in a plain `.ts` module so the count/error-share mapping and the capped
  * note decision are testable without a renderer or a DOM — mirroring the
- * `top-tools.ts` split (docs/ui-standards.md §10).
+ * `top-tools.ts` split.
  */
 
-describe('errorShareLabel()', () => {
+describe('errorPercent()', () => {
 	test('rounds a finite share to a percent label', () => {
-		expect(errorShareLabel(0.125)).toBe('13% errors');
-		expect(errorShareLabel(0.5)).toBe('50% errors');
-		expect(errorShareLabel(0.999)).toBe('100% errors');
+		expect(errorPercent(0.125)).toBe('13%');
+		expect(errorPercent(0.5)).toBe('50%');
+		expect(errorPercent(0.999)).toBe('100%');
 	});
 
 	test('treats zero as 0%', () => {
-		expect(errorShareLabel(0)).toBe('0% errors');
+		expect(errorPercent(0)).toBe('0%');
 	});
 
 	test('NaN / Infinity degrade to 0%', () => {
-		expect(errorShareLabel(Number.NaN)).toBe('0% errors');
-		expect(errorShareLabel(Number.POSITIVE_INFINITY)).toBe('0% errors');
-		expect(errorShareLabel(Number.NEGATIVE_INFINITY)).toBe('0% errors');
+		expect(errorPercent(Number.NaN)).toBe('0%');
+		expect(errorPercent(Number.POSITIVE_INFINITY)).toBe('0%');
+		expect(errorPercent(Number.NEGATIVE_INFINITY)).toBe('0%');
 	});
 
 	test('negative shares still round to a percent (no clamping)', () => {
-		expect(errorShareLabel(-0.1)).toBe('-10% errors');
+		expect(errorPercent(-0.1)).toBe('-10%');
 	});
 });
 
-describe('topToolBars()', () => {
+describe('topToolRows()', () => {
 	const makeUsage = (tools: ToolUsage['tools']): ToolUsage => ({ tools, capped: false });
 
-	test('maps each tool onto a BarChart row with value, detail and title', () => {
+	test('maps each tool onto a table row with count, errors and title', () => {
 		const usage = makeUsage([
 			{ name: 'bash', count: 100, errors: 10, errorShare: 0.1 },
 			{ name: 'read', count: 50, errors: 0, errorShare: 0 }
 		]);
-		const bars = topToolBars(usage);
-		expect(bars).toHaveLength(2);
-		expect(bars[0]).toEqual({
-			label: 'bash',
-			value: 100,
-			title: '10 of 100 calls errored',
-			detail: '10% errors'
+		const rows = topToolRows(usage);
+		expect(rows).toHaveLength(2);
+		expect(rows[0]).toEqual({
+			name: 'bash',
+			count: 100,
+			errors: 10,
+			title: '10 of 100 calls errored (10%)'
 		});
-		expect(bars[1]).toEqual({
-			label: 'read',
-			value: 50,
-			title: '0 of 50 calls errored',
-			detail: '0% errors'
+		expect(rows[1]).toEqual({
+			name: 'read',
+			count: 50,
+			errors: 0,
+			title: '0 of 50 calls errored (0%)'
 		});
 	});
 
@@ -63,13 +63,13 @@ describe('topToolBars()', () => {
 			{ name: 'a', count: 100, errors: 2, errorShare: 0.02 },
 			{ name: 'c', count: 50, errors: 0, errorShare: 0 }
 		]);
-		const bars = topToolBars(usage);
-		// topToolBars preserves the input array order (server returns ranked).
-		expect(bars.map((b) => b.label)).toEqual(['b', 'a', 'c']);
+		const rows = topToolRows(usage);
+		// topToolRows preserves the input array order (server returns ranked).
+		expect(rows.map((row) => row.name)).toEqual(['b', 'a', 'c']);
 	});
 
-	test('empty tools yields no bars', () => {
-		expect(topToolBars({ tools: [], capped: false })).toEqual([]);
+	test('empty tools yields no rows', () => {
+		expect(topToolRows({ tools: [], capped: false })).toEqual([]);
 	});
 });
 

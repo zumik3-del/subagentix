@@ -1,14 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
-	arcPath,
-	arcSegments,
 	bucketByUtcDay,
 	linearScale,
 	MAX_DAY_BUCKETS,
 	niceStep,
 	niceTicks,
-	TAU,
 	topN,
 	utcDayKey
 } from './chart';
@@ -18,7 +15,7 @@ import {
  *
  * `chart.ts` runs in SSR, the client bundle and `bun test`, so it must stay
  * DOM-free and free of any `uplot` import. These tests pin the scale/tick/
- * bucket/arc/top-N contracts, including the degenerate cases (empty, single
+ * bucket/top-N contracts, including the degenerate cases (empty, single
  * item, all-equal) called out in the spec.
  */
 
@@ -234,98 +231,6 @@ describe('bucketByUtcDay()', () => {
 	test('caps the bucket count on an unbounded window', () => {
 		const buckets = bucketByUtcDay([], Date.UTC(1900, 0, 1), Date.UTC(2100, 0, 1));
 		expect(buckets.length).toBe(MAX_DAY_BUCKETS);
-	});
-});
-
-describe('arcSegments()', () => {
-	test('splits proportional to the values and accumulates angles', () => {
-		const segments = arcSegments([1, 1, 2]);
-		expect(segments.map((segment) => segment.fraction)).toEqual([0.25, 0.25, 0.5]);
-		expect(segments[0].startAngle).toBe(0);
-		expect(segments[0].endAngle).toBeCloseTo(TAU * 0.25, 12);
-		expect(segments[2].endAngle).toBeCloseTo(TAU, 12);
-	});
-
-	test('all-equal values produce equal slices', () => {
-		const segments = arcSegments([3, 3, 3]);
-		for (const segment of segments) {
-			expect(segment.fraction).toBeCloseTo(1 / 3, 12);
-		}
-		expect(segments[1].startAngle).toBeCloseTo(TAU / 3, 12);
-	});
-
-	test('negative and non-finite values count as zero width', () => {
-		const segments = arcSegments([-2, Number.NaN, 4]);
-		expect(segments.map((segment) => segment.value)).toEqual([0, 0, 4]);
-		expect(segments[0].fraction).toBe(0);
-		expect(segments[2].fraction).toBe(1);
-	});
-
-	test('an all-zero input yields zero-width segments (nothing rendered)', () => {
-		const segments = arcSegments([0, 0]);
-		for (const segment of segments) {
-			expect(segment.fraction).toBe(0);
-			expect(segment.startAngle).toBe(segment.endAngle);
-		}
-	});
-
-	test('empty input yields no segments', () => {
-		expect(arcSegments([])).toEqual([]);
-	});
-
-	test('preserves input indices', () => {
-		expect(arcSegments([1, 2, 3]).map((segment) => segment.index)).toEqual([0, 1, 2]);
-	});
-});
-
-describe('arcPath()', () => {
-	const countChar = (value: string, char: string): number => value.split(char).length - 1;
-
-	test('renders a donut slice as a closed two-arc path', () => {
-		const path = arcPath(0, 0, 100, 60, 0, Math.PI / 2);
-		expect(path.startsWith('M ')).toBe(true);
-		expect(path.endsWith('Z')).toBe(true);
-		expect(countChar(path, 'A ')).toBe(2);
-		// Quarter sweep: small-arc flag 0 on the outer edge, sweep flag 1.
-		expect(path).toContain('A 100 100 0 0 1');
-		// The inner edge runs back counter-clockwise.
-		expect(path).toContain('A 60 60 0 0 0');
-	});
-
-	test('sets the large-arc flag for a sweep past half a turn', () => {
-		const path = arcPath(0, 0, 100, 0, 0, Math.PI * 1.5);
-		expect(path).toContain('A 100 100 0 1 1');
-	});
-
-	test('rInner <= 0 renders a pie wedge through the centre', () => {
-		const path = arcPath(0, 0, 50, 0, 0, Math.PI / 2);
-		expect(path.startsWith('M 0 0 L ')).toBe(true);
-		expect(countChar(path, 'A ')).toBe(1);
-		expect(path.endsWith('Z')).toBe(true);
-	});
-
-	test('a full turn is split into two arcs (SVG cannot express 2π in one)', () => {
-		const path = arcPath(0, 0, 100, 60, 0, TAU);
-		expect(countChar(path, 'M ')).toBe(2);
-		expect(countChar(path, 'A ')).toBe(4);
-	});
-
-	test('a negative sweep is normalised (drawn clockwise from the lower angle)', () => {
-		expect(arcPath(0, 0, 100, 60, Math.PI / 2, 0)).toBe(arcPath(0, 0, 100, 60, 0, Math.PI / 2));
-	});
-
-	test('a zero sweep or invalid radius yields an empty path', () => {
-		expect(arcPath(0, 0, 100, 60, 1, 1)).toBe('');
-		expect(arcPath(0, 0, 0, 0, 0, TAU)).toBe('');
-		expect(arcPath(0, 0, Number.NaN, 0, 0, TAU)).toBe('');
-	});
-
-	test('clamps the inner radius to the outer radius', () => {
-		expect(arcPath(0, 0, 50, 200, 0, Math.PI)).toBe(arcPath(0, 0, 50, 50, 0, Math.PI));
-	});
-
-	test('is deterministic for identical input', () => {
-		expect(arcPath(10, 20, 30, 10, 0, 1)).toBe(arcPath(10, 20, 30, 10, 0, 1));
 	});
 });
 

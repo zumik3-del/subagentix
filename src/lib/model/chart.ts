@@ -3,12 +3,9 @@
  *
  * No DOM, no Svelte and no chart-library import: this module is safe in SSR, in
  * the client bundle and in `bun test`, mirroring `model/gantt.ts`. Every
- * function is deterministic and side-effect free, so the scales, ticks, buckets,
- * arcs and top-N truncation are testable without a renderer.
+ * function is deterministic and side-effect free, so the scales, ticks, buckets
+ * and top-N truncation are testable without a renderer.
  */
-
-/** Full turn, in radians. */
-export const TAU = Math.PI * 2;
 
 // --- Linear scale -------------------------------------------------------------
 
@@ -153,113 +150,6 @@ export function bucketByUtcDay(
 		buckets.push({ day: key, value: totals.get(key) ?? 0 });
 	}
 	return buckets;
-}
-
-// --- Arc / pie ----------------------------------------------------------------
-
-/** One donut/pie slice: its share and its angular span. */
-export interface ArcSegment {
-	/** Input index, so callers can match a slice back to its label. */
-	index: number;
-	/** Non-negative value used for the share (input clamped to `>= 0`). */
-	value: number;
-	/** Share of the total `[0, 1]`; `0` for every slice when the total is `0`. */
-	fraction: number;
-	startAngle: number;
-	endAngle: number;
-}
-
-/**
- * Split values into cumulative angular segments over `[startAngle, endAngle]`.
- * Angles are in radians, `0` at 12 o'clock, increasing clockwise (SVG y-down).
- * Negative/non-finite values count as `0`; an all-zero input yields zero-width
- * segments so nothing is rendered for a meaningless slice.
- */
-export function arcSegments(
-	values: readonly number[],
-	startAngle = 0,
-	endAngle = TAU
-): ArcSegment[] {
-	const safe = values.map((value) => (Number.isFinite(value) && value > 0 ? value : 0));
-	const total = safe.reduce((sum, value) => sum + value, 0);
-	const span = finite(endAngle - startAngle, 0);
-	let cursor = finite(startAngle, 0);
-	return safe.map((value, index) => {
-		const fraction = total > 0 ? value / total : 0;
-		const from = cursor;
-		const to = total > 0 ? cursor + fraction * span : cursor;
-		cursor = to;
-		return { index, value, fraction, startAngle: from, endAngle: to };
-	});
-}
-
-function svgPoint(cx: number, cy: number, radius: number, angle: number): string {
-	return `${cx + radius * Math.sin(angle)} ${cy - radius * Math.cos(angle)}`;
-}
-
-function arcSegment(
-	cx: number,
-	cy: number,
-	rOuter: number,
-	rInner: number,
-	from: number,
-	to: number,
-	largeArc: number
-): string {
-	const outerStart = svgPoint(cx, cy, rOuter, from);
-	const outerEnd = svgPoint(cx, cy, rOuter, to);
-	if (rInner <= 0) {
-		return `M ${cx} ${cy} L ${outerStart} A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${outerEnd} Z`;
-	}
-	const innerEnd = svgPoint(cx, cy, rInner, to);
-	const innerStart = svgPoint(cx, cy, rInner, from);
-	return (
-		`M ${outerStart} A ${rOuter} ${rOuter} 0 ${largeArc} 1 ${outerEnd}` +
-		` L ${innerEnd} A ${rInner} ${rInner} 0 ${largeArc} 0 ${innerStart} Z`
-	);
-}
-
-/**
- * SVG `d` for one donut slice (`rInner > 0`) or pie wedge (`rInner <= 0`).
- * `startAngle`/`endAngle` are radians, `0` at 12 o'clock, increasing clockwise.
- * A negative sweep is normalised; a zero sweep or invalid radius yields `''`;
- * a full turn is split into two arcs because SVG cannot express 2π in one.
- */
-export function arcPath(
-	cx: number,
-	cy: number,
-	rOuter: number,
-	rInner: number,
-	startAngle: number,
-	endAngle: number
-): string {
-	if (!Number.isFinite(rOuter) || rOuter <= 0) return '';
-	const outer = rOuter;
-	const inner = Math.max(0, Math.min(finite(rInner, 0), outer));
-	let from = finite(startAngle, 0);
-	let to = finite(endAngle, 0);
-	let sweep = to - from;
-	if (sweep === 0) return '';
-	if (sweep < 0) {
-		const swap = from;
-		from = to;
-		to = swap;
-		sweep = -sweep;
-	}
-	if (sweep >= TAU) {
-		const mid = from + Math.PI;
-		return `${arcSegment(cx, cy, outer, inner, from, mid, 1)} ${arcSegment(
-			cx,
-			cy,
-			outer,
-			inner,
-			mid,
-			from + TAU,
-			1
-		)}`;
-	}
-	const largeArc = sweep > Math.PI ? 1 : 0;
-	return arcSegment(cx, cy, outer, inner, from, to, largeArc);
 }
 
 // --- Top-N --------------------------------------------------------------------

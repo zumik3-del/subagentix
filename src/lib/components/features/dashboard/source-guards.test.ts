@@ -117,40 +117,6 @@ describe('BarChart source: no chart library import', () => {
 	});
 });
 
-describe('DonutChart source: no chart library import', () => {
-	const source = readFileSync(
-		new URL('./DonutChart.svelte', import.meta.url),
-		'utf8'
-	);
-
-	test('does not import any chart library', () => {
-		expect(source).not.toMatch(/from ['"]uplot['"]/);
-		expect(source).not.toMatch(/from ['"]d3['"]/);
-	});
-
-	test('imports arcPath, arcSegments and topN from model/chart', () => {
-		expect(source).toMatch(/from ['"]\$lib\/model\/chart['"]/);
-	});
-
-	test('root SVG has role="img" and aria-label', () => {
-		expect(source).toMatch(/role="img"/);
-		expect(source).toMatch(/aria-label=/);
-	});
-
-	test('renders the empty state when total <= 0', () => {
-		expect(source).toMatch(/donut__empty/);
-	});
-
-	test('uses viewBox and responsive sizing', () => {
-		expect(source).toMatch(/viewBox="0 0 100 100"/);
-	});
-
-	test('legend table has scope attributes', () => {
-		expect(source).toMatch(/scope="row"/);
-		expect(source).toMatch(/scope="col"/);
-	});
-});
-
 describe('WidgetHost source: IntersectionObserver guard', () => {
 	const source = readFileSync(
 		new URL('./WidgetHost.svelte', import.meta.url),

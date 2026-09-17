@@ -169,9 +169,9 @@
 	--ember-dark-9: #fc533a;
 	--ember-dark-10: #ee462d;
 	--ember-dark-11: #ff917b;
-	--mint-dark-9: #c8ffc4;
-	--mint-dark-10: #bff5bb;
-	--mint-dark-11: #9dde99;
+	--sage-dark-9: #8ec295;
+	--sage-dark-10: #76b27b;
+	--sage-dark-11: #5ea164;
 	--cobalt-dark-9: #034cff;
 	--cobalt-dark-10: #0038ee;
 	--cobalt-dark-11: #89b5ff;
@@ -185,7 +185,7 @@
 	--chart-1: var(--blue-dark-9);
 	--chart-2: var(--amber-dark-9);
 	--chart-3: var(--ember-dark-9);
-	--chart-4: var(--mint-dark-9);
+	--chart-4: var(--sage-dark-9);
 	--chart-5: var(--cobalt-dark-9);
 	--chart-6: var(--solaris-dark-9);
 	--chart-7: var(--lilac-dark-9);
@@ -194,9 +194,9 @@
 	 * Semantic status colors (docs/ui-standards.md §4). These are the only color
 	 * tokens components may use for success/warning/danger/info/accent.
 	 */
-	--color-success-base: var(--mint-dark-9);
-	--color-success-strong: var(--mint-dark-11);
-	--color-success-surface: color-mix(in srgb, var(--mint-dark-9) 22%, transparent);
+	--color-success-base: var(--sage-dark-9);
+	--color-success-strong: var(--sage-dark-11);
+	--color-success-surface: color-mix(in srgb, var(--sage-dark-9) 22%, transparent);
 	--color-warning-base: var(--amber-dark-9);
 	--color-warning-strong: var(--amber-dark-11);
 	--color-warning-surface: color-mix(in srgb, var(--amber-dark-9) 22%, transparent);

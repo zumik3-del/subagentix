@@ -146,7 +146,6 @@
 										/>
 										<span class="widget-main">
 											<span class="widget-title">{def.title}</span>
-											<span class="widget-meta">tier {def.tier}</span>
 										</span>
 									</label>
 								</li>
@@ -222,11 +221,6 @@
 
 	.widget-title {
 		color: var(--text-strong);
-	}
-
-	.widget-meta {
-		font-size: var(--font-size-small);
-		color: var(--text-faint);
 	}
 
 	.restore {

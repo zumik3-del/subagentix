@@ -2,40 +2,148 @@
 	/**
 	 * Agent-distribution widget body (dashboard Phase 4, task #412).
 	 *
-	 * Tier-S donut: `useWidgetData` fetches `/api/dashboard/agent-distribution`
+	 * Table-only: `useWidgetData` fetches `/api/dashboard/agent-distribution`
 	 * for the shared filter and `WidgetCard` renders the loading/error/empty
-	 * states. A ready payload is drawn by the hand-rolled `DonutChart` (no chart
-	 * library); agent names map 1:1 onto the donut's `--chart-*` slices.
+	 * states. The ready payload is rendered as a rank-ordered table (agent, count
+	 * and share) — no chart library, no SVG. Rows are trimmed to the whole rows
+	 * the card height can show (`useRowFit` after mount; SSR shows all rows).
 	 */
 	import type { DistributionEntry } from '$lib/model/dashboard';
 	import type { WidgetBodyProps } from './widget';
 	import { useWidgetData } from './data.svelte';
 	import WidgetCard from './WidgetCard.svelte';
-	import DonutChart from './DonutChart.svelte';
+	import { formatNumber } from '$lib/model/format';
+	import { useRowFit } from './fit.svelte';
 
 	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
 
-	const state = useWidgetData<DistributionEntry[]>({
+	const query = useWidgetData<DistributionEntry[]>({
 		source: () => widget.source,
 		filter: () => filter,
 		refreshToken: () => refreshToken
 	});
 
-	/** Donut input: one labelled slice per agent, in the API's rank order. */
-	let slices = $derived(
-		(state.data ?? []).map((entry) => ({ label: entry.name, value: entry.count }))
-	);
+	/** The `--chart-*` tokens available for the row swatches (spec §2.6). */
+	const CHART_TOKENS = 7;
+
+	/** Rank-ordered rows from the API (count desc, then name asc). */
+	let rows = $derived(query.data ?? []);
+
+	/** Total sessions across the rows; the share denominator. */
+	let total = $derived(rows.reduce((sum, row) => sum + row.count, 0));
+
+	/** Clipped list host; fills the body so its height is the row budget. */
+	let list = $state<HTMLElement | null>(null);
+	const fit = useRowFit({ container: () => list, total: () => rows.length });
+	/** Whole rows that fit; SSR sees every row (no measurement yet). */
+	let visible = $derived(rows.slice(0, fit.budget));
+
+	/** Rounded percent share of the total for one row. */
+	function share(count: number): string {
+		return total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
+	}
 </script>
 
 <WidgetCard
 	title={widget.title}
-	status={state.status}
-	error={state.error ?? undefined}
-	refreshing={state.refreshing}
-	onRefresh={state.refresh}
+	status={query.status}
+	error={query.error ?? undefined}
+	refreshing={query.refreshing}
+	onRefresh={query.refresh}
 	{onSettings}
 >
-	{#if state.data}
-		<DonutChart {slices} label="Agent distribution" unit="sessions" />
+	{#if query.data}
+		{#if rows.length === 0}
+			<p class="distribution__empty">No data for this period.</p>
+		{:else}
+			<figure class="distribution" bind:this={list}>
+				<table class="distribution__table">
+					<caption class="sr-only">Agent distribution</caption>
+					<thead class="sr-only">
+						<tr>
+							<th scope="col">Name</th>
+							<th scope="col">Sessions</th>
+							<th scope="col">Share</th>
+						</tr>
+					</thead>
+					<tbody>
+						{#each visible as row, index (row.name)}
+							<tr>
+								<td class="distribution__swatch">
+									<span
+										class="ui-swatch"
+										style={`background:var(--chart-${(index % CHART_TOKENS) + 1})`}
+									></span>
+								</td>
+								<th scope="row" class="distribution__name">{row.name}</th>
+								<td class="distribution__count">{formatNumber(row.count)}</td>
+								<td class="distribution__share">{share(row.count)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</figure>
+		{/if}
 	{/if}
 </WidgetCard>
+
+<style>
+	/* Fills the card body so `clientHeight` is the available row budget; the
+	   hard `overflow` clip is a mid-measurement guarantee, not the trimming. */
+	.distribution {
+		display: flex;
+		flex: 1;
+		flex-direction: column;
+		margin: 0;
+		min-width: 0;
+		min-height: 0;
+		overflow: hidden;
+	}
+
+	.distribution__table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--font-size-small);
+	}
+
+	.distribution__table th,
+	.distribution__table td {
+		padding: var(--space-1) var(--space-2);
+		border-bottom: 1px solid var(--border-weaker-base);
+		text-align: left;
+		font-weight: var(--font-weight-regular);
+		font-variant-numeric: tabular-nums;
+		vertical-align: middle;
+	}
+
+	.distribution__table tr:last-child th,
+	.distribution__table tr:last-child td {
+		border-bottom: 0;
+	}
+
+	.distribution__swatch {
+		width: var(--space-4);
+		padding-right: 0;
+	}
+
+	.distribution__name {
+		color: var(--text-strong);
+		overflow-wrap: anywhere;
+	}
+
+	.distribution__count,
+	.distribution__share {
+		text-align: right;
+		white-space: nowrap;
+	}
+
+	.distribution__share {
+		color: var(--text-weak);
+	}
+
+	.distribution__empty {
+		margin: 0;
+		font-size: var(--font-size-small);
+		color: var(--text-weak);
+	}
+</style>

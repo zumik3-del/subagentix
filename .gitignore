@@ -7,3 +7,4 @@ build
 .data/
 deploy/
 deploy-quick.sh
+docs/ui-standards.md
