@@ -22,6 +22,10 @@
 		filterSearch,
 		parseFilter
 	} from '$lib/components/features/dashboard/filter';
+	import {
+		TOOL_CALLS_PARAM,
+		TOOL_ERRORS_PARAM
+	} from '$lib/components/features/dashboard/detail';
 	import { createCoalescingWriter, saveDashboardFilter } from '$lib/components/features/dashboard/save';
 	import type { PageProps } from './$types';
 
@@ -30,11 +34,6 @@
 	const directories = $derived(data.sidebar?.directories ?? []);
 	const knownScopes = $derived(directories.map((entry) => entry.directory));
 	const scopes = $derived(directoryOptions(directories));
-
-	/** URL param for the failures-only overlay (task #481, unchanged deep link). */
-	const TOOL_ERRORS_PARAM = 'toolErrors';
-	/** URL param for the all-calls overlay (task #484). */
-	const TOOL_CALLS_PARAM = 'toolCalls';
 
 	/**
 	 * Read the overlay target from a query string. `?toolErrors=` wins over

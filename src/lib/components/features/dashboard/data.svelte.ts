@@ -37,7 +37,7 @@ export interface WidgetDataState<T> {
 }
 
 export interface WidgetDataOptions<T> {
-	/** Reactive widget endpoint getter, e.g. `() => widget.source`. */
+	/** Reactive widget endpoint getter, e.g. `() => widgetSource(widget.id)`. */
 	source: () => string;
 	/** Reactive filter accessor; read (and tracked) inside the effect. */
 	filter: () => DashboardFilter;

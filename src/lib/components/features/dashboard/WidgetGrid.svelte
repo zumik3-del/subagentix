@@ -29,31 +29,21 @@
 	 * client mounts the widget body lazily once it is visible.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
-	import type { ToolCallStatus } from '$lib/model/tool-errors';
 	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
 	import { GRID_COLUMNS, GRID_GAP_HALF_REM, GRID_GAP_REM, GRID_ROW_HEIGHT_REM } from './layout';
 	import { DEFAULT_FILTER } from './filter';
 	import { gridstackEnhance } from './gridstack';
-	import type { WidgetLoaders } from './widget';
 	import WidgetHost from './WidgetHost.svelte';
 
 	interface Props {
 		/** Widget placements to render, in registry order. */
 		placements: readonly WidgetPlacement[];
-		/**
-		 * Optional per-widget code-split loaders (task #409 seam). Ids without a
-		 * loader render the static skeleton; `loaders.ts` registers the Phase 3
-		 * placeholder bodies and Phase 4 swaps them for the chart bodies.
-		 */
-		loaders?: WidgetLoaders;
 		/** Active global filter, forwarded to every mounted widget body. */
 		filter?: DashboardFilter;
 		/** Global refresh counter, forwarded to every mounted widget body. */
 		refreshToken?: number;
 		/** Opens the size-settings modal for a widget id (task #449). */
 		onWidgetSettings?: (id: WidgetId) => void;
-		/** Opens the in-place tool-call detail for a tool/mode (tasks #481/#484). */
-		onOpenToolDetail?: (tool: string, mode: ToolCallStatus) => void;
 		/**
 		 * Persistence hop for the gridstack enhancement (epic #462, stage 3):
 		 * called once per settled drag/resize with the full placement list,
@@ -65,11 +55,9 @@
 
 	let {
 		placements,
-		loaders = {},
 		filter = DEFAULT_FILTER,
 		refreshToken = 0,
 		onWidgetSettings,
-		onOpenToolDetail,
 		onLayoutChange
 	}: Props = $props();
 
@@ -192,8 +180,8 @@
 			<div class="grid-stack-item-content">
 				<WidgetHost
 					{def}
-					load={loaders[def.id]}
-					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id), onOpenToolDetail }}
+					load={def.load}
+					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id) }}
 				/>
 			</div>
 		</li>

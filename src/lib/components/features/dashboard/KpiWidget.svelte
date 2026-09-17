@@ -1,12 +1,13 @@
 <script lang="ts">
 	/**
-	 * KPI widget body (dashboard Phase 4, task #412).
+	 * KPI widget body (dashboard Phase 4, task #412; pure renderer from the widget
+	 * engine, task #491).
 	 *
-	 * Tier-S/M stats: `useWidgetData` fetches `/api/dashboard/kpi` for the shared
-	 * filter and `WidgetCard` renders the loading/error/empty states. The tiles
-	 * show the windowed cost, token total and session count; the stacked mix bar
-	 * plus its legend break the token total down by category. Bar geometry uses
-	 * `linearScale` from `model/chart.ts` — no chart library, no raw-HTML injection.
+	 * Content-only: `WidgetShell` owns the fetch and the card chrome, so this
+	 * component draws the tiles — windowed cost, token total and session count —
+	 * from the typed payload it receives. The stacked mix bar plus its legend
+	 * break the token total down by category. Bar geometry uses `linearScale`
+	 * from `model/chart.ts` — no chart library, no raw-HTML injection.
 	 *
 	 * Block-level fitting (task #444): the tiles always render, and the mix bar /
 	 * token breakdown are dropped whole when the measured remaining height cannot
@@ -14,39 +15,12 @@
 	 */
 	import { linearScale } from '$lib/model/chart';
 	import { formatCost, formatNumber, tokenBreakdown } from '$lib/model/format';
-	import { TOKEN_LABELS, total, usageFromCounts, type TokenCounts } from '$lib/model/token';
-	import type { WidgetBodyProps } from './widget';
-	import { useWidgetData } from './data.svelte';
-	import WidgetCard from './WidgetCard.svelte';
+	import { TOKEN_LABELS, total, usageFromCounts } from '$lib/model/token';
+	import type { WidgetRenderProps } from './widget';
 
-	/** `/api/dashboard/kpi` payload (see `routes/api/dashboard/widgets.ts`). */
-	interface KpiData {
-		/** In-window/scope sessions (Tier S). */
-		sessions: number;
-		/** Summed `message.data.cost` (Tier M). */
-		cost: number;
-		/** Summed `message.data.tokens.*` (Tier M). */
-		tokens: TokenCounts;
-	}
+	let { data }: WidgetRenderProps<'kpi'> = $props();
 
-	/** Zeroed fallback so the derived view is valid before the payload lands. */
-	const EMPTY_TOKENS: TokenCounts = {
-		input: 0,
-		output: 0,
-		reasoning: 0,
-		cacheRead: 0,
-		cacheWrite: 0
-	};
-
-	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
-
-	const widgetData = useWidgetData<KpiData>({
-		source: () => widget.source,
-		filter: () => filter,
-		refreshToken: () => refreshToken
-	});
-
-	let tokens = $derived(widgetData.data?.tokens ?? EMPTY_TOKENS);
+	let tokens = $derived(data.tokens);
 	let tokenTotal = $derived(total(tokens));
 
 	/**
@@ -117,66 +91,57 @@
 	});
 </script>
 
-<WidgetCard
-	title={widget.title}
-	status={widgetData.status}
-	error={widgetData.error ?? undefined}
-	refreshing={widgetData.refreshing}
-	onRefresh={widgetData.refresh}
-	{onSettings}
->
-	<div class="kpi" bind:this={root}>
-		<dl class="kpi__tiles">
-			<div class="kpi__tile">
-				<dt class="kpi__tile-label">Sessions</dt>
-				<dd class="kpi__tile-value">{formatNumber(widgetData.data?.sessions ?? 0)}</dd>
-			</div>
-			<div class="kpi__tile">
-				<dt class="kpi__tile-label">Cost (gross)</dt>
-				<dd class="kpi__tile-value">{formatCost(widgetData.data?.cost ?? 0)}</dd>
-			</div>
-			<div class="kpi__tile">
-				<dt class="kpi__tile-label">Total tokens</dt>
-				<dd class="kpi__tile-value">{formatNumber(tokenTotal)}</dd>
-			</div>
-		</dl>
+<div class="kpi" bind:this={root}>
+	<dl class="kpi__tiles">
+		<div class="kpi__tile">
+			<dt class="kpi__tile-label">Sessions</dt>
+			<dd class="kpi__tile-value">{formatNumber(data.sessions)}</dd>
+		</div>
+		<div class="kpi__tile">
+			<dt class="kpi__tile-label">Cost (gross)</dt>
+			<dd class="kpi__tile-value">{formatCost(data.cost)}</dd>
+		</div>
+		<div class="kpi__tile">
+			<dt class="kpi__tile-label">Total tokens</dt>
+			<dd class="kpi__tile-value">{formatNumber(tokenTotal)}</dd>
+		</div>
+	</dl>
 
-		{#if showMix}
-			<div class="kpi__mix">
-				<svg
-					class="kpi__mix-svg"
-					viewBox="0 0 100 1"
-					preserveAspectRatio="none"
-					role="img"
-					aria-label={mixLabel}
-				>
-					{#each mix as row (row.label)}
-						<rect
-							class="kpi__mix-seg"
-							x={row.x}
-							y="0"
-							width={row.width}
-							height="1"
-							style={`fill:${row.color}`}
-						/>
-					{/each}
-				</svg>
-			</div>
-		{/if}
-
-		{#if showBreakdown}
-			<ul class="kpi__breakdown">
+	{#if showMix}
+		<div class="kpi__mix">
+			<svg
+				class="kpi__mix-svg"
+				viewBox="0 0 100 1"
+				preserveAspectRatio="none"
+				role="img"
+				aria-label={mixLabel}
+			>
 				{#each mix as row (row.label)}
-					<li class="kpi__breakdown-item">
-						<span class="ui-swatch" style={`background:${row.color}`}></span>
-						<span class="kpi__breakdown-label">{row.label}</span>
-						<span class="kpi__breakdown-value">{formatNumber(row.value)}</span>
-					</li>
+					<rect
+						class="kpi__mix-seg"
+						x={row.x}
+						y="0"
+						width={row.width}
+						height="1"
+						style={`fill:${row.color}`}
+					/>
 				{/each}
-			</ul>
-		{/if}
-	</div>
-</WidgetCard>
+			</svg>
+		</div>
+	{/if}
+
+	{#if showBreakdown}
+		<ul class="kpi__breakdown">
+			{#each mix as row (row.label)}
+				<li class="kpi__breakdown-item">
+					<span class="ui-swatch" style={`background:${row.color}`}></span>
+					<span class="kpi__breakdown-label">{row.label}</span>
+					<span class="kpi__breakdown-value">{formatNumber(row.value)}</span>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+</div>
 
 <style>
 	/* Fills the card body so `clientHeight` is the height the blocks share. */

@@ -1,29 +1,27 @@
 <script lang="ts">
 	/**
-	 * Top-projects widget body (dashboard Phase 4, task #412).
+	 * Top-projects widget body (dashboard Phase 4, task #412; pure renderer from
+	 * the widget engine, task #491).
 	 *
-	 * Tier-S horizontal bars: `useWidgetData` fetches `/api/dashboard/top-projects`
-	 * for the shared filter and `WidgetCard` renders the loading/error/empty
-	 * states. A ready payload is drawn by the hand-rolled `BarChart` (no chart
-	 * library); a directory linked to a project shows the project name, else the
-	 * last path segment, with the full path kept as the row title.
+	 * Content-only: `WidgetShell` owns the fetch and the card chrome, so this
+	 * component maps the ready Tier-S payload to horizontal bars. A ready payload
+	 * is drawn by the hand-rolled `BarChart` (no chart library); a directory
+	 * linked to a project shows the project name, else the last path segment,
+	 * with the full path kept as the row title.
+	 *
+	 * It stays a separate body from `agent-distribution` (task #491): that widget
+	 * renders a numeric table (swatch/name/count/share), this one renders
+	 * inline-SVG bars — no common markup to share, and a merged "ranked-table"
+	 * body would need a per-cell view-kind switch the engine avoids.
 	 */
-	import type { TopDirectoryEntry } from '$lib/model/dashboard';
-	import type { WidgetBodyProps } from './widget';
-	import { useWidgetData } from './data.svelte';
-	import WidgetCard from './WidgetCard.svelte';
+	import type { WidgetDataMap } from '$lib/model/dashboard';
+	import type { WidgetRenderProps } from './widget';
 	import BarChart from './BarChart.svelte';
 
-	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
-
-	const state = useWidgetData<TopDirectoryEntry[]>({
-		source: () => widget.source,
-		filter: () => filter,
-		refreshToken: () => refreshToken
-	});
+	let { data }: WidgetRenderProps<'top-projects'> = $props();
 
 	/** Short display label: the project name when linked, else the path's basename. */
-	function projectLabel(entry: TopDirectoryEntry): string {
+	function projectLabel(entry: WidgetDataMap['top-projects'][number]): string {
 		const name = entry.projectName?.trim();
 		if (name) return name;
 		const segments = entry.directory.split('/').filter((segment) => segment !== '');
@@ -32,7 +30,7 @@
 
 	/** Bar input: ranked rows keyed by directory, with the full path as the tooltip. */
 	let bars = $derived(
-		(state.data ?? []).map((entry) => ({
+		data.map((entry) => ({
 			label: projectLabel(entry),
 			value: entry.count,
 			title: entry.directory
@@ -40,15 +38,4 @@
 	);
 </script>
 
-<WidgetCard
-	title={widget.title}
-	status={state.status}
-	error={state.error ?? undefined}
-	refreshing={state.refreshing}
-	onRefresh={state.refresh}
-	{onSettings}
->
-	{#if state.data}
-		<BarChart {bars} label="Top projects" colorVar="--chart-1" />
-	{/if}
-</WidgetCard>
+<BarChart {bars} label="Top projects" colorVar="--chart-1" />

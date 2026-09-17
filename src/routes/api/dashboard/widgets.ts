@@ -1,9 +1,10 @@
 /**
  * Dashboard widget endpoint composition (dashboard Phase 1/2, task #405).
  *
- * The single place that maps a widget id + filter onto its Tier S/M/P data. The
- * payload builder for a widget is selected from `WIDGET_DEFS[].tier` in
- * `src/lib/widgets/registry.ts`, and every load is wrapped in the short-TTL
+ * The single place that maps a widget id + filter onto its payload. The payload
+ * builder for a widget is selected straight from the id-keyed `WIDGET_BUILDERS`
+ * map below (`WidgetDef.tier` in `src/lib/widgets/registry.ts` is descriptive
+ * metadata only), and every load is wrapped in the short-TTL
  * `services/dashboard-cache.ts`, so the SQL and the DTO shapes stay in the
  * services (`services/dashboard*.ts`) — this module never re-implements an
  * aggregate, it only projects the service DTOs onto the whitelisted fields the
@@ -13,8 +14,12 @@
  * never reach the client bundle.
  */
 import { json } from '@sveltejs/kit';
-import { isDashboardPeriod, type DashboardFilter } from '$lib/model/dashboard';
-import type { TokenCounts } from '$lib/model/token';
+import {
+	isDashboardPeriod,
+	type DashboardFilter,
+	type KpiData,
+	type WidgetDataMap
+} from '$lib/model/dashboard';
 import { invalidRequest } from '$lib/server/http';
 import { listDirectoriesCached } from '$lib/server/queries/directories';
 import { loadDashboardAggregate } from '$lib/server/services/dashboard-cache';
@@ -26,17 +31,7 @@ import {
 } from '$lib/server/services/dashboard';
 import { getCostPerDay, getMessageTotals } from '$lib/server/services/dashboard-message';
 import { getTopTools } from '$lib/server/services/dashboard-tools';
-import { isWidgetId, WIDGET_DEFS, type WidgetId, type WidgetTier } from '$lib/widgets/registry';
-
-/** Windowed KPI payload: Tier-S session count + Tier-M cost/token sums. */
-export interface KpiData {
-	/** In-window/scope sessions (`session` rows, Tier S). */
-	sessions: number;
-	/** Summed `message.data.cost` (Tier M). */
-	cost: number;
-	/** Summed `message.data.tokens.*` (Tier M). */
-	tokens: TokenCounts;
-}
+import { isWidgetId, type WidgetId } from '$lib/widgets/registry';
 
 /** The validated response envelope (AC-1). */
 export interface DashboardEnvelope {
@@ -49,6 +44,15 @@ export interface DashboardEnvelope {
 
 /** Build one widget's payload from the services; no caching here. */
 type WidgetDataBuilder = (filter: DashboardFilter, now: number) => unknown;
+
+/**
+ * One payload builder per widget id, each returning its own
+ * {@link WidgetDataMap} payload — the map is what pins a builder to its widget,
+ * so a payload that drifts from the shared contract fails here.
+ */
+type WidgetBuilders = {
+	[K in WidgetId]: (filter: DashboardFilter, now: number) => WidgetDataMap[K];
+};
 
 /** Windowed KPI: message-derived cost/tokens (Tier M) + session count (Tier S). */
 function buildKpi(filter: DashboardFilter, now: number): KpiData {
@@ -67,58 +71,52 @@ function buildKpi(filter: DashboardFilter, now: number): KpiData {
 }
 
 /**
- * Payload builders grouped by the registry's dominant tier (`WidgetDef.tier`),
- * so the dispatch below is literally keyed off `WIDGET_DEFS[].tier`. `kpi` sits
- * in the M group because its dominant source is `message` (spec §2.3); its
- * builder additionally reads the cheap Tier-S session count.
+ * Payload builders keyed by widget id: one entry per registered widget, each
+ * returning its own {@link WidgetDataMap} payload. The `WidgetBuilders` type
+ * pins every id to the payload its registry descriptor declares, so a widget
+ * added to the registry without a builder is a compile error. `kpi`'s dominant
+ * source is `message`; its builder additionally reads the cheap `session`
+ * count. `WidgetDef.tier` stays registry metadata and is never read for
+ * dispatch.
  */
-const TIER_BUILDERS: Record<WidgetTier, Partial<Record<WidgetId, WidgetDataBuilder>>> = {
-	S: {
-		'sessions-per-day': (filter, now) =>
-			getSessionsPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
-		'agent-distribution': (filter, now) =>
-			getAgentDistribution(filter, now).map((row) => ({ name: row.name, count: row.count })),
-		'top-projects': (filter, now) =>
-			getTopDirectories(filter, now).map((row) => ({
-				directory: row.directory,
-				projectName: row.projectName,
-				count: row.count
+const WIDGET_BUILDERS: WidgetBuilders = {
+	kpi: buildKpi,
+	'sessions-per-day': (filter, now) =>
+		getSessionsPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
+	'cost-per-day': (filter, now) =>
+		getCostPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
+	'top-tools': (filter, now) => {
+		const usage = getTopTools(filter, now);
+		return {
+			capped: usage.capped,
+			tools: usage.tools.map((tool) => ({
+				name: tool.name,
+				count: tool.count,
+				errors: tool.errors,
+				errorShare: tool.errorShare
 			}))
+		};
 	},
-	M: {
-		kpi: buildKpi,
-		'cost-per-day': (filter, now) =>
-			getCostPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value }))
-	},
-	P: {
-		'top-tools': (filter, now) => {
-			const usage = getTopTools(filter, now);
-			return {
-				capped: usage.capped,
-				tools: usage.tools.map((tool) => ({
-					name: tool.name,
-					count: tool.count,
-					errors: tool.errors,
-					errorShare: tool.errorShare
-				}))
-			};
-		}
-	}
+	'agent-distribution': (filter, now) =>
+		getAgentDistribution(filter, now).map((row) => ({ name: row.name, count: row.count })),
+	'top-projects': (filter, now) =>
+		getTopDirectories(filter, now).map((row) => ({
+			directory: row.directory,
+			projectName: row.projectName,
+			count: row.count
+		}))
 };
 
 /**
- * Resolve a registered widget id to its tier payload builder via the registry,
- * so the registry stays the single source of widget identity/tier. Throws (a
- * 500, never a partial response) if a registered widget has no builder.
+ * Resolve a widget id to its payload builder straight from the id-keyed
+ * {@link WIDGET_BUILDERS} map (no tier lookup). A registered id that somehow has
+ * no builder throws — a 500, never a partial response — so the map stays the one
+ * dispatch source.
  */
 function builderFor(widgetId: WidgetId): WidgetDataBuilder {
-	const def = WIDGET_DEFS.find((candidate) => candidate.id === widgetId);
-	if (def === undefined) {
-		throw new Error(`Widget "${widgetId}" is not registered.`);
-	}
-	const builder = TIER_BUILDERS[def.tier][widgetId];
+	const builder: WidgetDataBuilder | undefined = WIDGET_BUILDERS[widgetId];
 	if (builder === undefined) {
-		throw new Error(`Widget "${widgetId}" has no Tier-${def.tier} payload builder.`);
+		throw new Error(`Widget "${widgetId}" has no payload builder.`);
 	}
 	return builder;
 }

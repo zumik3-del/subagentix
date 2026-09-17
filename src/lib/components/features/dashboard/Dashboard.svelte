@@ -10,11 +10,16 @@
 	 * the stored preference) and receives every selector change through
 	 * `onFilterChange` — the shell itself never persists the filter (#457). Each
 	 * selected widget mounts lazily and fetches its own data through the grid's
-	 * loaders, re-fetching whenever the filter prop changes (tasks #410/#415).
+	 * registry loaders, re-fetching whenever the filter prop changes (tasks
+	 * #410/#415).
 	 *
 	 * Since #449 the shell also owns the per-widget size-settings target: a gear
 	 * on a card opens one `WidgetSettings` dialog whose changes apply
 	 * optimistically and persist through the shared coalescing writer.
+	 *
+	 * Since #492 the shell provides the detail-overlay controls through context
+	 * and mounts the single `DetailHost`; widget bodies open a detail without a
+	 * threaded callback and the page keeps owning the URL state.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
 	import type { ToolCallDetail } from '$lib/model/tool-errors';
@@ -26,13 +31,13 @@
 		type WidgetPlacement
 	} from '$lib/widgets/registry';
 	import DashboardHeader from './DashboardHeader.svelte';
+	import DetailHost from './DetailHost.svelte';
 	import FilterSelector from './FilterSelector.svelte';
 	import WidgetGrid from './WidgetGrid.svelte';
 	import WidgetSettings from './WidgetSettings.svelte';
 	import WidgetsModal from './WidgetsModal.svelte';
-	import ToolErrorsModal from './ToolErrorsModal.svelte';
+	import { detailTargetFor, setDetailControls, type DetailTarget } from './detail';
 	import { DEFAULT_FILTER, type FilterOption } from './filter';
-	import { WIDGET_LOADERS } from './loaders';
 	import { updatePlacement } from './picker';
 	import { createCoalescingWriter, saveDashboardWidgets } from './save';
 	import type { WidgetSizePatch } from './widget';
@@ -68,8 +73,23 @@
 		onToolDetailChange
 	}: Props = $props();
 
-	/** Registry title shown by the tool-call detail overlay header (#481/#484). */
-	const toolErrorsTitle = findWidgetDef('top-tools').title;
+	/**
+	 * Detail-overlay controls for every descendant widget body (task #492).
+	 * A body calls `openDetail(target)` / `closeDetail()` from context, so the
+	 * callback no longer threads through the grid, host and shell. The URL state
+	 * itself stays with the page (the shell only forwards it), keeping the
+	 * `?toolErrors=`/`?toolCalls=` deep-link contract unchanged.
+	 */
+	setDetailControls({
+		openDetail: (target: DetailTarget) =>
+			onToolDetailChange?.({ tool: target.tool, mode: target.mode }),
+		closeDetail: () => onToolDetailChange?.(null)
+	});
+
+	/** Registry target for the single `DetailHost` (or `null` while closed). */
+	let detailTarget = $derived(
+		toolDetail === null ? null : detailTargetFor(toolDetail.tool, toolDetail.mode)
+	);
 
 	// Applied selection: starts from the loader, and a save replaces it with
 	// the normalised placements the settings API returned, so the grid
@@ -176,11 +196,9 @@
 	{:else}
 		<WidgetGrid
 			{placements}
-			loaders={WIDGET_LOADERS}
 			{filter}
 			{refreshToken}
 			onWidgetSettings={onWidgetSettings}
-			onOpenToolDetail={(tool, mode) => onToolDetailChange?.({ tool, mode })}
 			{onLayoutChange}
 		/>
 	{/if}
@@ -203,16 +221,7 @@
 	onClose={closeSettings}
 />
 
-{#if toolDetail !== null}
-	<ToolErrorsModal
-		tool={toolDetail.tool}
-		mode={toolDetail.mode}
-		title={toolErrorsTitle}
-		{filter}
-		{scopes}
-		onClose={() => onToolDetailChange?.(null)}
-	/>
-{/if}
+<DetailHost target={detailTarget} {filter} {scopes} />
 
 <style>
 	/* Side padding matches the turn page (`/sessions/[id]`): `--space-4`. */
