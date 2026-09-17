@@ -4,7 +4,7 @@
 	 * root can type its `kindFilter` state against the same union the filter
 	 * controls render.
 	 */
-	export type RowFilter = 'all' | 'step' | 'tool' | 'text' | 'reasoning' | 'files' | 'misc';
+	export type RowFilter = 'all' | 'step' | 'tool' | 'text' | 'reasoning' | 'misc';
 
 	export const ROW_FILTERS: ReadonlyArray<{ value: RowFilter; label: string }> = [
 		{ value: 'all', label: 'All' },
@@ -12,7 +12,6 @@
 		{ value: 'tool', label: 'Tools' },
 		{ value: 'text', label: 'Text' },
 		{ value: 'reasoning', label: 'Reasoning' },
-		{ value: 'files', label: 'Files' },
 		{ value: 'misc', label: 'Other' }
 	];
 </script>
@@ -21,7 +20,8 @@
 	/**
 	 * Steps & actions table (extracted from `NodeDetailPanel`, ADR 2.6).
 	 *
-	 * The table section: heading + search, row-kind/permission filters, the
+	 * The table section: heading, the row-kind filter row (with the free-text
+	 * search at its right edge), the
 	 * hierarchical step/child/marker `<tr>` table, and the floating
 	 * back-to-table button with its `IntersectionObserver`. Pure presentation —
 	 * the panel root owns the filter/expand state, the derived `visibleRows`
@@ -49,13 +49,11 @@
 		hasContent: boolean;
 		usageColumns: string[];
 		kindFilter: RowFilter;
-		permissionOnly: boolean;
 		actionSearch: string;
 		allExpanded: boolean;
 		/** Two-way search text (state stays in the panel root). */
 		onSearch: (value: string) => void;
 		onFilter: (value: RowFilter) => void;
-		onTogglePermission: () => void;
 		onToggleAll: () => void;
 		onToggleRow: (key: string) => void;
 		/** Jump to a tool-call detail block (owned by the panel root). */
@@ -71,12 +69,10 @@
 		hasContent,
 		usageColumns,
 		kindFilter,
-		permissionOnly,
 		actionSearch,
 		allExpanded,
 		onSearch,
 		onFilter,
-		onTogglePermission,
 		onToggleAll,
 		onToggleRow,
 		onFocusCall,
@@ -123,14 +119,6 @@
 <section class="block" bind:this={tableSectionEl}>
 	<div class="actions-head">
 		<h4>Steps &amp; actions ({stepCount} steps · {itemCount} items)</h4>
-		<input
-			class="ui-input search"
-			type="search"
-			placeholder="Filter rows…"
-			aria-label="Filter steps and actions"
-			value={actionSearch}
-			oninput={(event) => onSearch(event.currentTarget.value)}
-		/>
 	</div>
 	<div class="filters" role="group" aria-label="Row type filter">
 		<button
@@ -153,14 +141,14 @@
 				{filter.label}
 			</button>
 		{/each}
-		<button
-			type="button"
-			class="ui-chip ui-chip--toggle filter filter-perm"
-			class:active={permissionOnly}
-			onclick={onTogglePermission}
-		>
-			Permission
-		</button>
+		<input
+			class="ui-input search"
+			type="search"
+			placeholder="Filter rows…"
+			aria-label="Filter steps and actions"
+			value={actionSearch}
+			oninput={(event) => onSearch(event.currentTarget.value)}
+		/>
 	</div>
 	{#if !hasContent}
 		<p class="empty">No steps or actions recorded for this node.</p>
@@ -231,7 +219,6 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		justify-content: space-between;
 		gap: var(--space-2);
 		margin-bottom: var(--space-1);
 	}
@@ -240,28 +227,41 @@
 		margin: 0;
 	}
 
-	.search {
-		flex: 0 1 18rem;
-		min-width: 8rem;
-	}
-
 	.filters {
 		display: flex;
 		flex-wrap: wrap;
+		align-items: center;
 		gap: var(--space-1);
 		margin-bottom: var(--space-2);
 	}
 
-	/* Single square icon button that toggles expand/collapse for all steps. */
+	/* Single square icon button that toggles expand/collapse for all steps.
+	   Borderless and sized to match the search field beside it. */
 	.toggle-all {
+		height: var(--space-5);
 		padding: 0 var(--space-1);
 		color: var(--text-interactive-base);
+		border: none;
+	}
+
+	/* Filter chips are borderless; the active state reads via its background. */
+	.filter {
+		border: none;
 	}
 
 	.filter.active {
-		background: var(--surface-interactive-base);
+		background: var(--surface-raised-stronger);
 		color: var(--text-strong);
-		border-color: var(--border-selected);
+	}
+
+	/* Free-text filter, right-aligned in the filter row; its height matches
+	   the expand button. */
+	.search {
+		flex: 0 1 18rem;
+		min-width: 8rem;
+		height: var(--space-5);
+		margin-left: auto;
+		padding-block: 0;
 	}
 
 	.empty {
