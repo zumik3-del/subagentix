@@ -1,7 +1,13 @@
 import { describe, expect, test } from 'bun:test';
-import { createCoalescingWriter, saveDashboardWidgets, saveDashboardFilter } from './save';
+import {
+	createCoalescingWriter,
+	saveDashboardWidgets,
+	saveDashboardFilter,
+	saveDashboardWidgetSettings
+} from './save';
 import type { WidgetPlacement } from '$lib/widgets/registry';
 import type { DashboardFilter } from '$lib/model/dashboard';
+import type { WidgetId, WidgetSettingValues } from '$lib/widgets/registry';
 
 /**
  * Unit tests for the shared dashboard widget persistence helpers (task #449).
@@ -249,5 +255,72 @@ describe('createCoalescingWriter() with DashboardFilter', () => {
 		const writer = createCoalescingWriter(save);
 		await writer.idle();
 		expect(calls).toHaveLength(0);
+	});
+});
+
+// --- saveDashboardWidgetSettings ----------------------------------------------
+
+describe('saveDashboardWidgetSettings()', () => {
+	test('returns the server-normalised map on a successful PUT', async () => {
+		const all: Record<import('$lib/widgets/registry').WidgetId, import('$lib/widgets/registry').WidgetSettingValues> = {
+			'top-tools': { basic: false, mcp: true },
+			kpi: {},
+			'sessions-per-day': {},
+			'cost-per-day': {},
+			'agent-distribution': {},
+			'top-projects': {}
+		};
+		const stub = async () =>
+			new Response(
+				JSON.stringify({ dashboardWidgetSettings: all }),
+				{ status: 200, headers: { 'content-type': 'application/json' } }
+			);
+		const result = await saveDashboardWidgetSettings(all, stub as unknown as typeof fetch);
+		expect(result).toEqual(all);
+	});
+
+	test('falls back to the sent map when the server response omits dashboardWidgetSettings', async () => {
+		const all: Record<import('$lib/widgets/registry').WidgetId, import('$lib/widgets/registry').WidgetSettingValues> = {
+			'top-tools': { basic: true, mcp: false },
+			kpi: {},
+			'sessions-per-day': {},
+			'cost-per-day': {},
+			'agent-distribution': {},
+			'top-projects': {}
+		};
+		const stub = async () =>
+			new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+		const result = await saveDashboardWidgetSettings(all, stub as unknown as typeof fetch);
+		expect(result).toEqual(all);
+	});
+
+	test('throws an Error carrying the server error on non-OK response', async () => {
+		const all: Record<import('$lib/widgets/registry').WidgetId, import('$lib/widgets/registry').WidgetSettingValues> = {
+			'top-tools': { basic: true },
+			kpi: {},
+			'sessions-per-day': {},
+			'cost-per-day': {},
+			'agent-distribution': {},
+			'top-projects': {}
+		};
+		const stub = async () =>
+			new Response(
+				JSON.stringify({ error: 'quota exceeded' }),
+				{ status: 413, headers: { 'content-type': 'application/json' } }
+			);
+		await expect(saveDashboardWidgetSettings(all, stub as unknown as typeof fetch)).rejects.toThrow(/quota exceeded/);
+	});
+
+	test('falls back to a status-based message when the non-OK body is not JSON', async () => {
+		const all: Record<import('$lib/widgets/registry').WidgetId, import('$lib/widgets/registry').WidgetSettingValues> = {
+			'top-tools': { basic: true },
+			kpi: {},
+			'sessions-per-day': {},
+			'cost-per-day': {},
+			'agent-distribution': {},
+			'top-projects': {}
+		};
+		const stub = async () => new Response('internal server error', { status: 500 });
+		await expect(saveDashboardWidgetSettings(all, stub as unknown as typeof fetch)).rejects.toThrow(/500/);
 	});
 });

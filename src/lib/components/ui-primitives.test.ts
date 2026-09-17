@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 
 /**
  * Source-guard tests for the shared CSS primitives in src/app.css.
@@ -151,7 +152,6 @@ describe('Call-site adoption of .ui-select', () => {
 	const components = [
 		{ name: 'ToolErrorsModal', path: './features/dashboard/ToolErrorsModal.svelte' },
 		{ name: 'FilterSelector', path: './features/dashboard/FilterSelector.svelte' },
-		{ name: 'WidgetSettings', path: './features/dashboard/WidgetSettings.svelte' },
 	];
 
 	for (const comp of components) {
@@ -176,6 +176,136 @@ describe('Call-site adoption of .ui-select', () => {
 				expect(styleBlock).not.toMatch(/\.?\w*select[^{]*\{[^}]*border\s*:/);
 				expect(styleBlock).not.toMatch(/\.?\w*select[^{]*\{[^}]*background\s*:/);
 			}
+		});
+	}
+});
+
+describe('--border-selected token', () => {
+	test('is declared in :root', () => {
+		const rootIdx = css.indexOf(':root {');
+		expect(rootIdx).toBeGreaterThan(-1);
+		let depth = 0;
+		let end = -1;
+		for (let i = rootIdx; i < css.length; i++) {
+			if (css[i] === '{') depth++;
+			else if (css[i] === '}') {
+				depth--;
+				if (depth === 0) { end = i; break; }
+			}
+		}
+		expect(end).toBeGreaterThan(-1);
+		const rootBlock = css.slice(rootIdx, end + 1);
+		expect(rootBlock).toMatch(/\-\-border-selected:\s*rgba\(255,\s*255,\s*255,\s*0\.418\)\s*;?/);
+	});
+});
+
+describe('.ui-checkbox primitive', () => {
+	test('declares display: inline-flex', () => {
+		const block = css.match(/\.ui-checkbox\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('display: inline-flex');
+	});
+
+	test('declares align-items: center', () => {
+		const block = css.match(/\.ui-checkbox\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('align-items: center');
+	});
+
+	test('declares gap: var(--space-2)', () => {
+		const block = css.match(/\.ui-checkbox\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('gap: var(--space-2)');
+	});
+
+	test('declares cursor: pointer', () => {
+		const block = css.match(/\.ui-checkbox\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('cursor: pointer');
+	});
+});
+
+describe('.ui-checkbox__input primitive', () => {
+	test('declares flex: none', () => {
+		const block = css.match(/\.ui-checkbox__input\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('flex: none');
+	});
+
+	test('declares margin: 0', () => {
+		const block = css.match(/\.ui-checkbox__input\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('margin: 0');
+	});
+
+	test('declares exactly accent-color: var(--border-selected)', () => {
+		const block = css.match(/\.ui-checkbox__input\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('accent-color: var(--border-selected)');
+		// Ensure no other accent-color value leaks in via an alternative declaration.
+		const allAccent = css.match(/accent-color:[^;]+/g) ?? [];
+		for (const decl of allAccent) {
+			expect(decl).toBe('accent-color: var(--border-selected)');
+		}
+	});
+});
+
+describe('accent-color is single-sourced in app.css', () => {
+	const componentsDir = new URL('./', import.meta.url);
+
+	test('src/app.css contains accent-color via .ui-checkbox__input', () => {
+		expect(css).toContain('accent-color: var(--border-selected)');
+	});
+
+	test('no component file under src/lib/components re-declares accent-color', () => {
+		const svelteFiles: string[] = [];
+		function walk(dir: string): void {
+			for (const entry of readdirSync(dir, { withFileTypes: true })) {
+				const full = join(dir, entry.name);
+				if (entry.isDirectory()) {
+					walk(full);
+				} else if (entry.name.endsWith('.svelte')) {
+					svelteFiles.push(full);
+				}
+			}
+		}
+		walk(componentsDir.pathname);
+
+		for (const file of svelteFiles) {
+			const source = readFileSync(file, 'utf8');
+			expect(source).not.toContain('accent-color');
+		}
+	});
+});
+
+describe('Call-site adoption of .ui-checkbox', () => {
+	const callSites = [
+		{
+			name: 'SettingsModal',
+			path: './features/settings/SettingsModal.svelte',
+			rowLabel: 'Enable ziptask integration',
+		},
+		{
+			name: 'WidgetSettings',
+			path: './features/dashboard/WidgetSettings.svelte',
+			rowLabel: 'widget-setting__text',
+		},
+		{
+			name: 'WidgetsModal',
+			path: './features/dashboard/WidgetsModal.svelte',
+			rowLabel: 'widget-item',
+		},
+	];
+
+	for (const site of callSites) {
+		const source = readFileSync(
+			new URL(site.path, import.meta.url),
+			'utf8'
+		);
+
+		test(`${site.name} carries .ui-checkbox on the checkbox row`, () => {
+			expect(source).toMatch(/class="[^"]*ui-checkbox[^"]*"/);
+		});
+
+		test(`${site.name} carries .ui-checkbox__input on the native input`, () => {
+			expect(source).toMatch(/class="[^"]*ui-checkbox__input[^"]*"/);
+		});
+
+		test(`${site.name} row reference ("${site.rowLabel}") is present`, () => {
+			expect(source).toContain(site.rowLabel);
 		});
 	}
 });

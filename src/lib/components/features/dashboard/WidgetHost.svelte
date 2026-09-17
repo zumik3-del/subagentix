@@ -26,7 +26,7 @@
 		def: WidgetDef;
 		/** Vite code-split loader; when absent the host stays a skeleton. */
 		load?: WidgetLoader;
-		/** Props forwarded to the loaded widget body (widget, filter, refreshToken). */
+		/** Props forwarded to the loaded widget body (widget, filter, refreshToken, settings). */
 		widgetProps: WidgetBodyProps;
 	}
 

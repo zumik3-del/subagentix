@@ -395,4 +395,42 @@ describe('filter-key distinctness', () => {
 		expect(rA).toBe('repo-a');
 		expect(rB).toBe('repo-b');
 	});
+
+	test('same period but different settings signature produce independent cached values', async () => {
+		clearDashboardCache();
+		// Scope format: `<period>\0<scope>\0<widgetId>\0<signature>`
+		const sigA = 'basic=1|mcp=0';
+		const sigB = 'basic=0|mcp=0';
+		const rA = await loadDashboardAggregate(
+			{ period: '30d', scope: `*\u0000top-tools\u0000${sigA}` },
+			() => 'basic-true',
+			{ now: 1000 }
+		);
+		const rB = await loadDashboardAggregate(
+			{ period: '30d', scope: `*\u0000top-tools\u0000${sigB}` },
+			() => 'basic-false',
+			{ now: 1000 }
+		);
+		expect(rA).toBe('basic-true');
+		expect(rB).toBe('basic-false');
+	});
+
+	test('same period and same settings signature reuses the cached entry', async () => {
+		clearDashboardCache();
+		let calls = 0;
+		const sig = 'basic=1|mcp=0';
+		const r1 = await loadDashboardAggregate(
+			{ period: '30d', scope: `*\u0000top-tools\u0000${sig}` },
+			() => { calls++; return 'v1'; },
+			{ now: 1000 }
+		);
+		const r2 = await loadDashboardAggregate(
+			{ period: '30d', scope: `*\u0000top-tools\u0000${sig}` },
+			() => { calls++; return 'v2'; },
+			{ now: 1000 }
+		);
+		expect(r1).toBe('v1');
+		expect(r2).toBe('v1'); // same cache entry, not recomputed
+		expect(calls).toBe(1); // loader ran only once
+	});
 });

@@ -103,3 +103,34 @@ describe('resolveDashboardRequest 404/400 behaviour', () => {
 		expect(source).toMatch(/Unknown period/);
 	});
 });
+
+describe('resolveDashboardRequest — w.* parsing contract', () => {
+	const source = readFileSync(new URL('./widgets.ts', import.meta.url), 'utf8');
+
+	test('exports resolveDashboardRequest that reads searchParams for w.* keys', () => {
+		expect(source).toMatch(/parseWidgetSettingParams/);
+		expect(source).toMatch(/searchParams/);
+	});
+
+	test('settings are included in the resolved request object', () => {
+		// resolveDashboardRequest returns { ok, widgetId, filter, settings }.
+		expect(source).toMatch(/settings:\s*parseWidgetSettingParams/);
+	});
+
+	test('widgetCacheFilter appends a settings signature to the cache scope', () => {
+		expect(source).toMatch(/widgetSettingSignature/);
+		expect(source).toMatch(/\\u0000/);
+	});
+
+	test('unknown w.* params are ignored (no 400 for extraneous keys)', () => {
+		// parseWidgetSettingParams drops unknown keys; the source must not
+		// validate against a fixed schema that would reject them.
+		expect(source).toMatch(/parseWidgetSettingParams/);
+	});
+
+	test('malformed w.* values fall back to default (never 400)', () => {
+		// A malformed value (e.g. w.basic=maybe) should not trigger a 400.
+		// The source must use parseWidgetSettingParams, which is lenient.
+		expect(source).not.toMatch(/invalidRequest.*w\./);
+	});
+});

@@ -9,17 +9,17 @@
  */
 import type { Component } from 'svelte';
 import type { DashboardFilter, WidgetDataMap } from '$lib/model/dashboard';
-import type { WidgetDef, WidgetId, WidgetPlacement } from '$lib/widgets/registry';
+import type { WidgetDef, WidgetId, WidgetSettingValues } from '$lib/widgets/registry';
 
 /**
  * Props `WidgetHost` forwards to the shell for one mounted widget (tasks
  * #410/#491): the registry descriptor, the shared `filter`, the global
- * `refreshToken` and the shell-owned callbacks. Every v1 body is a pure
- * {@link WidgetRenderProps} renderer now, so these are the shell's inputs — a
- * body never reaches for global shell state; it reads its typed payload from
- * `WidgetShell`, which fetches `widgetSource(widget.id)` and refetches with
- * `?refresh=1` when `refreshToken` changes (global refresh) or the card refresh
- * control fires (this widget only).
+ * `refreshToken`, this widget's resolved settings and the shell-owned callbacks.
+ * Every v1 body is a pure {@link WidgetRenderProps} renderer now, so these are
+ * the shell's inputs — a body never reaches for global shell state; it reads
+ * its typed payload from `WidgetShell`, which fetches `widgetSource(widget.id)`
+ * and refetches with `?refresh=1` when `refreshToken` changes (global refresh)
+ * or the card refresh control fires (this widget only).
  */
 export interface WidgetBodyProps {
 	/** Registry entry for this body; supplies the endpoint and card title. */
@@ -29,14 +29,16 @@ export interface WidgetBodyProps {
 	/** Global refresh counter; a change refetches this widget with `refresh=1`. */
 	refreshToken: number;
 	/**
-	 * Opens this widget's size-settings modal (task #449). The grid supplies it
+	 * This widget's resolved settings; the shell appends the `w.<key>=1|0`
+	 * params from it. An empty map means the widget declares no settings.
+	 */
+	settings: WidgetSettingValues;
+	/**
+	 * Opens this widget's settings modal (task #449/#520). The grid supplies it
 	 * for every body; omitted only when the shell has no settings hook.
 	 */
 	onSettings?: () => void;
 }
-
-/** A width/height patch applied to one placement (task #449). */
-export type WidgetSizePatch = Partial<Pick<WidgetPlacement, 'width' | 'height'>>;
 
 /**
  * Props a migrated, pure widget body receives from `WidgetShell` (task #490).
@@ -51,7 +53,7 @@ export interface WidgetRenderProps<K extends WidgetId = WidgetId> {
 	data: WidgetDataMap[K];
 	/** Active global filter, forwarded from the shell. */
 	filter: DashboardFilter;
-	/** Opens this widget's size-settings modal (forwarded from the shell). */
+	/** Opens this widget's settings modal (forwarded from the shell). */
 	onSettings?: () => void;
 }
 

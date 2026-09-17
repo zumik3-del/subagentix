@@ -342,6 +342,14 @@ a {
  * adds sizing only (width / min-width / max-width) and never re-declares the
  * box.
  *
+ * Checkboxes
+ *   .ui-checkbox        — labelled checkbox row: inline-flex, vertically
+ *                         centred items, --space-2 gap and a pointer cursor;
+ *                         wrap the input and its label/hint text.
+ *   .ui-checkbox__input — the native box itself: never shrinks, no margin, and
+ *                         the shared --border-selected accent colour. The one
+ *                         source of checkbox box styling for every call site.
+ *
  * Chips and badges (pills; no wrapper components by the rule above)
  *   .ui-chip              — pill container for tracker refs / filters.
  *   .ui-chip--link        — clickable chip that behaves as a link.
@@ -523,6 +531,20 @@ a {
 
 .ui-input::placeholder {
 	color: var(--text-weak);
+}
+
+/* Checkboxes ---------------------------------------------------------- */
+.ui-checkbox {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	cursor: pointer;
+}
+
+.ui-checkbox__input {
+	flex: none;
+	margin: 0;
+	accent-color: var(--border-selected);
 }
 
 /* Chips and badges ---------------------------------------------------- */

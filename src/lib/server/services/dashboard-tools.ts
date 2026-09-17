@@ -16,29 +16,55 @@ import {
 	type ToolUsage,
 	type ToolUsageEntry
 } from '../../model/dashboard';
-import { aggregateToolUsage, DEFAULT_TOP_N, listSessionIds } from '../queries/dashboard';
+import type { WidgetSettingValues } from '../../widgets/registry';
+import {
+	aggregateToolUsage,
+	DEFAULT_TOP_N,
+	listSessionIds,
+	type ToolKindSelection
+} from '../queries/dashboard';
 import { toWindow } from './dashboard';
+
+/**
+ * Map the `top-tools` setting map to the query's kind selection: the `basic`
+ * and `mcp` keys are the registry-declared kinds, and an absent key means the
+ * registry default (on). Kept here so the route only threads the settings map.
+ */
+function kindSelection(settings: WidgetSettingValues | undefined): ToolKindSelection {
+	return {
+		basic: settings?.basic ?? true,
+		mcp: settings?.mcp ?? true
+	};
+}
 
 /**
  * Top tools (count desc, name asc) with error share for the selected
  * window/scope. Only the most recent `maxSessions` in-range sessions contribute
  * (the ceiling that bounds a `period=all` `part` scan; the parameter is exposed
  * for tests). `capped` is the flag the widget uses to label the all-time view as
- * approximate.
+ * approximate. `settings` is the persisted `top-tools` setting map: it selects
+ * which tool kinds are aggregated (`undefined` = both), and when both are off
+ * the call returns an empty payload without resolving sessions or scanning
+ * `part`.
  */
 export function getTopTools(
 	filter: DashboardFilter,
 	now = Date.now(),
+	settings?: WidgetSettingValues,
 	limit = DEFAULT_TOP_N,
 	maxSessions = MAX_TOOL_SESSIONS
 ): ToolUsage {
+	const kinds = kindSelection(settings);
+	// Both kinds off: no `part` scan (or Tier-S session resolve) at all.
+	if (!kinds.basic && !kinds.mcp) return { tools: [], capped: false };
 	const window = toWindow(filter, now);
 	// Ask for one more than the ceiling to tell an exact fit from a truncation.
 	const ids = listSessionIds(window, maxSessions + 1);
 	const capped = ids.length > maxSessions;
 	const tools: ToolUsageEntry[] = aggregateToolUsage(
 		capped ? ids.slice(0, maxSessions) : ids,
-		limit
+		limit,
+		kinds
 	).map((row) => ({
 		name: row.name,
 		count: row.count,

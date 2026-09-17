@@ -39,12 +39,41 @@ export { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH, WIDGET_MIN_HEIGHT, WIDGET_MIN_WIDT
 export type WidgetTier = 'S' | 'M' | 'P';
 
 /**
+ * A per-widget setting field's value type. Only `boolean` exists in v1; the
+ * union is the additive seam for `number`/`select` later, so the settings
+ * dialog and the persistence normaliser stay schema-driven (epic #512).
+ */
+export type WidgetSettingType = 'boolean';
+
+/**
+ * One registry-declared setting on a widget descriptor. Declaration order is
+ * render order; `key` is both the persisted map key and the `w.<key>` request
+ * suffix, so it is stable once shipped.
+ */
+export interface WidgetSettingDef {
+	/** Stable key: persisted map key and `w.<key>` request-param suffix. */
+	key: string;
+	/** Value type (v1: `boolean` only). */
+	type: WidgetSettingType;
+	/** Dialog row label. */
+	label: string;
+	/** Optional one-line helper text. */
+	hint?: string;
+	/** Registry-owned default; always present. */
+	default: boolean;
+}
+
+/** Effective/persisted setting values for one widget, keyed by {@link WidgetSettingDef.key}. */
+export type WidgetSettingValues = Record<string, boolean>;
+
+/**
  * The v1 widget catalog: one descriptor per widget, keyed by its stable id (the
  * `dashboardWidgets` persistence value). Declaration order is registry order
  * (also picker order). Each descriptor carries its card metadata, an optional
  * payload-emptiness rule (`isEmpty`), an optional `params` record of extra
- * props for a shared parameterized body (task #491) and a co-located lazy
- * `load` — the Vite code-split boundary for that widget's body.
+ * props for a shared parameterized body (task #491), an optional ordered
+ * `settings` schema for the per-widget settings dialog (task #515) and a
+ * co-located lazy `load` — the Vite code-split boundary for that widget's body.
  *
  * Every v1 body is a pure `{ data }` renderer wrapped by `WidgetShell`
  * (task #490/#491), so a descriptor carries no chrome or fetch config; the
@@ -91,6 +120,11 @@ export const WIDGET_REGISTRY = {
 		tier: 'P',
 		/** A capped top-tools payload with no rows is empty. */
 		isEmpty: (data: ToolUsage) => data.tools.length === 0,
+		/** Which tool kinds the aggregate includes (task #515). */
+		settings: [
+			{ key: 'basic', type: 'boolean', label: 'Basic tools', default: true },
+			{ key: 'mcp', type: 'boolean', label: 'MCP tools', default: true }
+		],
 		load: () => import('$lib/components/features/dashboard/TopToolsWidget.svelte')
 	},
 	'agent-distribution': {
@@ -225,6 +259,27 @@ export function widgetIsEmpty<K extends WidgetId>(
  */
 export function widgetParams<K extends WidgetId>(id: K): Record<string, unknown> {
 	return (WIDGET_REGISTRY[id] as unknown as { params?: Record<string, unknown> }).params ?? {};
+}
+
+/**
+ * The descriptor's registry-declared setting defs, in declaration order
+ * (`[]` when the widget declares none). `settings` is optional, so the
+ * `WidgetDef` union hides it behind a variant; the settings dialog and the
+ * persistence normaliser both read it through here, so a new widget only
+ * declares the array and the dialog follows.
+ */
+export function widgetSettingDefs<K extends WidgetId>(id: K): readonly WidgetSettingDef[] {
+	return (
+		WIDGET_REGISTRY[id] as unknown as { settings?: readonly WidgetSettingDef[] }
+	).settings ?? [];
+}
+
+/**
+ * True when the widget declares at least one setting. A schema-less widget
+ * still opens the dialog, which shows its empty-state placeholder.
+ */
+export function widgetHasSettings<K extends WidgetId>(id: K): boolean {
+	return widgetSettingDefs(id).length > 0;
 }
 
 /** Every registered id, in registry order. */

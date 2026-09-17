@@ -21,6 +21,7 @@ export const GET: RequestHandler = async ({ params, url }) => {
 					await loadWidgetData(
 						request.widgetId,
 						request.filter,
+						request.settings,
 						url.searchParams.get('refresh') === '1'
 					)
 				)

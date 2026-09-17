@@ -338,35 +338,104 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 		});
 	});
 
-	describe('WidgetSettings source: width select stringifies value', () => {
+	describe('WidgetSettings source: schema-driven dialog contract (task #520)', () => {
 		const source = readFileSync(
 			new URL('./WidgetSettings.svelte', import.meta.url),
 			'utf8'
 		);
 
-		test('width <select> passes a string, not a raw number, to value', () => {
-			// Svelte's select_option compares with is(option.__value, value).
-			// Static option values like value="1" become option.__value = "1" (string),
-			// so a numeric binding never matches and selectedIndex stays -1, making
-			// the saved width appear lost even though it is persisted.  Wrapping
-			// with String(...) keeps the two sides in the same type.
-			expect(source).toMatch(/value=\{String\(placement\.width\)\}/);
+		test('reads widgetSettingDefs from the registry', () => {
+			expect(source).toMatch(/widgetSettingDefs\(widget\.id\)/);
 		});
 
-		test('width <select> options are derived from WIDGET_MAX_WIDTH (1..6), not hardcoded literals', () => {
-			// Task #471 replaced the four static `<option value="1">.."4">` literals with
-			// `Array.from({ length: WIDGET_MAX_WIDTH }, ...)`, deriving options from the
-			// shared bound so the select never disagrees with the grid column count.
-			expect(source).toMatch(/WIDGET_MAX_WIDTH/);
-			expect(source).toMatch(/Array\.from\(\{ length: WIDGET_MAX_WIDTH \}/);
+		test('renders "No settings yet." when defs is empty', () => {
+			expect(source).toMatch(/No settings yet\./);
 		});
 
-		test('would fail if a numeric value were restored (regression pin)', () => {
-			// If someone reverts to value={placement.width} the String(…) guard
-			// above fails; this test documents the invariant explicitly so the
-			// failure mode is obvious on a diff.  Svelte strict `is()` compares
-			// option.__value (string) against the binding (number) → no match.
-			expect(source).not.toMatch(/value=\{placement\.width\}/);
+		test('renders one checkbox row per def with id `${widget.id}-${key}`', () => {
+			// controlId() produces `${widget?.id ?? ''}-${key}`; the input uses it.
+			expect(source).toMatch(/\bcontrolId\b/);
+			expect(source).toMatch(/id=\{controlId\(def\.key\)\}/);
+		});
+
+		test('toggles call onChange(key, value) immediately (no draft)', () => {
+			expect(source).toMatch(/onChange\(def\.key,\s*event\.currentTarget\.checked\)/);
+		});
+
+		test('carries no Width/Height controls or .ui-select markup', () => {
+			// The word "Width" may appear in the JSDoc comment; only flag actual
+			// template bindings or CSS custom property usage that would drive a
+			// size control. Strip comments first so the check targets rendered code.
+			const stripped = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
+			expect(stripped).not.toMatch(/\bWidth\b/);
+			expect(stripped).not.toMatch(/\bHeight\b/);
+			expect(stripped).not.toMatch(/\bWIDGET_MAX_WIDTH\b/);
+			expect(stripped).not.toMatch(/class="[^"]*ui-select[^"]*"/);
+		});
+
+		test('carries dialog a11y contract: role, aria-modal, labelledby', () => {
+			expect(source).toMatch(/role="dialog"/);
+			expect(source).toMatch(/aria-modal="true"/);
+			expect(source).toMatch(/aria-labelledby="widget-settings-title"/);
+		});
+
+		test('Escape key closes the dialog', () => {
+			expect(source).toMatch(/event\.key === 'Escape'/);
+			expect(source).toMatch(/onClose\(\)/);
+		});
+
+		test('focus returns to the opener on close', () => {
+			expect(source).toMatch(/previouslyFocused\?\.focus\(\)/);
+		});
+
+		test('emits no markup while closed (guarded by {#if open && widget})', () => {
+			// The entire dialog tree is wrapped in {#if open && widget}.
+			expect(source).toMatch(/\{#if open && widget\}/);
+		});
+	});
+
+	describe('WidgetSettings source: shared checkbox primitive, no local box rules', () => {
+		const source = readFileSync(
+			new URL('./WidgetSettings.svelte', import.meta.url),
+			'utf8'
+		);
+
+		test('each settings row uses .ui-checkbox on <label>', () => {
+			// Every checkbox row must carry the shared primitive; a bare <input>
+			// without the enclosing label + class would drift from the design token.
+			expect(source).toMatch(/class="ui-checkbox"/);
+		});
+
+		test('each settings row uses .ui-checkbox__input on <input>', () => {
+			expect(source).toMatch(/class="ui-checkbox__input"/);
+		});
+
+		test('no local .widget-setting rule declares display/align-items/gap/flex', () => {
+			// The shared .ui-checkbox owns the row box. A local .widget-setting rule
+			// with display/align-items/gap/flex would re-duplicate that box and break
+			// the single-source guarantee. Only __text/__label/__hint children are
+			// allowed — they lay out the label/hint text block, not the row itself.
+			const styleBlocks = source.match(/<style[^>]*>[\s\S]*?<\/style>/g) ?? [];
+			for (const block of styleBlocks) {
+				// Match rules scoped to .widget-setting but NOT .widget-setting__*.
+				const matches = block.match(/\.widget-setting(?![^{}]*__)[^{]*\{[^}]*\}/g) ?? [];
+				for (const rule of matches) {
+					expect(rule).not.toMatch(/display\s*:/);
+					expect(rule).not.toMatch(/align-items\s*:/);
+					expect(rule).not.toMatch(/gap\s*:/);
+					expect(rule).not.toMatch(/flex\s*:/);
+				}
+			}
+		});
+
+		test('the row can centre the box against the label/hint text block', () => {
+			// .ui-checkbox sets align-items: center so the input vertically centres
+			// against the multi-line widget-setting__text column. The __text block
+			// itself uses flex-direction: column; the row alignment is provided by
+			// the parent .ui-checkbox rule, not by any local override.
+			expect(source).toMatch(/\bcontrolId\b/);
+			// The label wrapping the input and text block uses the shared primitive.
+			expect(source).toMatch(/<label class="ui-checkbox"/);
 		});
 	});
 

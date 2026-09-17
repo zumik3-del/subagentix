@@ -168,6 +168,7 @@
 
 <Dashboard
 	widgets={data.widgets}
+	settings={data.settings}
 	{filter}
 	{scopes}
 	onFilterChange={onFilterChange}

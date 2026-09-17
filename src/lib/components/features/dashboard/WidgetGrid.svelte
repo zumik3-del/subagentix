@@ -29,7 +29,12 @@
 	 * client mounts the widget body lazily once it is visible.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
-	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
+	import {
+		findWidgetDef,
+		type WidgetId,
+		type WidgetPlacement,
+		type WidgetSettingValues
+	} from '$lib/widgets/registry';
 	import { GRID_COLUMNS, GRID_GAP_HALF_REM, GRID_GAP_REM, GRID_ROW_HEIGHT_REM } from './layout';
 	import { DEFAULT_FILTER } from './filter';
 	import { gridstackEnhance } from './gridstack';
@@ -42,7 +47,9 @@
 		filter?: DashboardFilter;
 		/** Global refresh counter, forwarded to every mounted widget body. */
 		refreshToken?: number;
-		/** Opens the size-settings modal for a widget id (task #449). */
+		/** Settings map (by widget id), forwarded to each widget's fetch (task #520). */
+		settings?: Record<WidgetId, WidgetSettingValues>;
+		/** Opens the settings modal for a widget id (task #449). */
 		onWidgetSettings?: (id: WidgetId) => void;
 		/**
 		 * Persistence hop for the gridstack enhancement (epic #462, stage 3):
@@ -57,6 +64,8 @@
 		placements,
 		filter = DEFAULT_FILTER,
 		refreshToken = 0,
+		// Standalone default (no shell): every widget falls back to no settings.
+		settings = {} as Record<WidgetId, WidgetSettingValues>,
 		onWidgetSettings,
 		onLayoutChange
 	}: Props = $props();
@@ -154,7 +163,8 @@
 	/**
 	 * A per-widget gear callback bound to the shell's settings hook (task #449).
 	 * The closure is recreated each render, but it is not part of the widget fetch
-	 * key (source/period/scope), so opening or changing a size never re-fetches.
+	 * key (source/period/scope/settings signature), so opening the dialog never
+	 * re-fetches.
 	 */
 	function settingsFor(id: WidgetId): (() => void) | undefined {
 		if (!onWidgetSettings) return undefined;
@@ -181,7 +191,13 @@
 				<WidgetHost
 					{def}
 					load={def.load}
-					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id) }}
+					widgetProps={{
+						widget: def,
+						filter,
+						refreshToken,
+						settings: settings[def.id] ?? {},
+						onSettings: settingsFor(def.id)
+					}}
 				/>
 			</div>
 		</li>

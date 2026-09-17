@@ -31,7 +31,8 @@ import {
 } from '$lib/server/services/dashboard';
 import { getCostPerDay, getMessageTotals } from '$lib/server/services/dashboard-message';
 import { getTopTools } from '$lib/server/services/dashboard-tools';
-import { isWidgetId, type WidgetId } from '$lib/widgets/registry';
+import { isWidgetId, type WidgetId, type WidgetSettingValues } from '$lib/widgets/registry';
+import { parseWidgetSettingParams, widgetSettingSignature } from '$lib/widgets/settings';
 
 /** The validated response envelope (AC-1). */
 export interface DashboardEnvelope {
@@ -43,15 +44,25 @@ export interface DashboardEnvelope {
 }
 
 /** Build one widget's payload from the services; no caching here. */
-type WidgetDataBuilder = (filter: DashboardFilter, now: number) => unknown;
+type WidgetDataBuilder = (
+	filter: DashboardFilter,
+	now: number,
+	settings: WidgetSettingValues
+) => unknown;
 
 /**
  * One payload builder per widget id, each returning its own
  * {@link WidgetDataMap} payload — the map is what pins a builder to its widget,
- * so a payload that drifts from the shared contract fails here.
+ * so a payload that drifts from the shared contract fails here. The third
+ * `settings` argument is the widget's resolved setting map; a builder that
+ * declares no settings simply omits the parameter.
  */
 type WidgetBuilders = {
-	[K in WidgetId]: (filter: DashboardFilter, now: number) => WidgetDataMap[K];
+	[K in WidgetId]: (
+		filter: DashboardFilter,
+		now: number,
+		settings: WidgetSettingValues
+	) => WidgetDataMap[K];
 };
 
 /** Windowed KPI: message-derived cost/tokens (Tier M) + session count (Tier S). */
@@ -85,8 +96,8 @@ const WIDGET_BUILDERS: WidgetBuilders = {
 		getSessionsPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
 	'cost-per-day': (filter, now) =>
 		getCostPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
-	'top-tools': (filter, now) => {
-		const usage = getTopTools(filter, now);
+	'top-tools': (filter, now, settings) => {
+		const usage = getTopTools(filter, now, settings);
 		return {
 			capped: usage.capped,
 			tools: usage.tools.map((tool) => ({
@@ -126,10 +137,20 @@ function builderFor(widgetId: WidgetId): WidgetDataBuilder {
  * requested with the same filter would collide. Namespace the cache-only key
  * with the widget id (NUL-separated, so it can never equal a real directory
  * scope); the loader still resolves the real filter from its closure, so the
- * namespace never reaches a query or a response.
+ * namespace never reaches a query or a response. The widget's settings
+ * signature is appended too, so two settings maps for the same widget get
+ * distinct entries (a toggle is a cache miss, never stale for the TTL).
  */
-function widgetCacheFilter(widgetId: WidgetId, filter: DashboardFilter): DashboardFilter {
-	return { period: filter.period, scope: `${filter.scope ?? '*'}\u0000${widgetId}` };
+function widgetCacheFilter(
+	widgetId: WidgetId,
+	filter: DashboardFilter,
+	settings: WidgetSettingValues
+): DashboardFilter {
+	const signature = widgetSettingSignature(widgetId, settings);
+	return {
+		period: filter.period,
+		scope: `${filter.scope ?? '*'}\u0000${widgetId}\u0000${signature}`
+	};
 }
 
 interface CachedWidgetData {
@@ -140,19 +161,22 @@ interface CachedWidgetData {
 /**
  * Load one widget's payload through the short-TTL dashboard cache. `refresh`
  * (`?refresh=1`) bypasses the TTL without clearing other widgets' entries.
- * `now` is injectable so tests can pin the window deterministically; the
- * returned `generatedAt` is when the payload was produced, not served.
+ * `settings` is the widget's parsed setting map; it feeds both the builder and
+ * the cache key. `now` is injectable so tests can pin the window
+ * deterministically; the returned `generatedAt` is when the payload was
+ * produced, not served.
  */
 export function loadWidgetData(
 	widgetId: WidgetId,
 	filter: DashboardFilter,
+	settings: WidgetSettingValues,
 	refresh: boolean,
 	now = Date.now()
 ): Promise<DashboardEnvelope> {
 	const builder = builderFor(widgetId);
 	return loadDashboardAggregate<CachedWidgetData>(
-		widgetCacheFilter(widgetId, filter),
-		() => ({ generatedAt: now, data: builder(filter, now) }),
+		widgetCacheFilter(widgetId, filter, settings),
+		() => ({ generatedAt: now, data: builder(filter, now, settings) }),
 		{ refresh, now }
 	).then((entry) => ({ widgetId, generatedAt: entry.generatedAt, data: entry.data }));
 }
@@ -204,12 +228,16 @@ export function resolveFilter(url: URL): DashboardFilterRequest {
 
 /** A validated widget request, or the 400/404 response to return instead. */
 export type DashboardRequest =
-	| { ok: true; widgetId: WidgetId; filter: DashboardFilter }
+	| { ok: true; widgetId: WidgetId; filter: DashboardFilter; settings: WidgetSettingValues }
 	| { ok: false; response: Response };
 
 /**
  * Validate `[widget]` on top of {@link resolveFilter}. An unknown widget id is
  * a 404; a bad period/scope is the 400 the shared filter validation returns.
+ * The widget's `w.<key>=1|0` settings are parsed leniently
+ * ({@link parseWidgetSettingParams}): absent/unknown params are ignored and a
+ * malformed value falls back to the registry default, so a stale deep link is
+ * never a 400.
  */
 export function resolveDashboardRequest(widgetParam: string, url: URL): DashboardRequest {
 	if (!isWidgetId(widgetParam)) {
@@ -220,5 +248,10 @@ export function resolveDashboardRequest(widgetParam: string, url: URL): Dashboar
 	}
 	const resolved = resolveFilter(url);
 	if (!resolved.ok) return resolved;
-	return { ok: true, widgetId: widgetParam, filter: resolved.filter };
+	return {
+		ok: true,
+		widgetId: widgetParam,
+		filter: resolved.filter,
+		settings: parseWidgetSettingParams(widgetParam, url.searchParams)
+	};
 }

@@ -6,6 +6,7 @@ import {
 	getStoredSettings,
 	resolveAgentsPath,
 	resolveDashboardFilter,
+	resolveDashboardWidgetSettings,
 	resolveDashboardWidgets,
 	resolveDbPath,
 	resolveZiptaskBaseUrl,
@@ -14,7 +15,7 @@ import {
 	updateStoredSettings
 } from '$lib/server/settings';
 import type { DashboardFilter } from '$lib/model/dashboard';
-import type { WidgetPlacement } from '$lib/widgets/registry';
+import type { WidgetId, WidgetPlacement, WidgetSettingValues } from '$lib/widgets/registry';
 
 type Source = 'file' | 'env' | 'default' | 'none';
 
@@ -25,6 +26,7 @@ interface SettingsPayload {
 	agentsPath: string | null;
 	dashboardWidgets: WidgetPlacement[];
 	dashboardFilter: DashboardFilter;
+	dashboardWidgetSettings: Record<WidgetId, WidgetSettingValues>;
 	stored: {
 		dbPath: string | null;
 		ziptaskBaseUrl: string | null;
@@ -32,6 +34,7 @@ interface SettingsPayload {
 		agentsPath: string | null;
 		dashboardWidgets: WidgetPlacement[] | null;
 		dashboardFilter: DashboardFilter | null;
+		dashboardWidgetSettings: Record<string, WidgetSettingValues> | null;
 	};
 	source: {
 		dbPath: Source;
@@ -40,6 +43,7 @@ interface SettingsPayload {
 		agentsPath: Source;
 		dashboardWidgets: Source;
 		dashboardFilter: Source;
+		dashboardWidgetSettings: Source;
 	};
 }
 
@@ -53,13 +57,15 @@ function settingsPayload(): SettingsPayload {
 		agentsPath: resolveAgentsPath(),
 		dashboardWidgets: resolveDashboardWidgets(),
 		dashboardFilter: resolveDashboardFilter(),
+		dashboardWidgetSettings: resolveDashboardWidgetSettings(),
 		stored: {
 			dbPath: stored.dbPath ?? null,
 			ziptaskBaseUrl: stored.ziptaskBaseUrl ?? null,
 			ziptaskEnabled: typeof stored.ziptaskEnabled === 'boolean' ? stored.ziptaskEnabled : null,
 			agentsPath: stored.agentsPath ?? null,
 			dashboardWidgets: stored.dashboardWidgets ?? null,
-			dashboardFilter: stored.dashboardFilter ?? null
+			dashboardFilter: stored.dashboardFilter ?? null,
+			dashboardWidgetSettings: stored.dashboardWidgetSettings ?? null
 		},
 		source: {
 			dbPath: stored.dbPath ? 'file' : process.env.OPENCODE_DB ? 'env' : 'default',
@@ -74,7 +80,8 @@ function settingsPayload(): SettingsPayload {
 			// Explicit empty selection is still a stored ("file") value; only a
 			// missing/null override falls back to the first-visit defaults.
 			dashboardWidgets: stored.dashboardWidgets != null ? 'file' : 'default',
-			dashboardFilter: stored.dashboardFilter != null ? 'file' : 'default'
+			dashboardFilter: stored.dashboardFilter != null ? 'file' : 'default',
+			dashboardWidgetSettings: stored.dashboardWidgetSettings != null ? 'file' : 'default'
 		}
 	};
 }
@@ -106,6 +113,7 @@ export const PUT: RequestHandler = async ({ request }) => {
 		agentsPath?: string | null;
 		dashboardWidgets?: WidgetPlacement[] | null;
 		dashboardFilter?: DashboardFilter | null;
+		dashboardWidgetSettings?: Record<string, WidgetSettingValues> | null;
 	} = {};
 	if (Object.prototype.hasOwnProperty.call(record, 'dbPath')) {
 		patch.dbPath = record.dbPath as string | null;
@@ -127,6 +135,15 @@ export const PUT: RequestHandler = async ({ request }) => {
 		// The raw value is passed through; `normaliseDashboardFilter` rejects a
 		// malformed pair with the 400 `{ error, field }` contract.
 		patch.dashboardFilter = record.dashboardFilter as DashboardFilter | null;
+	}
+	if (Object.prototype.hasOwnProperty.call(record, 'dashboardWidgetSettings')) {
+		// The raw value is passed through; `normaliseDashboardWidgetSettings`
+		// rejects a non-object with the 400 `{ error, field }` contract and
+		// silently drops unknown ids/keys and non-boolean leaves.
+		patch.dashboardWidgetSettings = record.dashboardWidgetSettings as Record<
+			string,
+			WidgetSettingValues
+		> | null;
 	}
 
 	try {

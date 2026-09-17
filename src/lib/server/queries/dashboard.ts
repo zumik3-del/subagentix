@@ -30,4 +30,8 @@ export {
 	type SessionTotalsRecord
 } from './dashboard-sessions';
 export { aggregateMessageUsageByUtcDay, type MessageDayRecord } from './dashboard-message';
-export { aggregateToolUsage, type ToolUsageRecord } from './dashboard-tools';
+export {
+	aggregateToolUsage,
+	type ToolKindSelection,
+	type ToolUsageRecord
+} from './dashboard-tools';

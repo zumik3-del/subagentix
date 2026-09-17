@@ -354,3 +354,109 @@ describe('GET /api/dashboard/[widget] — cached directory validation', () => {
 		expect(second).toEqual(first);
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* Task #519: w.* settings parsing via the widget endpoint            */
+/* ------------------------------------------------------------------ */
+
+describe('GET /api/dashboard/top-tools — w.* settings parsing', () => {
+	test('both kinds off (w.basic=0&w.mcp=0) → { tools: [], capped: false }', async () => {
+		const response = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=0&w.mcp=0&period=all')
+		});
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as { data: { tools: Array<unknown>; capped: boolean } };
+		expect(body.data.tools).toHaveLength(0);
+		expect(body.data.capped).toBe(false);
+	});
+
+	test('basic-only (w.basic=1&w.mcp=0) returns only allowlisted tools', async () => {
+		const response = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=1&w.mcp=0&period=all')
+		});
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as {
+			data: { tools: Array<{ name: string; count: number }> };
+		};
+		// Only 'bash' is in the allowlist; 'mcp_recall' is excluded.
+		const names = body.data.tools.map((t) => t.name);
+		expect(names).toContain('bash');
+		expect(names).not.toContain('mcp_recall');
+	});
+
+	test('mcp-only (w.basic=0&w.mcp=1) returns only non-allowlisted tools', async () => {
+		const response = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=0&w.mcp=1&period=all')
+		});
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as {
+			data: { tools: Array<{ name: string; count: number }> };
+		};
+		// The fixture only contains basic tools (bash, edit); mcp-only must exclude them.
+		const names = body.data.tools.map((t) => t.name);
+		expect(names).not.toContain('bash');
+		expect(names).not.toContain('edit');
+		// Empty result is correct: no MCP tools in the fixture.
+		expect(body.data.tools).toHaveLength(0);
+	});
+
+	test('no w.* params → defaults (both kinds on), same as unfiltered', async () => {
+		const withDefaults = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?period=all')
+		});
+		const withBothOn = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=1&w.mcp=1&period=all')
+		});
+		expect(withDefaults.status).toBe(200);
+		expect(withBothOn.status).toBe(200);
+		const bodyDefaults = (await withDefaults.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		const bodyBothOn = (await withBothOn.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		expect(bodyDefaults.data.tools.map((t) => t.name)).toEqual(bodyBothOn.data.tools.map((t) => t.name));
+	});
+
+	test('unknown w.zzz param is ignored (behaves like both-on)', async () => {
+		const withZzz = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.zzz=0&period=all')
+		});
+		const withBothOn = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=1&w.mcp=1&period=all')
+		});
+		expect(withZzz.status).toBe(200);
+		expect(withBothOn.status).toBe(200);
+		const bodyZzz = (await withZzz.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		const bodyBothOn = (await withBothOn.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		expect(bodyZzz.data.tools.map((t) => t.name)).toEqual(bodyBothOn.data.tools.map((t) => t.name));
+	});
+
+	test('malformed w.basic=maybe falls back to default (behaves like both-on), never 400', async () => {
+		const malformed = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.basic=maybe&period=all')
+		});
+		expect(malformed.status).toBe(200);
+		const body = (await malformed.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		// Should behave like both-on (the default). The fixture has bash(2) and edit(1).
+		const names = body.data.tools.map((t) => t.name);
+		expect(names).toContain('bash');
+		expect(names).toContain('edit');
+	});
+
+	test('malformed w.mcp=2 falls back to default (behaves like both-on), never 400', async () => {
+		const malformed = await GET({
+			params: { widget: 'top-tools' },
+			url: new URL('http://localhost/api/dashboard/top-tools?w.mcp=2&period=all')
+		});
+		expect(malformed.status).toBe(200);
+		const body = (await malformed.json()) as { data: { tools: Array<{ name: string; count: number }> } };
+		const names = body.data.tools.map((t) => t.name);
+		expect(names).toContain('bash');
+		expect(names).toContain('edit');
+	});
+});

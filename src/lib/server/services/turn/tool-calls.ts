@@ -1,30 +1,11 @@
 /**
  * Tool-call assembly: map raw `tool` parts to {@link ToolCall} DTOs.
  */
+import { isMcpTool } from '$lib/model/tool-kind';
 import type { ToolCall } from '../../../model/types';
 import type { PartRecord } from '../../schema';
 import { clampEnd, type SessionData } from './shared';
 import { extractTrackerRefs } from './tracker-refs';
-
-/** Tools that ship with opencode; everything with `_` and not here is MCP. */
-const BUILTIN_TOOLS = new Set([
-	'bash',
-	'read',
-	'edit',
-	'grep',
-	'glob',
-	'write',
-	'webfetch',
-	'todowrite',
-	'task',
-	'question',
-	'skill',
-	'invalid'
-]);
-
-function isMcpTool(name: string): boolean {
-	return name.includes('_') && !BUILTIN_TOOLS.has(name);
-}
 
 function mapToolCall(part: PartRecord, nodeId: string, now: number): ToolCall {
 	const startedAt = part.stateStart;

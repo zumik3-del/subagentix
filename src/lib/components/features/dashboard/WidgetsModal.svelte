@@ -142,8 +142,9 @@
 							{#each WIDGET_DEFS as def (def.id)}
 								{@const placement = draftById.get(def.id)}
 								<li class="widget-row">
-									<label class="widget-item">
+									<label class="ui-checkbox widget-item">
 										<input
+											class="ui-checkbox__input"
 											type="checkbox"
 											checked={placement !== undefined}
 											onchange={() => toggle(def.id)}
@@ -204,16 +205,10 @@
 		border-radius: var(--radius-sm);
 	}
 
+	/* Size-only override: the picker row shares `.ui-checkbox`'s row box and
+	   keeps its wider label→box gap. */
 	.widget-item {
-		display: flex;
-		align-items: center;
 		gap: var(--space-3);
-		cursor: pointer;
-	}
-
-	.widget-item input {
-		flex: none;
-		accent-color: var(--border-selected);
 	}
 
 	.widget-main {

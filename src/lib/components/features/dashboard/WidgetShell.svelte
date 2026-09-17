@@ -12,6 +12,13 @@
 	 * `K` is inferred from the descriptor, so `body` receives exactly
 	 * `WidgetDataMap[K]` — no per-widget fetch boilerplate, no payload cast at the
 	 * body boundary.
+	 *
+	 * The per-widget settings are threaded to the hook twice (task #529): the raw
+	 * values feed the URL, while a `$derived` **signature string** is the fetch
+	 * effect's dependency. A settings-map clone whose values for this widget are
+	 * unchanged serialises to the same signature, so the shell re-renders without
+	 * re-running the effect or aborting an in-flight request — only the widget
+	 * whose values actually changed refetches.
 	 */
 	import type { DashboardFilter, WidgetDataMap } from '$lib/model/dashboard';
 	import {
@@ -19,8 +26,10 @@
 		widgetParams,
 		widgetSource,
 		type WidgetDefFor,
-		type WidgetId
+		type WidgetId,
+		type WidgetSettingValues
 	} from '$lib/widgets/registry';
+	import { widgetSettingSignature } from '$lib/widgets/settings';
 	import type { WidgetRenderer } from './widget';
 	import { defaultIsEmpty, useWidgetData } from './data.svelte';
 	import WidgetCard from './WidgetCard.svelte';
@@ -32,13 +41,19 @@
 		filter: DashboardFilter;
 		/** Global refresh counter; a change refetches this widget with `refresh=1`. */
 		refreshToken: number;
-		/** Opens this widget's size-settings modal. */
+		/**
+		 * This widget's resolved settings values; appended as `w.<key>=1|0`
+		 * (task #520). Read only for the URL — the fetch effect depends on the
+		 * derived signature, not on this object's identity (task #529).
+		 */
+		settings?: WidgetSettingValues;
+		/** Opens this widget's settings modal. */
 		onSettings?: () => void;
 		/** Pure body renderer for this widget; the shell supplies the payload. */
 		body?: WidgetRenderer<K>;
 	}
 
-	let { widget, filter, refreshToken, onSettings, body }: Props = $props();
+	let { widget, filter, refreshToken, settings = {}, onSettings, body }: Props = $props();
 
 	/**
 	 * The descriptor's emptiness rule, narrowed to this widget's payload. Only
@@ -51,10 +66,22 @@
 		return rule ? rule(data) : defaultIsEmpty(data);
 	}
 
+	/**
+	 * Canonical per-widget settings signature (task #529) — the fetch effect's
+	 * settings dependency. Because it derives from **this widget's slice**, a
+	 * settings-map clone with equal values yields the identical string, so the
+	 * effect does not re-run (no aborted request, no refetch); a sibling widget's
+	 * toggle replaces the shared map identity but leaves this signature unchanged.
+	 * A real value change yields a new string and a fresh fetch.
+	 */
+	const settingsSignature = $derived(widgetSettingSignature(widget.id, settings));
+
 	const state = useWidgetData<WidgetDataMap[K]>({
 		source: () => widgetSource(widget.id),
 		filter: () => filter,
 		refreshToken: () => refreshToken,
+		settings: () => settings,
+		settingsSignature: () => settingsSignature,
 		isEmpty
 	});
 </script>
