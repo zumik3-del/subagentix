@@ -1,19 +1,18 @@
 /**
  * Phase 3 regression suite (task #391): query-reduction + cache invalidation.
  *
- * Runs in an isolated child process (same pattern as `data-layer.suite.ts` /
- * `turn-permission.suite.ts`) because `health.test.ts` installs a process-wide
+ * Runs in an isolated child process (same pattern as `data-layer.suite.ts`)
+ * because `health.test.ts` installs a process-wide
  * `mock.module('$lib/server/db', ...)` that bun cannot undo. This suite imports
  * the real db/query/service modules against a throwaway fixture.
  *
- * Covers four dev-specified regression axes from task #386:
+ * Covers three dev-specified regression axes from task #386:
  *   1. getSubtreeDelegationEdges cycle guard + equality with the per-session union.
  *   2. message-scoped part reads equal unscoped+filter, including the empty-scope
  *      `AND 0` short-circuit path.
- *   3. buildPermissionIndex invalidation after recordPermissionAsked / Replied.
- *   4. session-graph invalidation on a live WAL commit and on resetDbConnection.
+ *   3. session-graph invalidation on a live WAL commit and on resetDbConnection.
  */
-import { afterAll, afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -23,12 +22,6 @@ import { resetDbConnection } from './db';
 import { clearSessionGraphCache, loadSessionGraph } from './queries/session-graph';
 import { getDelegationEdges, getSessionSubtree, getSubtreeDelegationEdges } from './queries/sessions';
 import { getActionParts, getCompactionParts, getStepParts, getToolParts } from './queries/parts';
-import {
-	buildPermissionIndex,
-	recordPermissionAsked,
-	recordPermissionReplied,
-	resetPermissionStoreForTests
-} from './permission-store';
 import type { DelegationRecord } from './schema';
 
 const T = 1_700_000_000_000;
@@ -187,7 +180,6 @@ process.env.OPENCODE_DB = DB_PATH;
 process.env.SETTINGS_FILE = join(tempDir, 'settings.json');
 
 const { getDb } = await import('./db');
-const { resetPermissionStoreForTests: _rpsft } = await import('./permission-store');
 
 afterAll(() => {
 	rmSync(tempDir, { recursive: true, force: true });
@@ -292,65 +284,12 @@ describe('message-scoped part reads', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. buildPermissionIndex invalidation after recorded mutations
-// ---------------------------------------------------------------------------
-
-describe('buildPermissionIndex invalidation', () => {
-	beforeEach(() => {
-		resetPermissionStoreForTests();
-	});
-
-	test('a new recordPermissionAsked is visible after the next buildPermissionIndex call', () => {
-		const indexBefore = buildPermissionIndex();
-		expect(indexBefore.has('ses\0call-new')).toBe(false);
-
-		recordPermissionAsked({
-			requestId: 'perm-new',
-			sessionId: 'ses',
-			callId: 'call-new',
-			permission: 'bash',
-			patterns: [],
-			at: T
-		});
-
-		// The cache must have been dropped; the new ask surfaces on the next build.
-		const indexAfter = buildPermissionIndex();
-		const entry = indexAfter.get('ses\0call-new');
-		expect(entry).toBeDefined();
-		expect(entry!.permission).toBe('bash');
-		expect(entry!.requestId).toBe('perm-new');
-	});
-
-	test('a recordPermissionReplied updates the index entry on the next build', () => {
-		recordPermissionAsked({
-			requestId: 'perm-r',
-			sessionId: 'ses',
-			callId: 'call-r',
-			permission: 'edit',
-			patterns: [],
-			at: T
-		});
-		let index = buildPermissionIndex();
-		expect(index.get('ses\0call-r')?.reply).toBeNull();
-
-		recordPermissionReplied({ requestId: 'perm-r', sessionId: 'ses', reply: 'always', at: T + 10 });
-
-		index = buildPermissionIndex();
-		expect(index.get('ses\0call-r')?.reply).toBe('always');
-	});
-});
-
-// ---------------------------------------------------------------------------
-// 4. session-graph invalidation: live WAL commit + resetDbConnection
+// 3. session-graph invalidation: live WAL commit + resetDbConnection
 // ---------------------------------------------------------------------------
 
 describe('session-graph cache invalidation', () => {
 	beforeEach(() => {
 		clearSessionGraphCache();
-	});
-
-	afterEach(() => {
-		resetPermissionStoreForTests();
 	});
 
 	test('resetDbConnection drops every cached graph', () => {

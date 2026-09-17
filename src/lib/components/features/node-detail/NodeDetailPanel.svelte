@@ -102,9 +102,6 @@
 			0
 		)
 	);
-	const permissionRows = $derived(
-		(detail?.toolCalls ?? []).filter((call) => call.permission).map((call) => call.permission!)
-	);
 	/** Whether the node recorded anything at all (drives the empty state). */
 	const hasContent = $derived(
 		stepCount > 0 ||
@@ -130,16 +127,14 @@
 			case 'misc':
 				// `Other` is the catch-all for everything that is neither a step,
 				// tool, text nor reasoning action: file/patch actions and the
-				// remaining marker kinds, plus tool calls that requested
-				// permission (the former standalone Permission filter).
+				// remaining marker kinds, plus agent/compaction/start/prompt rows.
 				return (
 					row.kind === 'file' ||
 					row.kind === 'patch' ||
 					row.kind === 'agent' ||
 					row.kind === 'compaction' ||
 					row.kind === 'start' ||
-					row.kind === 'prompt' ||
-					(row.kind === 'tool' && Boolean(row.call?.permission))
+					row.kind === 'prompt'
 				);
 			default:
 				return row.kind === kindFilter;
@@ -262,7 +257,6 @@
 			{retryGroups}
 			{trackerRefs}
 			{refBase}
-			{permissionRows}
 			{ziptaskEnabled}
 			{onOpenTask}
 		/>

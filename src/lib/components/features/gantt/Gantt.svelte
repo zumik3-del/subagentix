@@ -357,8 +357,6 @@
 		x: number;
 		tone: ToolTone;
 		delegation: boolean;
-		/** The call triggered a user permission prompt (collector). */
-		permission: boolean;
 		title: string;
 	}
 	interface MarkerView {
@@ -458,15 +456,10 @@
 				x: x(call.startedAt ?? node.startedAt),
 				tone: toolTone(call.status),
 				delegation: call.isDelegation,
-				permission: call.permission != null,
 				title: `${call.name} · ${call.status}${call.error ? ` · ${call.error}` : ''} · ${formatDuration(
 					call.startedAt ?? node.startedAt,
 					call.endedAt
-				)}${call.flags.length ? ` · ${call.flags.join(', ')}` : ''}${
-					call.permission
-						? ` · permission: ${call.permission.reply ?? 'pending'}`
-						: ''
-				}`
+				)}${call.flags.length ? ` · ${call.flags.join(', ')}` : ''}`
 			}));
 
 			const markers: MarkerView[] = nodeMarkers.map((marker, markerIndex) => ({

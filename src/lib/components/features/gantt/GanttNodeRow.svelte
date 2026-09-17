@@ -3,7 +3,7 @@
 	 * One node row of the wall-clock Gantt (extracted from `Gantt`, ADR 3.5c).
 	 *
 	 * Renders the focusable node `<g>`: the agent-tinted span tube, its step
-	 * segments, tool ticks (with permission rings) and the compaction/removed
+	 * segments, tool ticks and the compaction/removed
 	 * markers. Pure presentation: the `Gantt` root keeps every positioning
 	 * decision — `x()`, `barX`, `barWidth`, `removedAnchorX` and the layout
 	 * constants — and passes the precomputed row slice down, so this component
@@ -20,8 +20,6 @@
 		x: number;
 		tone: ToolTone;
 		delegation: boolean;
-		/** The call triggered a user permission prompt (collector). */
-		permission: boolean;
 		title: string;
 	}
 
@@ -183,11 +181,6 @@
 		>
 			<title>{tool.title}</title>
 		</rect>
-		{#if tool.permission}
-			<circle class="tool-permission" cx={tool.x} cy={row.top + toolY - 3.5} r="2.6">
-				<title>Permission requested for {tool.title}</title>
-			</circle>
-		{/if}
 	{/each}
 
 	<!-- Positional markers (compaction) -->
@@ -258,12 +251,6 @@
 	.tool.delegation {
 		stroke: var(--text-strong);
 		stroke-width: 0.75;
-	}
-
-	.tool-permission {
-		fill: none;
-		stroke: var(--color-warning-base);
-		stroke-width: 1.2;
 	}
 
 	.marker {

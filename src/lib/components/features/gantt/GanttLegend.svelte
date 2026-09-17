@@ -3,7 +3,7 @@
 	 * Swatch legend for the wall-clock Gantt (extracted from `Gantt`, ADR 3.2).
 	 *
 	 * Pure presentation — no data logic. Renders the Tools ticks
-	 * (completed/error/running/other/delegation, permission ring) and the
+	 * (completed/error/running/other/delegation) and the
 	 * Markers swatches (compaction diamond, removed chip, running chip). The
 	 * `--running-hatch-bg` custom property stays declared on the `.gantt` root
 	 * in `Gantt.svelte` and is inherited here, so the legend chip matches the
@@ -20,7 +20,6 @@
 		<span class="legend-item"><span class="tick tick-running"></span>running</span>
 		<span class="legend-item"><span class="tick tick-other"></span>other</span>
 		<span class="legend-item"><span class="tick tick-delegation"></span>delegation</span>
-		<span class="legend-item"><span class="perm-ring"></span>permission asked</span>
 	</div>
 	<div class="legend-group">
 		<span class="legend-title">Markers</span>
@@ -91,14 +90,6 @@
 		width: 7px;
 		background: var(--surface-strong);
 		border: 1px solid var(--text-strong);
-	}
-
-	.perm-ring {
-		display: block;
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		border: 1.5px solid var(--color-warning-base);
 	}
 
 	.diamond {

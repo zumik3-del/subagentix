@@ -254,7 +254,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 });
 
 describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => {
-	test('renders Retries on its own row and the other three sections below, before the Steps table', () => {
+	test('renders Retries on its own row and the other two sections below, before the Steps table', () => {
 		const html = renderPanel(
 			makeDetail({
 				steps: [makeStep({ id: 's1', index: 0 }), makeStep({ id: 's2', index: 1 })],
@@ -266,26 +266,24 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 			}),
 			'https://zt.example'
 		);
-		// One merged strip: identity, then Retries, then the three other columns.
+		// One merged strip: identity, then Retries, then the two other columns.
 		const classTokens = [...html.matchAll(/class="([^"]*)"/g)].map((match) =>
 			match[1].split(/\s+/)
 		);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-strip')).length).toBe(1);
 		expect(classTokens.filter((tokens) => tokens.includes('identity')).length).toBe(1);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-row')).length).toBe(3);
-		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(3);
-		// All four headings render, including the empty tracker/permission states.
+		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(2);
+		// Both headings render, including the empty tracker state.
 		expect(html).toContain('Retries (1)');
 		expect(html).toContain('Markers (1)');
 		expect(html).toContain('Tracker links');
 		expect(html).toContain('No tracker link.');
-		expect(html).toContain('Permissions (0)');
-		expect(html).toContain('No permission prompts recorded.');
 		// The strip precedes the Steps table in document order.
 		expect(html.indexOf('summary-strip')).toBeLessThan(html.indexOf('Steps &amp; actions ('));
 	});
 
-	test('all four columns always render; empty Retries shows the muted placeholder', () => {
+	test('all columns always render; empty Retries shows the muted placeholder', () => {
 		const html = renderPanel(makeDetail());
 		expect(html).toContain('Retries (0)');
 		expect(html).toContain('No retries.');
@@ -293,8 +291,6 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 		expect(html).toContain('No compaction or removed-content markers.');
 		expect(html).toContain('Tracker links');
 		expect(html).toContain('No tracker link.');
-		expect(html).toContain('Permissions (0)');
-		expect(html).toContain('No permission prompts recorded.');
 	});
 
 	test('the strip is a responsive auto-fit grid (source)', () => {
@@ -345,33 +341,6 @@ describe('NodeDetailPanel SSR — merged Steps & actions table', () => {
 		expect(html).toContain('id="action-a2"');
 		// Tool calls stay Reason links inside the step, not separate rows.
 		expect(html).toContain('reason-link');
-	});
-
-	test('carries the permission prompt onto the tool row and summary column', () => {
-		const html = renderPanel(
-			makeDetail({
-				steps: [makeStep({ id: 's1', index: 0 })],
-				toolCalls: [
-					makeTool({
-						id: 't9',
-						name: 'bash',
-						stepId: 's1',
-						permission: {
-							requestId: 'per_1',
-							permission: 'bash',
-							patterns: ['rm*'],
-							reply: 'reject',
-							askedAt: 1,
-							repliedAt: 2
-						}
-					})
-				]
-			})
-		);
-		expect(html).toContain('Permissions (1)');
-		expect(html).toContain('ui-badge--perm');
-		expect(html).toContain('permission: reject');
-		expect(html).toContain('ask: reject');
 	});
 });
 

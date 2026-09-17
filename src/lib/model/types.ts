@@ -129,12 +129,6 @@ export interface ToolCall {
 	isMcp: boolean;
 	isDelegation: boolean;
 	trackerRefs: string[];
-	/**
-	 * The permission prompt this call triggered (matched by session + call id),
-	 * or `null`/absent when the collector saw none. Additive; always populated
-	 * by the turn assembler when the permission store has a match.
-	 */
-	permission?: PermissionInfo | null;
 }
 
 /**
@@ -164,20 +158,6 @@ export interface Action {
 	 * mark a user message's `text` as the prompt. Optional for partial DTOs.
 	 */
 	role?: string | null;
-}
-
-/**
- * A user permission prompt that an action triggered, reconstructed from the
- * opencode event stream (never persisted by opencode itself). `reply` is
- * `null` while the request is still pending.
- */
-export interface PermissionInfo {
-	requestId: string;
-	permission: string;
-	patterns: string[];
-	reply: 'once' | 'always' | 'reject' | null;
-	askedAt: number;
-	repliedAt: number | null;
 }
 
 export type MarkerType = 'compaction' | 'removed';

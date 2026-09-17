@@ -15,7 +15,7 @@ agent ran, and what tokens/cost it consumed, with per-node drill-down.
 
 - Session sidebar grouped by working directory, with search and paging.
 - Turn Gantt (SVG) with delegation edges between orchestrator and subagents.
-- Per-node drill-down: steps, tool calls, errors and permission prompts.
+- Per-node drill-down: steps, tool calls and errors.
 - Runtime settings (opencode DB path, ziptask URL, subagents dir) in a modal.
 - Optional ziptask integration (task links), gated by a runtime toggle.
 
@@ -34,8 +34,7 @@ cache_write`); `message`/`session` rollups are cross-checks. The data layer
 whitelists `session`, `message`, `part`, `project` and `todo`, and never returns
 `account` or `credential`. Access is strictly read-only (`readonly:true`,
 `PRAGMA query_only=1`, `busy_timeout`); the app never writes, checkpoints or
-vacuums the database. Permission asks/replies, which opencode does not persist,
-are collected from the opencode event bus while the app runs.
+vacuums the database.
 
 ## Requirements
 
@@ -46,7 +45,7 @@ are collected from the opencode event bus while the app runs.
 
 ```sh
 bun install
-cp .env.example .env   # adjust OPENCODE_DB / OPENCODE_BASE_URL if needed
+cp .env.example .env   # adjust OPENCODE_DB if needed
 bun run dev            # http://127.0.0.1:5173
 ```
 
@@ -72,7 +71,6 @@ take precedence over the environment.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Path to the live opencode DB (read-only). |
-| `OPENCODE_BASE_URL` | `http://127.0.0.1:1234` | opencode web server; SSE source for permission events. |
 | `ZIPTASK_BASE_URL` | unset | Base URL used to resolve ziptask task links. |
 | `ZIPTASK_ENABLED` | derived | Feature toggle for the ziptask integration. |
 | `HOST` / `PORT` | `127.0.0.1` / `3010` | Production HTTP bind address. |

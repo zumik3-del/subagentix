@@ -88,18 +88,6 @@
 		<span class="ui-badge">{call.status}</span>
 		{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
 		{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
-		{#if call.permission}
-			<span
-				class="ui-badge ui-badge--perm"
-				title={`Permission ${call.permission.permission}${
-					call.permission.patterns.length
-						? ` · ${call.permission.patterns.join(', ')}`
-						: ''
-				}`}
-			>
-				permission: {call.permission.reply ?? 'pending'}
-			</span>
-		{/if}
 		<span class="muted">{formatDuration(startOf(call.startedAt), call.endedAt)}</span>
 	</div>
 	{#if call.error}

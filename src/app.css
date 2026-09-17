@@ -348,8 +348,7 @@ a {
  *   .ui-badge--reasoning  — action kind "reasoning".
  *   .ui-badge--agent      — action kind "agent".
  *   .ui-badge--patch      — action kind "patch".
- *   .ui-badge--perm       — permission-request tone.
- *   .ui-badge--removed    — removed/rejected marker and rejected permission.
+ *   .ui-badge--removed    — removed marker.
  *   .ui-badge--compaction — compaction marker / action kind.
  *   Some tones reach markup only through dynamic composition —
  *   `ui-badge--${flagTone(key)}` → warning|danger,
@@ -578,10 +577,6 @@ a {
 .ui-badge--patch {
 	background: var(--color-success-surface);
 	color: var(--color-success-strong);
-}
-.ui-badge--perm {
-	background: var(--color-warning-surface);
-	color: var(--color-warning-strong);
 }
 .ui-badge--removed {
 	background: var(--color-danger-surface);
