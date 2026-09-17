@@ -26,6 +26,7 @@ type RenderFn = (
 	let DayTable: unknown;
 	let WidgetGrid: unknown;
 	let WidgetSettings: unknown;
+	let WidgetsModal: unknown;
 
 beforeAll(async () => {
 	vite = await createServer({
@@ -64,6 +65,11 @@ beforeAll(async () => {
 	WidgetSettings = (
 		(await vite.ssrLoadModule(
 			'/src/lib/components/features/dashboard/WidgetSettings.svelte'
+		)) as { default: unknown }
+	).default;
+	WidgetsModal = (
+		(await vite.ssrLoadModule(
+			'/src/lib/components/features/dashboard/WidgetsModal.svelte'
 		)) as { default: unknown }
 	).default;
 }, 60_000);
@@ -560,6 +566,81 @@ describe('WidgetSettings SSR', () => {
 		expect(html).toContain('aria-labelledby="widget-settings-title"');
 		expect(html).toContain('>Cost &amp; tokens<');
 		expect(html).toContain('Widget settings');
+	});
+
+	test('header has the icon close control with widget-title-specific aria-label and no footer', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: true,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close Cost &amp; tokens settings"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+		expect(html).not.toContain('ui-modal__foot');
+	});
+
+	test('header is a single row: title + subtitle + close in one .ui-modal__head', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: true,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html).toContain('widget-settings__sub');
+		expect(html.match(/<h2[^>]*>/g)?.length ?? 0).toBe(1);
+	});
+});
+
+// --- WidgetsModal SSR ---------------------------------------------------------
+
+describe('WidgetsModal SSR', () => {
+	const baseProps = {
+		open: true,
+		selected: [],
+		onApply: () => {},
+		onClose: () => {}
+	};
+
+	test('renders dialog shell with role=dialog and aria-modal when open', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('role="dialog"');
+		expect(html).toContain('aria-modal="true"');
+		expect(html).toContain('aria-labelledby="widgets-title"');
+		expect(html).toContain('>Widgets<');
+	});
+
+	test('header has the icon close control with widget-picker-specific aria-label and no footer Close/Cancel', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close widget picker"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+	});
+
+	test('footer carries Restore defaults + Apply (no Cancel)', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-modal__foot');
+		expect(html).toContain('Restore defaults');
+		expect(html).toContain('>Apply<');
+		expect(html).not.toContain('>Cancel<');
+	});
+
+	test('header is a single row: title + close in one .ui-modal__head', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html.match(/<h2[^>]*>/g)?.length ?? 0).toBe(1);
 	});
 });
 

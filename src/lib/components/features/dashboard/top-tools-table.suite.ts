@@ -231,29 +231,87 @@ describe('TopToolsTable SSR', () => {
 		expect(html).toContain('Top tools');
 	});
 
-	test('renders a Close button in the footer and no back control', () => {
+	test('header has the icon close control and no footer Close', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
-		expect(html).toContain('ui-modal__foot');
-		expect(html).toContain('>Close<');
+		// Header X: icon button with the mode-specific aria-label, last in .ui-modal__head.
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close error detail"');
+		// SSR renders the Icon component as an inline SVG, not as a component tag.
+		expect(html).toContain('aria-hidden="true"');
+		expect(html).toContain('focusable="false"');
+		// No textual Close/Cancel anywhere in the rendered markup.
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+		// No footer row — ToolErrorsModal has no action buttons.
+		expect(html).not.toContain('ui-modal__foot');
+		// No back control.
 		expect(html).not.toContain('tool-errors__back');
 	});
 
-	test('renders the Tool / Period / Project / Agent / Search filter fields', () => {
+	test('header is a single row: title + subtitle + close in one .ui-modal__head', () => {
+		const html = render(ToolErrorsModal, { props: baseProps }).body;
+		// The header block must contain the title, the subtitle, and the close btn.
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html).toContain('tool-errors__sub');
+		// Exactly one h2 title element inside the header.
+		expect(html.match(/<h2[^>]*>/g)?.length ?? 0).toBe(1);
+	});
+
+	test('renders the Period / Project / Agent / Search filter fields, no Tool field', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
 		expect(html).toContain('tool-errors__field');
-		expect(html).toContain('>Tool<');
+		expect(html).not.toContain('>Tool<');
 		expect(html).toContain('>Period<');
 		expect(html).toContain('>Project<');
 		expect(html).toContain('>Agent<');
 		expect(html).toContain('>Search<');
 	});
 
-	test('renders the table with the five columns: Time, Agent, Tool, Error, Session', () => {
+	test('heading shows the fixed tool as a filter hint', () => {
+		const html = render(ToolErrorsModal, { props: baseProps }).body;
+		expect(html).toContain('Top tools');
+		expect(html).toContain('(filter: bash)');
+		expect(html).toContain('tool-errors__filter-hint');
+	});
+
+	test('errors mode omits the Tool column; loading placeholder is present', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
 		// In SSR the modal is in 'loading' state (no data fetched yet), so the table
 		// is not rendered. We verify the loading placeholder is present instead.
 		expect(html).toContain('role="status"');
 		expect(html).toContain('Loading');
+		// The Tool column header must not appear anywhere in the output.
+		expect(html).not.toContain('>Tool<');
+	});
+
+	test('errors mode column set: Time, Agent, Error text, Session (no Status, no Tool)', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// Errors-mode thead: Time, Agent, (no Tool), (no Status), Error text, Session.
+		expect(source).toContain('<th scope="col">Time</th>');
+		expect(source).toContain('<th scope="col">Agent</th>');
+		expect(source).not.toContain('<th scope="col">Tool</th>');
+		// Status is gated behind `#if isAll`, never unconditional.
+		expect(source).toContain('{#if isAll}');
+		expect(source).toContain('<th scope="col">Status</th>');
+		expect(source).toContain('<th scope="col">Error text</th>');
+		expect(source).toContain('<th scope="col">Session</th>');
+	});
+
+	test('all mode column set: Time, Agent, Status, Error text, Session (no Tool)', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		expect(source).toContain('<th scope="col">Time</th>');
+		expect(source).toContain('<th scope="col">Agent</th>');
+		expect(source).not.toContain('<th scope="col">Tool</th>');
+		expect(source).toContain('<th scope="col">Status</th>');
+		expect(source).toContain('<th scope="col">Error text</th>');
+		expect(source).toContain('<th scope="col">Session</th>');
 	});
 
 	test('renders the total line with failed call count text in errors mode', () => {

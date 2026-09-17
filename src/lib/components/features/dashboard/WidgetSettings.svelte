@@ -13,6 +13,7 @@
 	 * gear, and no markup while closed.
 	 */
 	import { tick } from 'svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH } from '$lib/widgets/registry';
 	import type { WidgetDef, WidgetPlacement } from '$lib/widgets/registry';
 	import type { WidgetSizePatch } from './widget';
@@ -119,10 +120,16 @@
 			onkeydown={onDialogKeydown}
 		>
 			<header class="ui-modal__head">
-				<div class="widget-settings__heading">
-					<h2 class="ui-modal__title" id="widget-settings-title">{widget.title}</h2>
-					<p class="widget-settings__sub">Widget settings</p>
-				</div>
+				<h2 class="ui-modal__title" id="widget-settings-title">{widget.title}</h2>
+				<p class="widget-settings__sub">Widget settings</p>
+				<button
+					type="button"
+					class="ui-icon-btn"
+					aria-label={`Close ${widget.title} settings`}
+					onclick={onClose}
+				>
+					<Icon name="close" />
+				</button>
 			</header>
 
 			<div class="ui-modal__body">
@@ -176,10 +183,6 @@
 					</div>
 				</div>
 			</div>
-
-			<footer class="ui-modal__foot">
-				<button type="button" class="ui-btn close" onclick={onClose}>Close</button>
-			</footer>
 		</div>
 	</div>
 {/if}
@@ -190,17 +193,15 @@
 		width: min(22rem, calc(100vw - 2rem));
 	}
 
-	.widget-settings__heading {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
+	/* Secondary text: right-aligned element of the single-line header row. */
 	.widget-settings__sub {
 		margin: 0;
+		margin-inline-start: auto;
+		align-self: flex-start;
 		font-size: var(--font-size-small);
 		color: var(--text-weak);
+		text-align: right;
+		white-space: nowrap;
 	}
 
 	.widget-settings__error {
@@ -277,9 +278,5 @@
 		text-align: center;
 		font-size: var(--font-size-small);
 		font-variant-numeric: tabular-nums;
-	}
-
-	.close {
-		margin-inline-start: auto;
 	}
 </style>

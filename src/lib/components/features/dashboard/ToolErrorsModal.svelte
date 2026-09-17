@@ -6,14 +6,15 @@
 	 * Opened by the Errors/Calls/name cells of `TopToolsWidget`; the shell mounts
 	 * it from the `?toolErrors=` (failures) or `?toolCalls=` (all calls) URL
 	 * param, so it opens over the dashboard (no separate route), a deep link
-	 * restores it, and browser Back closes it. It lists the individual tool calls
-	 * newest first, with server-side filters on top (status mode, tool, period,
-	 * project, agent), a debounced error-text search and limit/offset paging
-	 * through the shared `/api/dashboard/tool-errors`.
+	 * restores it, and browser Back closes it. The clicked tool is fixed (shown
+	 * in the heading, sent on every request); the remaining server-side filters
+	 * are status mode, period, project and agent, plus a debounced error-text
+	 * search and limit/offset paging through the shared
+	 * `/api/dashboard/tool-errors`.
 	 *
 	 * In `all` mode every call is listed and a raw `Status` column is added; in
-	 * `errors` mode only failed calls appear (Time, Agent, Tool, Error text,
-	 * Session). The copy (subtitle, total, empty state) follows the mode.
+	 * `errors` mode only failed calls appear (Time, Agent, Error text, Session).
+	 * The copy (subtitle, total, empty state) follows the mode.
 	 *
 	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
 	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
@@ -27,6 +28,7 @@
 	import { DEFAULT_ERROR_LIMIT } from '$lib/model/tool-errors';
 	import { formatDateTime, formatNumber } from '$lib/model/format';
 	import { clock } from '$lib/model/clock.svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import { ALL_SCOPE_OPTION, PERIOD_OPTIONS, SCOPE_ALL, type FilterOption } from './filter';
 	import { appendToolErrorRows, buildToolErrorsUrl, type ToolErrorViewFilters } from './tool-errors';
@@ -57,8 +59,9 @@
 
 	// Editable filter state, seeded once from the click + the dashboard filter
 	// (the shell mounts the modal per open, so the snapshot never goes stale).
+	// The tool is NOT editable state: it is fixed by the row click and read
+	// straight from the immutable `tool` prop on every request.
 	let callStatus = untrack(() => mode);
-	let toolValue = $state(untrack(() => tool));
 	let period = $state(untrack(() => filter.period));
 	let scope = $state(untrack(() => filter.scope));
 	let agent = $state('');
@@ -102,7 +105,7 @@
 	function currentFilters(): ToolErrorViewFilters {
 		return {
 			status: callStatus,
-			tool: toolValue,
+			tool,
 			period,
 			scope,
 			agent,
@@ -260,22 +263,17 @@
 		onkeydown={onDialogKeydown}
 	>
 		<header class="ui-modal__head">
-			<div class="tool-errors__titles">
-				<h2 class="ui-modal__title" id="tool-errors-title">{title}</h2>
-				<p class="tool-errors__sub">{subtitle}</p>
-			</div>
+			<h2 class="ui-modal__title" id="tool-errors-title">
+				{title}
+				<span class="tool-errors__filter-hint">(filter: {tool})</span>
+			</h2>
+			<p class="tool-errors__sub">{subtitle}</p>
+			<button type="button" class="ui-icon-btn" aria-label="Close error detail" onclick={onClose}>
+				<Icon name="close" />
+			</button>
 		</header>
 
 		<div class="tool-errors__filters">
-			<label class="tool-errors__field">
-				<span class="tool-errors__label">Tool</span>
-				<input
-					class="ui-input tool-errors__input"
-					type="text"
-					value={toolValue}
-					oninput={(event) => (toolValue = event.currentTarget.value)}
-				/>
-			</label>
 			<label class="tool-errors__field">
 				<span class="tool-errors__label">Period</span>
 				<select
@@ -349,7 +347,6 @@
 								<tr>
 									<th scope="col">Time</th>
 									<th scope="col">Agent</th>
-									<th scope="col">Tool</th>
 									{#if isAll}
 										<th scope="col">Status</th>
 									{/if}
@@ -362,7 +359,6 @@
 									<tr>
 										<td class="tool-errors__time">{formatDateTime(row.at, clock.tz)}</td>
 										<td>{row.agent}</td>
-										<td>{row.tool}</td>
 										{#if isAll}
 											<td class="tool-errors__status">
 												{row.status === '' ? '—' : row.status}
@@ -404,10 +400,6 @@
 				</div>
 			</ScrollView>
 		</div>
-
-		<footer class="ui-modal__foot">
-			<button type="button" class="ui-btn" onclick={onClose}>Close</button>
-		</footer>
 	</div>
 </div>
 
@@ -422,16 +414,21 @@
 		height: calc(100dvh - 2rem);
 	}
 
-	.tool-errors__titles {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
+	/* Mode subtitle: right-aligned element of the single-line header row. */
 	.tool-errors__sub {
 		margin: 0;
+		margin-inline-start: auto;
+		align-self: flex-start;
 		font-size: var(--font-size-small);
+		color: var(--text-weak);
+		text-align: right;
+		white-space: nowrap;
+	}
+
+	/* The fixed tool name is a qualifier of the title, so it reads weaker. */
+	.tool-errors__filter-hint {
+		font-size: var(--font-size-base);
+		font-weight: var(--font-weight-regular);
 		color: var(--text-weak);
 	}
 

@@ -5,12 +5,14 @@
 	 * Lists every registry widget in registry order with a visibility toggle and
 	 * a `Restore defaults` action. Drafts the selection locally and persists it
 	 * through the shared `saveDashboardWidgets` helper on Apply; per-widget sizes
-	 * live in the gear-opened `WidgetSettings` dialog. Cancel (and Escape /
-	 * backdrop click) discards the draft; the parent owns `open` and applies the
-	 * saved selection. Focus handling follows docs/ui-standards.md §9: dialog
-	 * semantics, Escape close, a Tab trap and focus return to the opener.
+	 * live in the gear-opened `WidgetSettings` dialog. Escape / backdrop click /
+	 * the header close icon discards the draft; the parent owns `open` and
+	 * applies the saved selection. Focus handling follows docs/ui-standards.md
+	 * §9: dialog semantics, Escape close, a Tab trap and focus return to the
+	 * opener.
 	 */
 	import { tick } from 'svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import { DEFAULT_WIDGETS, WIDGET_DEFS, resolvePlacements } from '$lib/widgets/registry';
 	import type { WidgetId, WidgetPlacement } from '$lib/widgets/registry';
@@ -125,6 +127,9 @@
 		>
 			<header class="ui-modal__head">
 				<h2 class="ui-modal__title" id="widgets-title">Widgets</h2>
+				<button type="button" class="ui-icon-btn" aria-label="Close widget picker" onclick={onClose}>
+					<Icon name="close" />
+				</button>
 			</header>
 
 			<div class="ui-modal__body">
@@ -159,7 +164,6 @@
 				<button type="button" class="ui-btn restore" onclick={restoreDefaults} disabled={saving}>
 					Restore defaults
 				</button>
-				<button type="button" class="ui-btn" onclick={onClose} disabled={saving}>Cancel</button>
 				<button
 					type="button"
 					class="ui-btn ui-btn--primary"

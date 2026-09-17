@@ -9,6 +9,7 @@
 	 * The parent owns `open` and closes it.
 	 */
 	import { onDestroy, tick } from 'svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 
 	type Tab = 'opencode' | 'ziptask';
@@ -475,6 +476,9 @@
 		>
 			<header class="ui-modal__head">
 				<h2 class="ui-modal__title" id="settings-title">Settings</h2>
+				<button type="button" class="ui-icon-btn" aria-label="Close settings" onclick={onClose}>
+					<Icon name="close" />
+				</button>
 			</header>
 
 			<div
@@ -603,9 +607,6 @@
 				{#if notice}
 					<p class="ui-notice" role="status" aria-live="polite">{notice}</p>
 				{/if}
-				<button type="button" class="ui-btn" onclick={onClose} disabled={saving}>
-					Cancel
-				</button>
 				<button
 					type="button"
 					class="ui-btn ui-btn--primary"

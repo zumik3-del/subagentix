@@ -640,6 +640,22 @@ describe('TaskModal SSR — dialog shell and loading state', () => {
 		expect(html).toContain('Task #185');
 		expect(html).toContain('Loading…');
 	});
+
+	test('header has the icon close control with task-id-specific aria-label and no footer', () => {
+		const html = render(TaskModal, { props: { id: '185' } }).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close task #185"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+		expect(html).not.toContain('ui-modal__foot');
+	});
+
+	test('header is a single row: title + close in one .ui-modal__head', () => {
+		const html = render(TaskModal, { props: { id: '185' } }).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html.match(/<h3[^>]*>/g)?.length ?? 0).toBe(1);
+	});
 });
 
 describe('NodeDetailPanel SSR — raw JSON, escaping and raw-HTML hygiene', () => {
