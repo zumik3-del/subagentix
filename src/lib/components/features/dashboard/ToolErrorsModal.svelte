@@ -1,0 +1,510 @@
+<script lang="ts">
+	/**
+	 * In-place error detail overlay for the top-tools widget (task #481).
+	 *
+	 * Opened by the Errors cell of `TopToolsWidget`; the shell mounts it from the
+	 * `?toolErrors=` URL param, so it opens over the dashboard (no separate
+	 * route), a deep link restores it, and browser Back closes it. It lists the
+	 * individual failed tool calls newest first, with server-side filters on top
+	 * (tool, period, project, agent), a debounced error-text search and
+	 * limit/offset paging through the shared `/api/dashboard/tool-errors`.
+	 *
+	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
+	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
+	 * a Tab trap, initial focus and focus return to the opener, and no markup
+	 * while closed (the shell renders it only when open).
+	 */
+	import { untrack } from 'svelte';
+	import type { DashboardFilter, DashboardPeriod } from '$lib/model/dashboard';
+	import { isDashboardPeriod } from '$lib/model/dashboard';
+	import type { ToolErrorEntry, ToolErrorsPage } from '$lib/model/tool-errors';
+	import { DEFAULT_ERROR_LIMIT } from '$lib/model/tool-errors';
+	import { formatDateTime, formatNumber } from '$lib/model/format';
+	import { clock } from '$lib/model/clock.svelte';
+	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import { ALL_SCOPE_OPTION, PERIOD_OPTIONS, SCOPE_ALL, type FilterOption } from './filter';
+	import { appendToolErrorRows, buildToolErrorsUrl, type ToolErrorViewFilters } from './tool-errors';
+
+	interface Props {
+		/** Initial tool filter; comes from the clicked widget row. */
+		tool: string;
+		/** Widget title shown in the header (e.g. `Top tools`). */
+		title: string;
+		/** Dashboard filter seeding period/scope. */
+		filter: DashboardFilter;
+		/** Directory options for the project filter (no `All projects` entry). */
+		scopes?: readonly FilterOption[];
+		/** Close/leave the overlay (the shell clears the URL param). */
+		onClose: () => void;
+	}
+
+	let { tool, title, filter, scopes = [], onClose }: Props = $props();
+
+	/** One page request; the search is debounced so typing does not spam it. */
+	const PAGE_SIZE = DEFAULT_ERROR_LIMIT;
+	const SEARCH_DEBOUNCE_MS = 300;
+
+	let dialog = $state<HTMLDivElement | null>(null);
+	let previouslyFocused: HTMLElement | null = null;
+
+	// Editable filter state, seeded once from the click + the dashboard filter
+	// (the shell mounts the modal per open, so the snapshot never goes stale).
+	let toolValue = $state(untrack(() => tool));
+	let period = $state(untrack(() => filter.period));
+	let scope = $state(untrack(() => filter.scope));
+	let agent = $state('');
+	let search = $state('');
+	let debouncedSearch = $state('');
+
+	// Result state.
+	let rows = $state<ToolErrorEntry[]>([]);
+	let total = $state(0);
+	let agents = $state<string[]>([]);
+	let capped = $state(false);
+	let status = $state<'loading' | 'ready' | 'error'>('loading');
+	let error = $state<string | null>(null);
+	let loadingMore = $state(false);
+	/** A failed "Load more"; the already-loaded rows stay on screen. */
+	let loadMoreError = $state<string | null>(null);
+
+	/** Monotonic request id, so a late response can never overwrite a newer one. */
+	let requestSeq = 0;
+
+	let scopeChoices = $derived<readonly FilterOption[]>([ALL_SCOPE_OPTION, ...scopes]);
+	let agentChoices = $derived<readonly FilterOption[]>([
+		{ value: '', label: 'All agents' },
+		...agents.map((name) => ({ value: name, label: name }))
+	]);
+	let hasMore = $derived(rows.length < total);
+
+	function currentFilters(): ToolErrorViewFilters {
+		return { tool: toolValue, period, scope, agent, search: debouncedSearch };
+	}
+
+	/** Best-effort error text: the API's `error` field, else the HTTP status. */
+	async function responseError(response: Response): Promise<string> {
+		try {
+			const body: unknown = await response.json();
+			if (
+				body !== null &&
+				typeof body === 'object' &&
+				typeof (body as { error?: unknown }).error === 'string'
+			) {
+				return (body as { error: string }).error;
+			}
+		} catch {
+			// Non-JSON error body: fall through to the status message.
+		}
+		return `Request failed (${response.status}).`;
+	}
+
+	async function requestPage(
+		filters: ToolErrorViewFilters,
+		offset: number,
+		signal?: AbortSignal
+	): Promise<ToolErrorsPage> {
+		const response = await fetch(buildToolErrorsUrl(filters, PAGE_SIZE, offset), {
+			signal,
+			headers: { accept: 'application/json' }
+		});
+		if (!response.ok) throw new Error(await responseError(response));
+		return (await response.json()) as ToolErrorsPage;
+	}
+
+	// First page: runs on mount and whenever a filter changes. It reads only the
+	// filter state, so its own result writes cannot retrigger it.
+	$effect(() => {
+		const filters = currentFilters();
+		const seq = ++requestSeq;
+		const controller = new AbortController();
+		status = 'loading';
+		error = null;
+		rows = [];
+		// A filter change abandons any in-flight "Load more"; reset its flag so
+		// the fresh page can page again.
+		loadingMore = false;
+		loadMoreError = null;
+
+		void (async () => {
+			try {
+				const page = await requestPage(filters, 0, controller.signal);
+				if (controller.signal.aborted || seq !== requestSeq) return;
+				rows = page.rows;
+				total = page.total;
+				agents = page.agents;
+				capped = page.capped;
+				status = 'ready';
+			} catch (cause) {
+				if (controller.signal.aborted || seq !== requestSeq) return;
+				error = cause instanceof Error ? cause.message : String(cause);
+				status = 'error';
+			}
+		})();
+
+		return () => controller.abort();
+	});
+
+	// Debounce the search term: each keystroke restarts the timer, so only a
+	// settled value reaches the fetch effect above.
+	$effect(() => {
+		const value = search;
+		const timer = setTimeout(() => {
+			debouncedSearch = value;
+		}, SEARCH_DEBOUNCE_MS);
+		return () => clearTimeout(timer);
+	});
+
+	async function loadMore(): Promise<void> {
+		if (loadingMore || !hasMore) return;
+		const seq = requestSeq;
+		loadingMore = true;
+		loadMoreError = null;
+		try {
+			const page = await requestPage(currentFilters(), rows.length);
+			if (seq !== requestSeq) return;
+			rows = appendToolErrorRows(rows, page);
+			total = page.total;
+			agents = page.agents;
+			capped = page.capped;
+		} catch (cause) {
+			if (seq !== requestSeq) return;
+			loadMoreError = cause instanceof Error ? cause.message : String(cause);
+		} finally {
+			if (seq === requestSeq) loadingMore = false;
+		}
+	}
+
+	function setPeriod(value: string): void {
+		if (isDashboardPeriod(value)) period = value;
+	}
+
+	function setScope(value: string): void {
+		scope = value === SCOPE_ALL ? null : value;
+	}
+
+	$effect(() => {
+		previouslyFocused =
+			typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
+	});
+
+	$effect(() => {
+		dialog?.focus();
+		return () => previouslyFocused?.focus();
+	});
+
+	function onDialogKeydown(event: KeyboardEvent): void {
+		if (event.key === 'Escape') {
+			event.preventDefault();
+			onClose();
+			return;
+		}
+		if (event.key !== 'Tab' || !dialog) return;
+		const focusables = Array.from(
+			dialog.querySelectorAll<HTMLElement>(
+				'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+			)
+		);
+		if (focusables.length === 0) return;
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		const active = document.activeElement;
+		if (event.shiftKey && (active === first || !dialog.contains(active))) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && active === last) {
+			event.preventDefault();
+			first.focus();
+		}
+	}
+</script>
+
+<div class="ui-modal tool-errors">
+	<button type="button" class="ui-modal__backdrop" aria-label="Close error detail" onclick={onClose}
+	></button>
+	<div
+		class="ui-modal__dialog tool-errors__dialog"
+		role="dialog"
+		aria-modal="true"
+		aria-labelledby="tool-errors-title"
+		tabindex="-1"
+		bind:this={dialog}
+		onkeydown={onDialogKeydown}
+	>
+		<header class="ui-modal__head">
+			<div class="tool-errors__titles">
+				<h2 class="ui-modal__title" id="tool-errors-title">{title}</h2>
+				<p class="tool-errors__sub">Failed tool calls</p>
+			</div>
+		</header>
+
+		<div class="tool-errors__filters">
+			<label class="tool-errors__field">
+				<span class="tool-errors__label">Tool</span>
+				<input
+					class="ui-input tool-errors__input"
+					type="text"
+					value={toolValue}
+					oninput={(event) => (toolValue = event.currentTarget.value)}
+				/>
+			</label>
+			<label class="tool-errors__field">
+				<span class="tool-errors__label">Period</span>
+				<select
+					class="tool-errors__select"
+					value={period}
+					onchange={(event) => setPeriod(event.currentTarget.value)}
+				>
+					{#each PERIOD_OPTIONS as option (option.value)}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="tool-errors__field">
+				<span class="tool-errors__label">Project</span>
+				<select
+					class="tool-errors__select"
+					value={scope ?? SCOPE_ALL}
+					onchange={(event) => setScope(event.currentTarget.value)}
+				>
+					{#each scopeChoices as option (option.value)}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="tool-errors__field">
+				<span class="tool-errors__label">Agent</span>
+				<select
+					class="tool-errors__select"
+					value={agent}
+					onchange={(event) => (agent = event.currentTarget.value)}
+				>
+					{#each agentChoices as option (option.value)}
+						<option value={option.value}>{option.label}</option>
+					{/each}
+				</select>
+			</label>
+			<label class="tool-errors__field tool-errors__field--search">
+				<span class="tool-errors__label">Search</span>
+				<input
+					class="ui-input tool-errors__input"
+					type="search"
+					placeholder="Filter error text…"
+					value={search}
+					oninput={(event) => (search = event.currentTarget.value)}
+				/>
+			</label>
+		</div>
+
+		<p class="tool-errors__total" aria-live="polite">
+			{formatNumber(total)} failed {total === 1 ? 'call' : 'calls'}
+			{#if capped}
+				<span class="tool-errors__capped">
+					(approximate — only the most recent sessions in range are counted)
+				</span>
+			{/if}
+		</p>
+
+		<div class="ui-modal__body">
+			<ScrollView>
+				<div class="ui-modal__content tool-errors__content">
+					{#if status === 'loading'}
+						<p class="tool-errors__state" role="status">Loading…</p>
+					{:else if status === 'error'}
+						<p class="tool-errors__state tool-errors__state--error" role="alert">{error}</p>
+					{:else if rows.length === 0}
+						<p class="tool-errors__state">No failed tool calls for these filters.</p>
+					{:else}
+						<table class="tool-errors__table">
+							<caption class="sr-only">Failed tool calls, newest first</caption>
+							<thead>
+								<tr>
+									<th scope="col">Time</th>
+									<th scope="col">Agent</th>
+									<th scope="col">Tool</th>
+									<th scope="col">Error text</th>
+									<th scope="col">Session</th>
+								</tr>
+							</thead>
+							<tbody>
+								{#each rows as row (row.id)}
+									<tr>
+										<td class="tool-errors__time">{formatDateTime(row.at, clock.tz)}</td>
+										<td>{row.agent}</td>
+										<td>{row.tool}</td>
+										<td class="tool-errors__error">{row.error === '' ? '—' : row.error}</td>
+										<td>
+											<a
+												class="tool-errors__session"
+												href={`/sessions/${encodeURIComponent(row.sessionId)}`}
+												title={row.sessionId}
+											>
+												{row.sessionId}
+											</a>
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+
+						{#if hasMore}
+							<div class="tool-errors__more">
+								<button
+									type="button"
+									class="ui-btn"
+									onclick={loadMore}
+									disabled={loadingMore}
+								>
+									{loadingMore ? 'Loading…' : 'Load more'}
+								</button>
+								{#if loadMoreError}
+									<p class="tool-errors__state tool-errors__state--error" role="alert">
+										{loadMoreError}
+									</p>
+								{/if}
+							</div>
+						{/if}
+					{/if}
+				</div>
+			</ScrollView>
+		</div>
+
+		<footer class="ui-modal__foot">
+			<button type="button" class="ui-btn" onclick={onClose}>Close</button>
+		</footer>
+	</div>
+</div>
+
+<style>
+	/* Size only — shape/behavior come from the global `.ui-modal` contract. */
+	.tool-errors {
+		z-index: 110;
+	}
+
+	.tool-errors__dialog {
+		width: min(80rem, calc(100vw - 2rem));
+		height: calc(100dvh - 2rem);
+	}
+
+	.tool-errors__titles {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+
+	.tool-errors__sub {
+		margin: 0;
+		font-size: var(--font-size-small);
+		color: var(--text-weak);
+	}
+
+	.tool-errors__filters {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: var(--space-2) var(--space-3);
+		padding: var(--space-3) var(--space-4);
+		border-bottom: 1px solid var(--border-weak-base);
+	}
+
+	.tool-errors__field {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+		min-width: 0;
+	}
+
+	.tool-errors__field--search {
+		flex: 1 1 14rem;
+		margin-inline-start: auto;
+	}
+
+	.tool-errors__label {
+		font-size: var(--font-size-xs);
+		color: var(--text-weak);
+	}
+
+	.tool-errors__input,
+	.tool-errors__select {
+		min-width: 8rem;
+	}
+
+	.tool-errors__select {
+		padding: var(--space-1) var(--space-2);
+		background: var(--surface-base);
+		color: var(--text-base);
+		border: 1px solid var(--border-weak-base);
+		border-radius: var(--radius-sm);
+		font: inherit;
+		font-size: var(--font-size-small);
+		line-height: var(--line-height-normal);
+		cursor: pointer;
+	}
+
+	.tool-errors__total {
+		margin: 0;
+		padding: var(--space-2) var(--space-4);
+		font-size: var(--font-size-small);
+		color: var(--text-weak);
+	}
+
+	.tool-errors__capped {
+		color: var(--color-warning-strong);
+	}
+
+	.tool-errors__state {
+		margin: 0;
+		color: var(--text-weak);
+		font-size: var(--font-size-small);
+	}
+
+	.tool-errors__state--error {
+		color: var(--color-danger-strong);
+	}
+
+	.tool-errors__table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--font-size-small);
+	}
+
+	.tool-errors__table th,
+	.tool-errors__table td {
+		padding: var(--space-2);
+		border-bottom: 1px solid var(--border-weaker-base);
+		text-align: left;
+		vertical-align: top;
+	}
+
+	.tool-errors__table thead th {
+		position: sticky;
+		top: 0;
+		background: var(--background-strong);
+		color: var(--text-weak);
+		font-weight: var(--font-weight-medium);
+	}
+
+	.tool-errors__time {
+		white-space: nowrap;
+		font-variant-numeric: tabular-nums;
+		color: var(--text-weak);
+	}
+
+	.tool-errors__error {
+		overflow-wrap: anywhere;
+		white-space: pre-wrap;
+	}
+
+	.tool-errors__session {
+		font-family: var(--font-family-mono);
+		color: var(--text-interactive-base);
+	}
+
+	.tool-errors__more {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-4) 0 var(--space-2);
+	}
+</style>

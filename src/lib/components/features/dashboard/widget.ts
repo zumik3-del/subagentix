@@ -30,6 +30,12 @@ export interface WidgetBodyProps {
 	 * for every body; omitted only when the shell has no settings hook.
 	 */
 	onSettings?: () => void;
+	/**
+	 * Opens the in-place error detail for a tool (task #481). The shell derives
+	 * the overlay from the `?toolErrors=` URL param and supplies this for every
+	 * body; omitted only when the shell has no overlay hook.
+	 */
+	onOpenToolErrors?: (tool: string) => void;
 }
 
 /** A width/height patch applied to one placement (task #449). */

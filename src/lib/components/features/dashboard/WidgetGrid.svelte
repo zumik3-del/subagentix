@@ -51,6 +51,8 @@
 		refreshToken?: number;
 		/** Opens the size-settings modal for a widget id (task #449). */
 		onWidgetSettings?: (id: WidgetId) => void;
+		/** Opens the in-place error detail for a tool (task #481). */
+		onOpenToolErrors?: (tool: string) => void;
 		/**
 		 * Persistence hop for the gridstack enhancement (epic #462, stage 3):
 		 * called once per settled drag/resize with the full placement list,
@@ -66,6 +68,7 @@
 		filter = DEFAULT_FILTER,
 		refreshToken = 0,
 		onWidgetSettings,
+		onOpenToolErrors,
 		onLayoutChange
 	}: Props = $props();
 
@@ -189,7 +192,7 @@
 				<WidgetHost
 					{def}
 					load={loaders[def.id]}
-					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id) }}
+					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id), onOpenToolErrors }}
 				/>
 			</div>
 		</li>

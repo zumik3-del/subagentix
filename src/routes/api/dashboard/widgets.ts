@@ -164,26 +164,20 @@ const DEFAULT_PERIOD = '30d';
 /** `?scope=` value meaning "every directory" (maps to `filter.scope = null`). */
 const ALL_SCOPES = 'all';
 
-/** A validated request, or the 400/404 response to return instead. */
-export type DashboardRequest =
-	| { ok: true; widgetId: WidgetId; filter: DashboardFilter }
+/** A validated filter, or the 400 response to return instead. */
+export type DashboardFilterRequest =
+	| { ok: true; filter: DashboardFilter }
 	| { ok: false; response: Response };
 
 /**
- * Validate `[widget]`, `?period=` and `?scope=`. An unknown widget id is a 404;
- * a value outside the period enum or a scope that is not a known directory is a
- * 400 `{ error, field }`. A blank/absent period or scope falls back to the
- * documented defaults (`30d`, all directories) rather than erroring, so an
- * empty query string is still a valid request.
+ * Validate `?period=` and `?scope=` on their own — shared by the widget
+ * endpoint and the top-tools error detail endpoint, so both reject a bad filter
+ * identically. A value outside the period enum or a scope that is not a known
+ * directory is a 400 `{ error, field }`; a blank/absent period or scope falls
+ * back to the documented defaults (`30d`, all directories) rather than
+ * erroring, so an empty query string is still a valid request.
  */
-export function resolveDashboardRequest(widgetParam: string, url: URL): DashboardRequest {
-	if (!isWidgetId(widgetParam)) {
-		return {
-			ok: false,
-			response: json({ error: `Unknown widget "${widgetParam}".` }, { status: 404 })
-		};
-	}
-
+export function resolveFilter(url: URL): DashboardFilterRequest {
 	const periodParam = url.searchParams.get('period');
 	const period = periodParam === null || periodParam === '' ? DEFAULT_PERIOD : periodParam;
 	if (!isDashboardPeriod(period)) {
@@ -207,5 +201,26 @@ export function resolveDashboardRequest(widgetParam: string, url: URL): Dashboar
 		scope = scopeParam;
 	}
 
-	return { ok: true, widgetId: widgetParam, filter: { period, scope } };
+	return { ok: true, filter: { period, scope } };
+}
+
+/** A validated widget request, or the 400/404 response to return instead. */
+export type DashboardRequest =
+	| { ok: true; widgetId: WidgetId; filter: DashboardFilter }
+	| { ok: false; response: Response };
+
+/**
+ * Validate `[widget]` on top of {@link resolveFilter}. An unknown widget id is
+ * a 404; a bad period/scope is the 400 the shared filter validation returns.
+ */
+export function resolveDashboardRequest(widgetParam: string, url: URL): DashboardRequest {
+	if (!isWidgetId(widgetParam)) {
+		return {
+			ok: false,
+			response: json({ error: `Unknown widget "${widgetParam}".` }, { status: 404 })
+		};
+	}
+	const resolved = resolveFilter(url);
+	if (!resolved.ok) return resolved;
+	return { ok: true, widgetId: widgetParam, filter: resolved.filter };
 }

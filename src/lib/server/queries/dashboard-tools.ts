@@ -6,7 +6,7 @@
  * the per-chunk partials in JS. `event` stays untouched.
  */
 import { getDb } from '../db';
-import { jsonEquals, jsonExtract, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import { jsonEquals, jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
 import {
 	chunk,
 	DEFAULT_TOP_N,
@@ -23,17 +23,21 @@ export interface ToolUsageRecord {
 	name: string;
 	/** Matching tool parts in the chunked session set. */
 	count: number;
-	/** Of `count`, parts whose `state.status` is `error`. */
+	/** Of `count`, parts whose `state.status` is `error` or `failed`. */
 	errors: number;
 }
 
-/** `part.data.state.status` value marking a failed tool call. */
-const ERROR_STATUS = 'error';
+/**
+ * `part.data.state.status` values marking a failed tool call. Deliberately the
+ * same pair `model/node.ts:summarizeStepTools` uses, so the widget's errors
+ * column and the error-detail total (task #481) count the same rows.
+ */
+const ERROR_STATUSES = ['error', 'failed'] as const;
 
 /**
  * Tool parts grouped by `part.data.tool`, restricted to the given session ids
  * (`part_session_idx`), each group carrying its total `count` and its `errors`
- * (`state.status = 'error'`). The id list is queried in chunks of
+ * (`state.status IN ('error', 'failed')`). The id list is queried in chunks of
  * {@link IN_CHUNK_SIZE} and the per-tool partials are merged in JS, so a
  * `period=all` call stays under SQLite's bound-parameter limit; the caller caps
  * the id set itself (see `MAX_TOOL_SESSIONS`), which is what keeps the `part`
@@ -47,7 +51,7 @@ export function aggregateToolUsage(
 ): ToolUsageRecord[] {
 	if (sessionIds.length === 0) return [];
 	const typeFilter = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
-	const errorFilter = jsonEquals('part.data', JSON_PATH.part.status, ERROR_STATUS);
+	const errorFilter = jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES);
 	const toolExpr = `COALESCE(NULLIF(trim(${jsonExtract(
 		'part.data',
 		JSON_PATH.part.tool

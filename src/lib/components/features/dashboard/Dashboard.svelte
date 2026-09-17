@@ -29,6 +29,7 @@
 	import WidgetGrid from './WidgetGrid.svelte';
 	import WidgetSettings from './WidgetSettings.svelte';
 	import WidgetsModal from './WidgetsModal.svelte';
+	import ToolErrorsModal from './ToolErrorsModal.svelte';
 	import { DEFAULT_FILTER, type FilterOption } from './filter';
 	import { WIDGET_LOADERS } from './loaders';
 	import { updatePlacement } from './picker';
@@ -46,6 +47,13 @@
 		scopes?: readonly FilterOption[];
 		/** Selector callback; the page turns it into a `goto` URL update. */
 		onFilterChange?: (filter: DashboardFilter) => void;
+		/**
+		 * Tool whose error detail overlay is open (`?toolErrors=`); `null` while
+		 * closed. The page owns the URL state and passes it down (task #481).
+		 */
+		errorTool?: string | null;
+		/** Opens (`tool`) or closes (`null`) the error detail overlay. */
+		onToolErrorsChange?: (tool: string | null) => void;
 	}
 
 	let {
@@ -53,8 +61,13 @@
 		filter = DEFAULT_FILTER,
 		refreshToken = 0,
 		scopes = [],
-		onFilterChange
+		onFilterChange,
+		errorTool = null,
+		onToolErrorsChange
 	}: Props = $props();
+
+	/** Registry title shown by the error-detail overlay header (task #481). */
+	const toolErrorsTitle = findWidgetDef('top-tools').title;
 
 	// Applied selection: starts from the loader, and a save replaces it with
 	// the normalised placements the settings API returned, so the grid
@@ -165,6 +178,7 @@
 			{filter}
 			{refreshToken}
 			onWidgetSettings={onWidgetSettings}
+			onOpenToolErrors={(tool) => onToolErrorsChange?.(tool)}
 			{onLayoutChange}
 		/>
 	{/if}
@@ -186,6 +200,16 @@
 	onChange={onSettingsChange}
 	onClose={closeSettings}
 />
+
+{#if errorTool !== null}
+	<ToolErrorsModal
+		tool={errorTool}
+		title={toolErrorsTitle}
+		{filter}
+		{scopes}
+		onClose={() => onToolErrorsChange?.(null)}
+	/>
+{/if}
 
 <style>
 	/* Side padding matches the turn page (`/sessions/[id]`): `--space-4`. */
