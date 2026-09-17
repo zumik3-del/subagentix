@@ -98,17 +98,15 @@ export interface WidgetDef {
 	minHeight: number;
 	/** Dominant aggregation source tier (`S` | `M` | `P`). */
 	tier: WidgetTier;
-	/** `true` when the widget is part of the first-visit default selection. */
-	defaultOn: boolean;
 	/** Widget data endpoint: `/api/dashboard/<id>`. */
 	source: string;
 }
 
 /**
- * Every v1 widget, in registry (picker) order. `defaultOn` is `true` for the
- * six first-visit defaults; optional catalog extensions (top models, token
- * mix, activity heatmap) are intentionally not registered here (spec §3). The
- * `width`/`height` are the per-widget registry defaults (task #438).
+ * Every v1 widget, in registry (picker) order. Optional catalog extensions
+ * (top models, token mix, activity heatmap) are intentionally not registered
+ * here (spec §3). The `width`/`height` are the per-widget registry defaults
+ * (task #438); the first-visit arrangement is {@link DEFAULT_WIDGETS}.
  */
 export const WIDGET_DEFS: readonly WidgetDef[] = [
 	{
@@ -118,7 +116,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 4,
 		minHeight: 4,
 		tier: 'M',
-		defaultOn: true,
 		source: '/api/dashboard/kpi'
 	},
 	{
@@ -128,7 +125,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 6,
 		minHeight: 6,
 		tier: 'S',
-		defaultOn: true,
 		source: '/api/dashboard/sessions-per-day'
 	},
 	{
@@ -138,7 +134,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 6,
 		minHeight: 6,
 		tier: 'M',
-		defaultOn: true,
 		source: '/api/dashboard/cost-per-day'
 	},
 	{
@@ -148,7 +143,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 6,
 		minHeight: 4,
 		tier: 'P',
-		defaultOn: true,
 		source: '/api/dashboard/top-tools'
 	},
 	{
@@ -158,7 +152,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 6,
 		minHeight: 4,
 		tier: 'S',
-		defaultOn: true,
 		source: '/api/dashboard/agent-distribution'
 	},
 	{
@@ -168,7 +161,6 @@ export const WIDGET_DEFS: readonly WidgetDef[] = [
 		height: 6,
 		minHeight: 2,
 		tier: 'S',
-		defaultOn: true,
 		source: '/api/dashboard/top-projects'
 	}
 ];
@@ -195,19 +187,21 @@ export function isWidgetId(value: unknown): value is WidgetId {
 }
 
 /**
- * The first-visit default placements, in registry order. Derived from
- * {@link WIDGET_DEFS} so `defaultOn`/default sizes stay the single source of
- * truth; the grid positions are resolved through {@link resolvePlacements} so
- * every default widget is positioned with no overlap (first visit renders a
- * packed grid, never a stack of unplaced widgets).
+ * The first-visit default placements, in registry order: the hand-arranged
+ * starter layout a fresh install renders before any settings are saved (the
+ * explicit sizes and grid positions mirror the production dashboard every
+ * widget was tuned to). Fed through {@link resolvePlacements} so the entries
+ * are clamped, deduped and validated against the grid exactly like a persisted
+ * placement, and the output stays registry order.
  */
-export const DEFAULT_WIDGETS: readonly WidgetPlacement[] = resolvePlacements(
-	WIDGET_DEFS.filter((def) => def.defaultOn).map((def) => ({
-		id: def.id,
-		width: def.width,
-		height: def.height
-	}))
-);
+export const DEFAULT_WIDGETS: readonly WidgetPlacement[] = resolvePlacements([
+	{ id: 'kpi', width: 4, height: 6, x: 0, y: 0 },
+	{ id: 'sessions-per-day', width: 1, height: 7, x: 5, y: 8 },
+	{ id: 'cost-per-day', width: 1, height: 7, x: 4, y: 8 },
+	{ id: 'top-tools', width: 2, height: 9, x: 0, y: 6 },
+	{ id: 'agent-distribution', width: 2, height: 8, x: 4, y: 0 },
+	{ id: 'top-projects', width: 2, height: 9, x: 2, y: 6 }
+]);
 
 /** Parse one raw entry into an id plus optional size/position overrides; unknown -> null. */
 function parsePlacement(

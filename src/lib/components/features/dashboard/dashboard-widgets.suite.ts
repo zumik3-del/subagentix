@@ -95,7 +95,7 @@ function countClass(html: string, token: string): number {
 
 // --- Fixtures ----------------------------------------------------------------
 
-const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' };
+const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, tier: 'M', source: '/api/dashboard/kpi' };
 
 function renderWidgetCard(props: Record<string, unknown> = {}): string {
 	return render(WidgetCard, {
@@ -565,7 +565,7 @@ describe('WidgetSettings SSR', () => {
 		const html = render(WidgetSettings, {
 			props: {
 				open: false,
-				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' },
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', source: '/api/dashboard/kpi' },
 				placement: { id: 'kpi', width: 4, height: 2 },
 				onChange: () => {},
 				onClose: () => {}
@@ -581,7 +581,7 @@ describe('WidgetSettings SSR', () => {
 		const html = render(WidgetSettings, {
 			props: {
 				open: true,
-				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', defaultOn: true, source: '/api/dashboard/kpi' },
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', source: '/api/dashboard/kpi' },
 				placement: { id: 'kpi', width: 4, height: 2 },
 				onChange: () => {},
 				onClose: () => {}

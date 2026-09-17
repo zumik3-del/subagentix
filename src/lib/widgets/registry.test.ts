@@ -453,14 +453,14 @@ describe('registry source stays server-free and DOM-free (spec §2.1)', () => {
 });
 
 	describe('DEFAULT_WIDGETS positions', () => {
-		test('resolves to a packed non-overlapping layout in registry order', () => {
+		test('is the production first-visit layout (registry order, explicit positions)', () => {
 			const expected: WidgetPlacement[] = [
-				{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
-				{ id: 'sessions-per-day', width: 3, height: 6, x: 0, y: 4 },
-				{ id: 'cost-per-day', width: 3, height: 6, x: 3, y: 4 },
-				{ id: 'top-tools', width: 3, height: 6, x: 0, y: 10 },
-				{ id: 'agent-distribution', width: 2, height: 6, x: 3, y: 10 },
-				{ id: 'top-projects', width: 3, height: 6, x: 0, y: 16 }
+				{ id: 'kpi', width: 4, height: 6, x: 0, y: 0 },
+				{ id: 'sessions-per-day', width: 1, height: 7, x: 5, y: 8 },
+				{ id: 'cost-per-day', width: 1, height: 7, x: 4, y: 8 },
+				{ id: 'top-tools', width: 2, height: 9, x: 0, y: 6 },
+				{ id: 'agent-distribution', width: 2, height: 8, x: 4, y: 0 },
+				{ id: 'top-projects', width: 2, height: 9, x: 2, y: 6 }
 			];
 			expect(DEFAULT_WIDGETS).toEqual(expected);
 		});
