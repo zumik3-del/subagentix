@@ -17,6 +17,7 @@
 	 * optimistically and persist through the shared coalescing writer.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
+	import type { ToolCallDetail } from '$lib/model/tool-errors';
 	import Icon from '$lib/components/primitives/Icon.svelte';
 	import {
 		findWidgetDef,
@@ -48,12 +49,13 @@
 		/** Selector callback; the page turns it into a `goto` URL update. */
 		onFilterChange?: (filter: DashboardFilter) => void;
 		/**
-		 * Tool whose error detail overlay is open (`?toolErrors=`); `null` while
-		 * closed. The page owns the URL state and passes it down (task #481).
+		 * Tool-call detail overlay target (`?toolErrors=` or `?toolCalls=`);
+		 * `null` while closed. The page owns the URL state and passes it down
+		 * (tasks #481/#484).
 		 */
-		errorTool?: string | null;
-		/** Opens (`tool`) or closes (`null`) the error detail overlay. */
-		onToolErrorsChange?: (tool: string | null) => void;
+		toolDetail?: ToolCallDetail | null;
+		/** Opens (`detail`) or closes (`null`) the tool-call detail overlay. */
+		onToolDetailChange?: (detail: ToolCallDetail | null) => void;
 	}
 
 	let {
@@ -62,11 +64,11 @@
 		refreshToken = 0,
 		scopes = [],
 		onFilterChange,
-		errorTool = null,
-		onToolErrorsChange
+		toolDetail = null,
+		onToolDetailChange
 	}: Props = $props();
 
-	/** Registry title shown by the error-detail overlay header (task #481). */
+	/** Registry title shown by the tool-call detail overlay header (#481/#484). */
 	const toolErrorsTitle = findWidgetDef('top-tools').title;
 
 	// Applied selection: starts from the loader, and a save replaces it with
@@ -178,7 +180,7 @@
 			{filter}
 			{refreshToken}
 			onWidgetSettings={onWidgetSettings}
-			onOpenToolErrors={(tool) => onToolErrorsChange?.(tool)}
+			onOpenToolDetail={(tool, mode) => onToolDetailChange?.({ tool, mode })}
 			{onLayoutChange}
 		/>
 	{/if}
@@ -201,13 +203,14 @@
 	onClose={closeSettings}
 />
 
-{#if errorTool !== null}
+{#if toolDetail !== null}
 	<ToolErrorsModal
-		tool={errorTool}
+		tool={toolDetail.tool}
+		mode={toolDetail.mode}
 		title={toolErrorsTitle}
 		{filter}
 		{scopes}
-		onClose={() => onToolErrorsChange?.(null)}
+		onClose={() => onToolDetailChange?.(null)}
 	/>
 {/if}
 

@@ -1,13 +1,19 @@
 <script lang="ts">
 	/**
-	 * In-place error detail overlay for the top-tools widget (task #481).
+	 * In-place tool-call detail overlay for the top-tools widget (task #481;
+	 * all-calls mode #484).
 	 *
-	 * Opened by the Errors cell of `TopToolsWidget`; the shell mounts it from the
-	 * `?toolErrors=` URL param, so it opens over the dashboard (no separate
-	 * route), a deep link restores it, and browser Back closes it. It lists the
-	 * individual failed tool calls newest first, with server-side filters on top
-	 * (tool, period, project, agent), a debounced error-text search and
-	 * limit/offset paging through the shared `/api/dashboard/tool-errors`.
+	 * Opened by the Errors/Calls/name cells of `TopToolsWidget`; the shell mounts
+	 * it from the `?toolErrors=` (failures) or `?toolCalls=` (all calls) URL
+	 * param, so it opens over the dashboard (no separate route), a deep link
+	 * restores it, and browser Back closes it. It lists the individual tool calls
+	 * newest first, with server-side filters on top (status mode, tool, period,
+	 * project, agent), a debounced error-text search and limit/offset paging
+	 * through the shared `/api/dashboard/tool-errors`.
+	 *
+	 * In `all` mode every call is listed and a raw `Status` column is added; in
+	 * `errors` mode only failed calls appear (Time, Agent, Tool, Error text,
+	 * Session). The copy (subtitle, total, empty state) follows the mode.
 	 *
 	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
 	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
@@ -17,7 +23,7 @@
 	import { untrack } from 'svelte';
 	import type { DashboardFilter, DashboardPeriod } from '$lib/model/dashboard';
 	import { isDashboardPeriod } from '$lib/model/dashboard';
-	import type { ToolErrorEntry, ToolErrorsPage } from '$lib/model/tool-errors';
+	import type { ToolCallStatus, ToolErrorEntry, ToolErrorsPage } from '$lib/model/tool-errors';
 	import { DEFAULT_ERROR_LIMIT } from '$lib/model/tool-errors';
 	import { formatDateTime, formatNumber } from '$lib/model/format';
 	import { clock } from '$lib/model/clock.svelte';
@@ -28,6 +34,8 @@
 	interface Props {
 		/** Initial tool filter; comes from the clicked widget row. */
 		tool: string;
+		/** Detail mode: `errors` = failed only, `all` = every call. */
+		mode: ToolCallStatus;
 		/** Widget title shown in the header (e.g. `Top tools`). */
 		title: string;
 		/** Dashboard filter seeding period/scope. */
@@ -38,7 +46,7 @@
 		onClose: () => void;
 	}
 
-	let { tool, title, filter, scopes = [], onClose }: Props = $props();
+	let { tool, mode, title, filter, scopes = [], onClose }: Props = $props();
 
 	/** One page request; the search is debounced so typing does not spam it. */
 	const PAGE_SIZE = DEFAULT_ERROR_LIMIT;
@@ -49,6 +57,7 @@
 
 	// Editable filter state, seeded once from the click + the dashboard filter
 	// (the shell mounts the modal per open, so the snapshot never goes stale).
+	let callStatus = untrack(() => mode);
 	let toolValue = $state(untrack(() => tool));
 	let period = $state(untrack(() => filter.period));
 	let scope = $state(untrack(() => filter.scope));
@@ -70,6 +79,19 @@
 	/** Monotonic request id, so a late response can never overwrite a newer one. */
 	let requestSeq = 0;
 
+	/** `all` lists every call and adds a Status column; `errors` is failures only. */
+	let isAll = $derived(callStatus === 'all');
+	/** Mode-dependent copy: subtitle, total line and empty state. */
+	let subtitle = $derived(isAll ? 'Tool calls' : 'Failed tool calls');
+	let totalText = $derived(
+		isAll
+			? `${formatNumber(total)} ${total === 1 ? 'call' : 'calls'}`
+			: `${formatNumber(total)} ${total === 1 ? 'failed call' : 'failed calls'}`
+	);
+	let emptyText = $derived(
+		isAll ? 'No tool calls for these filters.' : 'No failed tool calls for these filters.'
+	);
+
 	let scopeChoices = $derived<readonly FilterOption[]>([ALL_SCOPE_OPTION, ...scopes]);
 	let agentChoices = $derived<readonly FilterOption[]>([
 		{ value: '', label: 'All agents' },
@@ -78,7 +100,14 @@
 	let hasMore = $derived(rows.length < total);
 
 	function currentFilters(): ToolErrorViewFilters {
-		return { tool: toolValue, period, scope, agent, search: debouncedSearch };
+		return {
+			status: callStatus,
+			tool: toolValue,
+			period,
+			scope,
+			agent,
+			search: debouncedSearch
+		};
 	}
 
 	/** Best-effort error text: the API's `error` field, else the HTTP status. */
@@ -233,7 +262,7 @@
 		<header class="ui-modal__head">
 			<div class="tool-errors__titles">
 				<h2 class="ui-modal__title" id="tool-errors-title">{title}</h2>
-				<p class="tool-errors__sub">Failed tool calls</p>
+				<p class="tool-errors__sub">{subtitle}</p>
 			</div>
 		</header>
 
@@ -296,7 +325,7 @@
 		</div>
 
 		<p class="tool-errors__total" aria-live="polite">
-			{formatNumber(total)} failed {total === 1 ? 'call' : 'calls'}
+			{totalText}
 			{#if capped}
 				<span class="tool-errors__capped">
 					(approximate — only the most recent sessions in range are counted)
@@ -312,15 +341,18 @@
 					{:else if status === 'error'}
 						<p class="tool-errors__state tool-errors__state--error" role="alert">{error}</p>
 					{:else if rows.length === 0}
-						<p class="tool-errors__state">No failed tool calls for these filters.</p>
+						<p class="tool-errors__state">{emptyText}</p>
 					{:else}
 						<table class="tool-errors__table">
-							<caption class="sr-only">Failed tool calls, newest first</caption>
+							<caption class="sr-only">{subtitle}, newest first</caption>
 							<thead>
 								<tr>
 									<th scope="col">Time</th>
 									<th scope="col">Agent</th>
 									<th scope="col">Tool</th>
+									{#if isAll}
+										<th scope="col">Status</th>
+									{/if}
 									<th scope="col">Error text</th>
 									<th scope="col">Session</th>
 								</tr>
@@ -331,6 +363,11 @@
 										<td class="tool-errors__time">{formatDateTime(row.at, clock.tz)}</td>
 										<td>{row.agent}</td>
 										<td>{row.tool}</td>
+										{#if isAll}
+											<td class="tool-errors__status">
+												{row.status === '' ? '—' : row.status}
+											</td>
+										{/if}
 										<td class="tool-errors__error">{row.error === '' ? '—' : row.error}</td>
 										<td>
 											<a

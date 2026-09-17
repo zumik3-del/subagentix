@@ -1,16 +1,19 @@
 /**
- * SSR render suite for TopToolsTable and ToolErrorsModal (task #481).
+ * SSR render suite for TopToolsTable and ToolErrorsModal (task #481; all-calls #484).
  *
  * Pins the rendered structure:
- * - TopToolsTable: errors cell is <button> only when errors > 0 and onOpenToolErrors is supplied;
- *   otherwise it is inert <span>.
- * - ToolErrorsModal: renders the overlay shell with title, Close footer button, filters, table columns,
- *   and load-more when hasMore is true.
+ * - TopToolsTable: calls count and tool name are interactive buttons opening
+ *   mode `all`; errors count is a button only when errors > 0 (mode `errors`);
+ *   the errors button carries no underline (text-decoration: none).
+ * - ToolErrorsModal: all mode renders a Status column and "Tool calls" copy;
+ *   failures mode keeps "Failed tool calls" copy and omits the Status column.
  *
  * No DOM runtime, no DB. Uses Vite's SSR module runner.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createServer, type ViteDevServer } from 'vite';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type RenderFn = (
 	component: unknown,
@@ -80,9 +83,9 @@ const ROWS_NO_ERRORS = [
 // --- TopToolsTable ------------------------------------------------------------
 
 describe('TopToolsTable SSR', () => {
-	test('errors cell is a <button> when errors > 0 and onOpenToolErrors is supplied', () => {
+	test('errors cell is a <button> when errors > 0 and onOpenToolDetail is supplied', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: ROWS_WITH_ERRORS, onOpenToolErrors: () => {} }
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
 		}).body;
 		// The first row (bash, errors=5) should have a button.
 		expect(countClass(html, 'top-tools__errors-btn')).toBe(1);
@@ -91,32 +94,32 @@ describe('TopToolsTable SSR', () => {
 
 	test('errors cell is a <span> when errors == 0', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: ROWS_WITH_ERRORS, onOpenToolErrors: () => {} }
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
 		}).body;
 		// The second row (read, errors=0) should NOT have a button.
 		// Count buttons: only the bash row has errors>0.
 		expect(countClass(html, 'top-tools__errors-btn')).toBe(1);
 	});
 
-	test('errors cell is inert <span> when onOpenToolErrors is absent', () => {
+	test('errors cell is inert <span> when onOpenToolDetail is absent', () => {
 		const html = render(TopToolsTable, {
 			props: { rows: ROWS_WITH_ERRORS }
 		}).body;
-		// Without onOpenToolErrors, even rows with errors > 0 render as <span>.
+		// Without onOpenToolDetail, even rows with errors > 0 render as <span>.
 		expect(countClass(html, 'top-tools__errors-btn')).toBe(0);
 		expect(html).toContain('top-tools__errors');
 	});
 
-	test('errors cell is inert <span> when errors == 0 even with onOpenToolErrors', () => {
+	test('errors cell is inert <span> when errors == 0 even with onOpenToolDetail', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: ROWS_NO_ERRORS, onOpenToolErrors: () => {} }
+			props: { rows: ROWS_NO_ERRORS, onOpenToolDetail: () => {} }
 		}).body;
 		expect(countClass(html, 'top-tools__errors-btn')).toBe(0);
 	});
 
 	test('table has the correct columns in thead', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: ROWS_WITH_ERRORS, onOpenToolErrors: () => {} }
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
 		}).body;
 		expect(html).toContain('scope="col"');
 		expect(html).toContain('Tool');
@@ -126,7 +129,7 @@ describe('TopToolsTable SSR', () => {
 
 	test('renders all rows from the input', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: ROWS_WITH_ERRORS, onOpenToolErrors: () => {} }
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
 		}).body;
 		expect(html).toContain('>bash<');
 		expect(html).toContain('>read<');
@@ -134,19 +137,80 @@ describe('TopToolsTable SSR', () => {
 
 	test('empty rows renders an empty table body', () => {
 		const html = render(TopToolsTable, {
-			props: { rows: [], onOpenToolErrors: () => {} }
+			props: { rows: [], onOpenToolDetail: () => {} }
 		}).body;
 		expect(html).toContain('top-tools__table');
 		// No data rows should be present.
 		expect(countClass(html, 'top-tools__name')).toBe(0);
 	});
+
+	// --- All-calls mode: calls count + tool name are interactive (task #484) ---
+
+	test('tool name renders as a button when onOpenToolDetail is supplied', () => {
+		const html = render(TopToolsTable, {
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
+		}).body;
+		// Both rows should have a button for the tool name.
+		expect(countClass(html, 'top-tools__name-btn')).toBe(2);
+		// The button should carry an aria-label mentioning "all calls".
+		expect(html).toContain('aria-label="View all calls for bash"');
+		expect(html).toContain('aria-label="View all calls for read"');
+	});
+
+	test('calls count renders as a button when onOpenToolDetail is supplied', () => {
+		const html = render(TopToolsTable, {
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
+		}).body;
+		// Both rows should have a button for the calls count.
+		expect(countClass(html, 'top-tools__count-btn')).toBe(2);
+		// The button should carry an aria-label mentioning the count and "calls".
+		expect(html).toContain('aria-label="View 100 calls for bash"');
+		expect(html).toContain('aria-label="View 50 calls for read"');
+	});
+
+	test('tool name and calls count are inert text when onOpenToolDetail is absent', () => {
+		const html = render(TopToolsTable, {
+			props: { rows: ROWS_WITH_ERRORS }
+		}).body;
+		expect(countClass(html, 'top-tools__name-btn')).toBe(0);
+		expect(countClass(html, 'top-tools__count-btn')).toBe(0);
+		// But the text content should still be there.
+		expect(html).toContain('>bash<');
+		expect(html).toContain('>100<');
+	});
+
+	test('errors button carries no underline (text-decoration: none)', () => {
+		// SSR does not emit <style> blocks, so we check the component source
+		// to pin the no-underline contract.
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/TopToolsTable.svelte'),
+			'utf8'
+		);
+		// The source must declare text-decoration: none on the errors button.
+		expect(source).toContain('text-decoration: none');
+		// And it must appear in the .top-tools__errors-btn rule.
+		expect(source).toContain('.top-tools__errors-btn');
+	});
+
+	test('errors button is a <button> element, not an <a>', () => {
+		const html = render(TopToolsTable, {
+			props: { rows: ROWS_WITH_ERRORS, onOpenToolDetail: () => {} }
+		}).body;
+		// The errors button should use <button> tag.
+		expect(html).toContain('<button');
+		// It should not be an anchor.
+		const buttonMatches = html.match(/<button[^>]*class="[^"]*top-tools__errors-btn[^"]*"/g);
+		expect(buttonMatches).not.toBeNull();
+		expect(buttonMatches!.length).toBe(1);
+	});
 });
 
 // --- ToolErrorsModal SSR ------------------------------------------------------
 
-describe('ToolErrorsModal SSR', () => {
+	describe('ToolErrorsModal SSR', () => {
 	const baseProps = {
 		tool: 'bash',
+		mode: 'errors' as const,
 		title: 'Top tools',
 		filter: { period: '30d', scope: null },
 		scopes: [{ value: '/repo/a', label: 'Repo A' }],
@@ -192,7 +256,7 @@ describe('ToolErrorsModal SSR', () => {
 		expect(html).toContain('Loading');
 	});
 
-	test('renders the total line with failed call count text', () => {
+	test('renders the total line with failed call count text in errors mode', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
 		// In SSR, the total is 0 (no data loaded yet) so it shows "0 failed calls".
 		expect(html).toContain('failed');
@@ -215,5 +279,50 @@ describe('ToolErrorsModal SSR', () => {
 	test('modal has the tool-errors class on the root', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
 		expect(html).toContain('ui-modal tool-errors');
+	});
+
+	// --- All-calls mode copy and Status column (task #484) -------------------
+
+	test('errors mode subtitle says "Failed tool calls"', () => {
+		const html = render(ToolErrorsModal, { props: baseProps }).body;
+		expect(html).toContain('Failed tool calls');
+	});
+
+	test('errors mode total text says "failed calls"', () => {
+		const html = render(ToolErrorsModal, { props: baseProps }).body;
+		expect(html).toContain('failed calls');
+	});
+
+	test('errors mode does not render a Status column header', () => {
+		const html = render(ToolErrorsModal, { props: baseProps }).body;
+		// In SSR the table is in loading state, but we verify errors mode copy
+		// does not include "Status" column text.
+		expect(html).not.toContain('>Status<');
+	});
+
+	test('all mode subtitle says "Tool calls"', async () => {
+		const allProps = { ...baseProps, mode: 'all' as const };
+		const html = render(ToolErrorsModal, { props: allProps }).body;
+		expect(html).toContain('Tool calls');
+		expect(html).not.toContain('Failed tool calls');
+	});
+
+	test('all mode total text says "calls" not "failed calls"', async () => {
+		const allProps = { ...baseProps, mode: 'all' as const };
+		const html = render(ToolErrorsModal, { props: allProps }).body;
+		// In SSR total is 0, so it shows "0 calls" not "0 failed calls".
+		expect(html).toContain('0 calls');
+		expect(html).not.toContain('0 failed calls');
+	});
+
+	test('all mode empty text says "No tool calls"', () => {
+		// SSR renders the loading placeholder, not the empty state. We check the
+		// component source to pin the all-mode empty-text contract.
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// The source should contain the all-mode empty text string.
+		expect(source).toContain('No tool calls for these filters.');
 	});
 });

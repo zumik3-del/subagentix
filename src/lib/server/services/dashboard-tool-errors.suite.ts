@@ -241,6 +241,71 @@ describe('consistency with top-tools aggregate', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* All-calls mode at service level (task #484)                          */
+/* ------------------------------------------------------------------ */
+
+describe('getToolErrors — all-calls mode', () => {
+	test('status=all returns more rows than status=errors', () => {
+		const errorsPage = getToolErrors({ period: 'all', scope: null }, { status: 'errors' }, T);
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		expect(allPage.rows.length).toBeGreaterThan(errorsPage.rows.length);
+		expect(allPage.total).toBeGreaterThan(errorsPage.total);
+	});
+
+	test('status=all rows include completed-status entries', () => {
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		const completedRows = allPage.rows.filter((r) => r.status === 'completed');
+		expect(completedRows.length).toBeGreaterThan(0);
+	});
+
+	test('status=all rows each carry a string status field', () => {
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		for (const row of allPage.rows) {
+			expect(typeof row.status).toBe('string');
+		}
+	});
+
+	test('status=all widens agents list compared to errors mode', () => {
+		const errorsPage = getToolErrors({ period: 'all', scope: null }, { status: 'errors' }, T);
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		// All mode agents should be a superset of errors mode agents.
+		for (const agent of errorsPage.agents) {
+			expect(allPage.agents).toContain(agent);
+		}
+		// All mode should include at least as many agents.
+		expect(allPage.agents.length).toBeGreaterThanOrEqual(errorsPage.agents.length);
+	});
+
+	test('status=all preserves newest-first ordering', () => {
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		for (let i = 1; i < allPage.rows.length; i++) {
+			const prev = allPage.rows[i - 1];
+			const curr = allPage.rows[i];
+			expect(prev.at).toBeGreaterThanOrEqual(curr.at);
+		}
+	});
+
+	test('status=all preserves paging', () => {
+		const fullPage = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 100, offset: 0 }, T);
+		const page1 = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 1, offset: 0 }, T);
+		const page2 = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 1, offset: 1 }, T);
+		expect(page1.rows).toHaveLength(1);
+		expect(page2.rows).toHaveLength(1);
+		expect(page1.rows[0].id).not.toBe(page2.rows[0].id);
+		expect(page1.total).toBe(fullPage.total);
+		expect(page2.total).toBe(fullPage.total);
+	});
+
+	test('default status (absent) is errors, not all', () => {
+		const defaultPage = getToolErrors({ period: 'all', scope: null }, {}, T);
+		const errorsPage = getToolErrors({ period: 'all', scope: null }, { status: 'errors' }, T);
+		expect(defaultPage.total).toBe(errorsPage.total);
+		expect(defaultPage.rows).toEqual(errorsPage.rows);
+		expect(defaultPage.agents).toEqual(errorsPage.agents);
+	});
+});
+
+/* ------------------------------------------------------------------ */
 /* Read-only guarantee                                                  */
 /* ------------------------------------------------------------------ */
 

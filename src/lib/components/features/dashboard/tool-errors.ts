@@ -1,12 +1,13 @@
 /**
- * Pure view logic for the top-tools error detail (task #481).
+ * Pure view logic for the top-tools call detail (task #481; all-calls mode
+ * #484).
  *
  * Kept out of `ToolErrorsModal.svelte` so the request-URL mapping and the
  * page-append rule are testable without a renderer or a DOM, mirroring the
  * `top-tools.ts` split. No DOM, no Svelte and no `$lib/server` import.
  */
 import type { DashboardPeriod } from '$lib/model/dashboard';
-import type { ToolErrorEntry, ToolErrorsPage } from '$lib/model/tool-errors';
+import type { ToolCallStatus, ToolErrorEntry, ToolErrorsPage } from '$lib/model/tool-errors';
 import { SCOPE_ALL } from './filter';
 
 /** Endpoint backing the detail table. */
@@ -14,6 +15,8 @@ export const TOOL_ERRORS_ENDPOINT = '/api/dashboard/tool-errors';
 
 /** The editable filter state the detail panel sends to the server. */
 export interface ToolErrorViewFilters {
+	/** Mode: `errors` = failed only, `all` = every call; sent as `?status=`. */
+	status: ToolCallStatus;
 	/** Exact tool name; blank = every tool. */
 	tool: string;
 	/** Window preset, sent as `?period=`. */
@@ -27,10 +30,11 @@ export interface ToolErrorViewFilters {
 }
 
 /**
- * Build the detail request URL. Every filter is server-side: the tool/agent
- * values are only sent when present, the search travels as `?q=` and both the
- * page size and offset are always explicit. `URLSearchParams` does the
- * percent-encoding, so a tool name or search term with spaces/`&`/`%` is safe.
+ * Build the detail request URL. Every filter is server-side: the status is
+ * always sent explicitly, the tool/agent values are only sent when present, the
+ * search travels as `?q=` and both the page size and offset are always
+ * explicit. `URLSearchParams` does the percent-encoding, so a tool name or
+ * search term with spaces/`&`/`%` is safe.
  */
 export function buildToolErrorsUrl(
 	filters: ToolErrorViewFilters,
@@ -38,6 +42,7 @@ export function buildToolErrorsUrl(
 	offset: number
 ): string {
 	const params = new URLSearchParams({
+		status: filters.status,
 		period: filters.period,
 		scope: filters.scope ?? SCOPE_ALL,
 		limit: String(limit),

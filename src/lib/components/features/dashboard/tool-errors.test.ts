@@ -10,6 +10,7 @@ describe('TOOL_ERRORS_ENDPOINT', () => {
 
 describe('buildToolErrorsUrl()', () => {
 	const base = {
+		status: 'errors' as const,
 		tool: '',
 		period: '30d' as const,
 		scope: null as string | null,
@@ -17,9 +18,10 @@ describe('buildToolErrorsUrl()', () => {
 		search: ''
 	};
 
-	test('includes period, scope=all, limit and offset', () => {
+	test('includes status, period, scope=all, limit and offset', () => {
 		const url = buildToolErrorsUrl(base, 50, 0);
 		const params = new URLSearchParams(url.split('?')[1]);
+		expect(params.get('status')).toBe('errors');
 		expect(params.get('period')).toBe('30d');
 		expect(params.get('scope')).toBe('all');
 		expect(params.get('limit')).toBe('50');
@@ -80,11 +82,11 @@ describe('buildToolErrorsUrl()', () => {
 describe('appendToolErrorRows()', () => {
 	test('appends new rows to existing rows', () => {
 		const existing: ToolErrorEntry[] = [
-			{ id: 'r1', sessionId: 's1', at: 200, agent: 'a', tool: 't', error: 'e1' },
-			{ id: 'r2', sessionId: 's1', at: 100, agent: 'a', tool: 't', error: 'e2' }
+			{ id: 'r1', sessionId: 's1', at: 200, agent: 'a', tool: 't', status: 'error', error: 'e1' },
+			{ id: 'r2', sessionId: 's1', at: 100, agent: 'a', tool: 't', status: 'failed', error: 'e2' }
 		];
 		const page = { rows: [
-			{ id: 'r3', sessionId: 's1', at: 300, agent: 'a', tool: 't', error: 'e3' }
+			{ id: 'r3', sessionId: 's1', at: 300, agent: 'a', tool: 't', status: 'error', error: 'e3' }
 		]};
 		const result = appendToolErrorRows(existing, page);
 		expect(result).toHaveLength(3);
@@ -95,7 +97,7 @@ describe('appendToolErrorRows()', () => {
 
 	test('empty existing array returns just the new rows', () => {
 		const page = { rows: [
-			{ id: 'r1', sessionId: 's1', at: 100, agent: 'a', tool: 't', error: 'e' }
+			{ id: 'r1', sessionId: 's1', at: 100, agent: 'a', tool: 't', status: 'error', error: 'e' }
 		]};
 		expect(appendToolErrorRows([], page)).toHaveLength(1);
 		expect(appendToolErrorRows([], page)[0].id).toBe('r1');
@@ -103,7 +105,7 @@ describe('appendToolErrorRows()', () => {
 
 	test('empty page rows leaves existing unchanged', () => {
 		const existing: ToolErrorEntry[] = [
-			{ id: 'r1', sessionId: 's1', at: 100, agent: 'a', tool: 't', error: 'e' }
+			{ id: 'r1', sessionId: 's1', at: 100, agent: 'a', tool: 't', status: 'error', error: 'e' }
 		];
 		expect(appendToolErrorRows(existing, { rows: [] })).toEqual(existing);
 	});

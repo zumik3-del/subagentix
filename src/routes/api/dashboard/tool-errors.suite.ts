@@ -295,3 +295,106 @@ describe('GET /api/dashboard/tool-errors — 500 on DB failure', () => {
 			expect(body.total).toBe(2);
 		});
 	});
+
+/* ------------------------------------------------------------------ */
+/* All-calls mode: ?status=all (task #484)                              */
+/* ------------------------------------------------------------------ */
+
+describe('GET /api/dashboard/tool-errors — ?status=all', () => {
+	test('status=all returns every call including completed, not just failures', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		expect(response.status).toBe(200);
+		const body = (await response.json()) as { total: number; rows: Array<{ tool: string; status: string }> };
+		// Fixture has 3 tool parts: p1 (error), p2 (failed), p3 (completed).
+		// status=all should return all 3.
+		expect(body.total).toBe(3);
+		expect(body.rows).toHaveLength(3);
+	});
+
+	test('status=all rows include non-failed status values (completed)', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as { rows: Array<{ status: string }> };
+		const statuses = body.rows.map((r) => r.status);
+		expect(statuses).toContain('completed');
+		expect(statuses).toContain('error');
+		expect(statuses).toContain('failed');
+	});
+
+	test('status=all rows each carry a string status field', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as { rows: Array<{ status: unknown }> };
+		for (const row of body.rows) {
+			expect(typeof row.status).toBe('string');
+		}
+	});
+
+	test('status=all widens total beyond the failures-only count', async () => {
+		const errorsResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=errors')
+		});
+		const allResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const errorsBody = (await errorsResp.json()) as { total: number };
+		const allBody = (await allResp.json()) as { total: number };
+		expect(allBody.total).toBeGreaterThan(errorsBody.total);
+	});
+
+	test('status=all widens agents list compared to errors mode', async () => {
+		const errorsResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=errors')
+		});
+		const allResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const errorsAgents = (await errorsResp.json()) as { agents: string[] };
+		const allAgents = (await allResp.json()) as { agents: string[] };
+		// All mode agents should be a superset of errors mode agents.
+		for (const agent of errorsAgents.agents) {
+			expect(allAgents.agents).toContain(agent);
+		}
+		// All mode should include at least as many agents.
+		expect(allAgents.agents.length).toBeGreaterThanOrEqual(errorsAgents.agents.length);
+	});
+
+	test('absent status defaults to errors (failures-only)', async () => {
+		const defaultResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all')
+		});
+		const explicitResp = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=errors')
+		});
+		const defaultBody = (await defaultResp.json()) as { total: number; rows: unknown[] };
+		const explicitBody = (await explicitResp.json()) as { total: number; rows: unknown[] };
+		expect(defaultBody.total).toBe(explicitBody.total);
+		expect(defaultBody.rows).toEqual(explicitBody.rows);
+	});
+
+	test('status=bogus returns 400 { error, field: "status" } with cache-control: no-store', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=bogus')
+		});
+		expect(response.status).toBe(400);
+		expect(response.headers.get('cache-control')).toBe('no-store');
+		const body = (await response.json()) as { error: string; field: string };
+		expect(body.field).toBe('status');
+		expect(typeof body.error).toBe('string');
+		expect(body.error.length).toBeGreaterThan(0);
+	});
+});

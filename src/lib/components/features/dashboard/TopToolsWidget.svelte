@@ -1,12 +1,14 @@
 <script lang="ts">
 	/**
-	 * Top-tools widget body (dashboard Phase 4, task #413; clickable errors #481).
+	 * Top-tools widget body (dashboard Phase 4, task #413; clickable errors
+	 * #481; all-calls detail #484).
 	 *
 	 * Table-only: `useWidgetData` fetches `/api/dashboard/top-tools` for the
 	 * shared filter and `WidgetCard` renders the loading/error/empty states. The
 	 * ready payload is mapped to rank-ordered rows and rendered by
-	 * `TopToolsTable` — the errors cell opens the in-place error detail through
-	 * `onOpenToolErrors` (task #481).
+	 * `TopToolsTable` — the calls/name cells open the in-place "all calls" detail
+	 * and the errors cell opens the failures-only detail through
+	 * `onOpenToolDetail` (tasks #481/#484).
 	 *
 	 * `getTopTools` caps its `part` scan at `MAX_TOOL_SESSIONS` (the Tier-P
 	 * ceiling) and flags `capped`; `period=all` is also the unbounded slow path.
@@ -19,7 +21,7 @@
 	import TopToolsTable from './TopToolsTable.svelte';
 	import WidgetCard from './WidgetCard.svelte';
 
-	let { widget, filter, refreshToken, onSettings, onOpenToolErrors }: WidgetBodyProps = $props();
+	let { widget, filter, refreshToken, onSettings, onOpenToolDetail }: WidgetBodyProps = $props();
 
 	const query = useWidgetData<ToolUsage>({
 		source: () => widget.source,
@@ -47,7 +49,7 @@
 		{#if note}
 			<p class="top-tools__note">{note}</p>
 		{/if}
-		<TopToolsTable {rows} {onOpenToolErrors} />
+		<TopToolsTable {rows} {onOpenToolDetail} />
 	{/if}
 </WidgetCard>
 

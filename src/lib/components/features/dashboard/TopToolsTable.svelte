@@ -1,26 +1,34 @@
 <script lang="ts">
 	/**
-	 * Top-tools table (dashboard Phase 4, task #413; clickable errors #481).
+	 * Top-tools table (dashboard Phase 4, task #413; clickable errors #481;
+	 * all-calls detail #484).
 	 *
 	 * Presentation-only: the parent maps the Tier-P payload to {@link TopToolRow}
 	 * and this component renders the rank-ordered table. Rows are trimmed to the
 	 * whole rows the card height can show (`useRowFit` after mount; SSR shows all
-	 * rows). The errors cell is a button only when the tool actually errored and
-	 * an opener is supplied; a zero-error row stays inert text, so the control
-	 * never promises a detail view that has no rows.
+	 * rows). Every supplied opener makes three cells actionable: the calls count
+	 * and the tool name open the "all calls" detail, the errors count opens the
+	 * failures-only detail (and only when the tool actually errored — a
+	 * zero-error row stays inert text, so the failures control never promises a
+	 * detail view that has no rows).
 	 */
 	import { formatNumber } from '$lib/model/format';
+	import type { ToolCallStatus } from '$lib/model/tool-errors';
 	import type { TopToolRow } from './top-tools';
 	import { useRowFit } from './fit.svelte';
 
 	interface Props {
 		/** Rank-ordered rows (count desc, name asc) from the server. */
 		rows: readonly TopToolRow[];
-		/** Opens the error detail for one tool; absent => the cell is inert. */
-		onOpenToolErrors?: (tool: string) => void;
+		/**
+		 * Opens the tool-call detail for one tool in the given mode
+		 * (`errors` = failures only, `all` = every call); absent => the cells are
+		 * inert text.
+		 */
+		onOpenToolDetail?: (tool: string, mode: ToolCallStatus) => void;
 	}
 
-	let { rows, onOpenToolErrors }: Props = $props();
+	let { rows, onOpenToolDetail }: Props = $props();
 
 	/** Clipped list host; fills the body so its height is the row budget. */
 	let list = $state<HTMLElement | null>(null);
@@ -42,16 +50,42 @@
 		<tbody>
 			{#each visible as row (row.name)}
 				<tr>
-					<th scope="row" class="top-tools__name" title={row.title}>{row.name}</th>
-					<td class="top-tools__count">{formatNumber(row.count)}</td>
+					<th scope="row" class="top-tools__name" title={row.title}>
+						{#if onOpenToolDetail}
+							<button
+								type="button"
+								class="ui-link-btn top-tools__name-btn"
+								aria-label={`View all calls for ${row.name}`}
+								onclick={() => onOpenToolDetail(row.name, 'all')}
+							>
+								{row.name}
+							</button>
+						{:else}
+							{row.name}
+						{/if}
+					</th>
+					<td class="top-tools__count">
+						{#if onOpenToolDetail}
+							<button
+								type="button"
+								class="ui-link-btn top-tools__count-btn"
+								aria-label={`View ${formatNumber(row.count)} calls for ${row.name}`}
+								onclick={() => onOpenToolDetail(row.name, 'all')}
+							>
+								{formatNumber(row.count)}
+							</button>
+						{:else}
+							{formatNumber(row.count)}
+						{/if}
+					</td>
 					<td class="top-tools__errors">
-						{#if row.errors > 0 && onOpenToolErrors}
+						{#if row.errors > 0 && onOpenToolDetail}
 							<button
 								type="button"
 								class="top-tools__errors-btn"
 								title={row.title}
 								aria-label={`View ${formatNumber(row.errors)} failed calls for ${row.name}`}
-								onclick={() => onOpenToolErrors(row.name)}
+								onclick={() => onOpenToolDetail(row.name, 'errors')}
 							>
 								{formatNumber(row.errors)}
 							</button>
@@ -114,8 +148,12 @@
 		color: var(--text-weak);
 	}
 
-	/* The errored count reads as an actionable link-like control while keeping
-	   the cell's right alignment; the global focus ring supplies its own outline. */
+	/* The count/name openers are borderless link-like controls (`.ui-link-btn`);
+	   only the errored count needs its own danger tone below. */
+
+	/* The errored count reads as an actionable control (pointer + hover colour)
+	   without an underline in any state; the global focus ring supplies its own
+	   outline. */
 	.top-tools__errors-btn {
 		margin: 0;
 		padding: 0;
@@ -125,12 +163,13 @@
 		color: var(--color-danger-strong);
 		font: inherit;
 		font-variant-numeric: tabular-nums;
-		text-decoration: underline;
-		text-underline-offset: 2px;
+		text-decoration: none;
 		cursor: pointer;
 	}
 
-	.top-tools__errors-btn:hover {
+	.top-tools__errors-btn:hover,
+	.top-tools__errors-btn:focus-visible {
 		color: var(--color-danger-base);
+		text-decoration: none;
 	}
 </style>

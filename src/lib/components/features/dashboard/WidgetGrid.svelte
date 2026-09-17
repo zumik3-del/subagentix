@@ -29,6 +29,7 @@
 	 * client mounts the widget body lazily once it is visible.
 	 */
 	import type { DashboardFilter } from '$lib/model/dashboard';
+	import type { ToolCallStatus } from '$lib/model/tool-errors';
 	import { findWidgetDef, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
 	import { GRID_COLUMNS, GRID_GAP_HALF_REM, GRID_GAP_REM, GRID_ROW_HEIGHT_REM } from './layout';
 	import { DEFAULT_FILTER } from './filter';
@@ -51,8 +52,8 @@
 		refreshToken?: number;
 		/** Opens the size-settings modal for a widget id (task #449). */
 		onWidgetSettings?: (id: WidgetId) => void;
-		/** Opens the in-place error detail for a tool (task #481). */
-		onOpenToolErrors?: (tool: string) => void;
+		/** Opens the in-place tool-call detail for a tool/mode (tasks #481/#484). */
+		onOpenToolDetail?: (tool: string, mode: ToolCallStatus) => void;
 		/**
 		 * Persistence hop for the gridstack enhancement (epic #462, stage 3):
 		 * called once per settled drag/resize with the full placement list,
@@ -68,7 +69,7 @@
 		filter = DEFAULT_FILTER,
 		refreshToken = 0,
 		onWidgetSettings,
-		onOpenToolErrors,
+		onOpenToolDetail,
 		onLayoutChange
 	}: Props = $props();
 
@@ -192,7 +193,7 @@
 				<WidgetHost
 					{def}
 					load={loaders[def.id]}
-					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id), onOpenToolErrors }}
+					widgetProps={{ widget: def, filter, refreshToken, onSettings: settingsFor(def.id), onOpenToolDetail }}
 				/>
 			</div>
 		</li>

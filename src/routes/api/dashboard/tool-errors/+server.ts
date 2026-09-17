@@ -4,8 +4,12 @@ import {
 	clampErrorLimit,
 	clampErrorOffset,
 	DEFAULT_ERROR_LIMIT,
+	DEFAULT_TOOL_CALL_STATUS,
+	isToolCallStatus,
+	type ToolCallStatus,
 	type ToolErrorsQuery
 } from '$lib/model/tool-errors';
+import { invalidRequest } from '$lib/server/http';
 import { getToolErrors } from '$lib/server/services/dashboard-tool-errors';
 import { resolveFilter } from '../widgets';
 
@@ -26,15 +30,23 @@ function parseOffset(raw: string | null): number {
 	return clampErrorOffset(Number.isFinite(value) ? value : 0);
 }
 
+/** `?status=`: absent/blank = the default (`errors`), unknown = `null` (a 400). */
+function parseStatus(raw: string | null): ToolCallStatus | null {
+	if (raw === null || raw.trim() === '') return DEFAULT_TOOL_CALL_STATUS;
+	return isToolCallStatus(raw) ? raw : null;
+}
+
 /**
- * `GET /api/dashboard/tool-errors?period=&scope=&tool=&agent=&q=&limit=&offset=`
+ * `GET /api/dashboard/tool-errors?period=&scope=&status=&tool=&agent=&q=&limit=&offset=`
  * -> `{ rows, total, agents, capped }`.
  *
- * The top-tools error detail: one page of failed tool calls (newest first) plus
- * the filtered total, the stable agent options and the Tier-P `capped` flag. An
- * invalid period/scope is the same 400 `{ error, field }` as `/api/dashboard`;
- * a data-layer failure is a generic 500 that never leaks internals (`apiError`
- * would echo them, so it is deliberately not used here). Never cached.
+ * The top-tools call detail: one page of tool calls (newest first) plus the
+ * filtered total, the stable agent options and the Tier-P `capped` flag.
+ * `?status=errors` (default) lists failed calls only, `?status=all` every call.
+ * An invalid period/scope/status is the same 400 `{ error, field }` as
+ * `/api/dashboard`; a data-layer failure is a generic 500 that never leaks
+ * internals (`apiError` would echo them, so it is deliberately not used here).
+ * Never cached.
  */
 export const GET: RequestHandler = ({ url }) => {
 	try {
@@ -43,7 +55,17 @@ export const GET: RequestHandler = ({ url }) => {
 			resolved.response.headers.set('cache-control', NO_STORE);
 			return resolved.response;
 		}
+		const status = parseStatus(url.searchParams.get('status'));
+		if (status === null) {
+			const invalid = invalidRequest(
+				`Unknown status "${url.searchParams.get('status') ?? ''}".`,
+				'status'
+			);
+			invalid.headers.set('cache-control', NO_STORE);
+			return invalid;
+		}
 		const query: ToolErrorsQuery = {
+			status,
 			tool: url.searchParams.get('tool'),
 			agent: url.searchParams.get('agent'),
 			search: url.searchParams.get('q'),

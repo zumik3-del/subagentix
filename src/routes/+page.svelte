@@ -15,6 +15,7 @@
 	import { goto, pushState, replaceState } from '$app/navigation';
 	import { page } from '$app/state';
 	import type { DashboardFilter } from '$lib/model/dashboard';
+	import type { ToolCallDetail } from '$lib/model/tool-errors';
 	import Dashboard from '$lib/components/features/dashboard/Dashboard.svelte';
 	import {
 		directoryOptions,
@@ -30,11 +31,30 @@
 	const knownScopes = $derived(directories.map((entry) => entry.directory));
 	const scopes = $derived(directoryOptions(directories));
 
+	/** URL param for the failures-only overlay (task #481, unchanged deep link). */
+	const TOOL_ERRORS_PARAM = 'toolErrors';
+	/** URL param for the all-calls overlay (task #484). */
+	const TOOL_CALLS_PARAM = 'toolCalls';
+
 	/**
-	 * Last resolved filter, kept so a URL-only change (opening/closing the error
-	 * overlay via `pushState`, task #481) does not hand the grid a fresh object
-	 * with the same period/scope — that would re-run every widget's fetch
-	 * effect. Identity changes only when the filter actually changes.
+	 * Read the overlay target from a query string. `?toolErrors=` wins over
+	 * `?toolCalls=` (they are mutually exclusive, so a hand-edited URL with both
+	 * still resolves deterministically); blank values are ignored.
+	 */
+	function readToolDetail(search: URLSearchParams): ToolCallDetail | null {
+		const errorsTool = search.get(TOOL_ERRORS_PARAM);
+		if (errorsTool !== null && errorsTool !== '') return { tool: errorsTool, mode: 'errors' };
+		const callsTool = search.get(TOOL_CALLS_PARAM);
+		if (callsTool !== null && callsTool !== '') return { tool: callsTool, mode: 'all' };
+		return null;
+	}
+
+	/**
+	 * Last resolved filter, kept so a URL-only change (opening/closing the
+	 * tool-call overlay via `pushState`, tasks #481/#484) does not hand the grid
+	 * a fresh object with the same period/scope — that would re-run every
+	 * widget's fetch effect. Identity changes only when the filter actually
+	 * changes.
 	 */
 	let previousFilter: DashboardFilter | null = null;
 	const filter = $derived.by((): DashboardFilter => {
@@ -51,7 +71,7 @@
 	});
 
 	/**
-	 * Tool whose error detail overlay is open (`?toolErrors=`), or `null`.
+	 * Tool-call detail overlay target (`{ tool, mode }`), or `null`.
 	 *
 	 * This is local state, deliberately NOT derived from `page.url`: SvelteKit's
 	 * `pushState` updates `page.state`, not `page.url` (only `popstate` refreshes
@@ -59,8 +79,11 @@
 	 * overlay and nothing appeared. The URL is still kept in sync so a deep link
 	 * and a reload restore the overlay, and `popstate` re-seeds this state so
 	 * browser Back/Forward open and close it.
+	 *
+	 * The mode is URL-visible and mutually exclusive (task #484): `?toolErrors=`
+	 * is failures only, `?toolCalls=` is every call.
 	 */
-	let errorTool = $state<string | null>(page.url.searchParams.get('toolErrors'));
+	let toolDetail = $state<ToolCallDetail | null>(readToolDetail(page.url.searchParams));
 
 	/**
 	 * True while the overlay was opened from this page. The close path then uses
@@ -70,29 +93,41 @@
 	 */
 	let pushedByUs = false;
 
-	/** The current URL with `?toolErrors=` set (`tool`) or removed (`null`). */
-	function overlayUrl(tool: string | null): URL {
+	/** The current URL with the overlay params cleared, then the active one set. */
+	function overlayUrl(detail: ToolCallDetail | null): URL {
 		const url = new URL(location.href);
-		if (tool === null) url.searchParams.delete('toolErrors');
-		else url.searchParams.set('toolErrors', tool);
+		url.searchParams.delete(TOOL_ERRORS_PARAM);
+		url.searchParams.delete(TOOL_CALLS_PARAM);
+		if (detail !== null) {
+			url.searchParams.set(
+				detail.mode === 'errors' ? TOOL_ERRORS_PARAM : TOOL_CALLS_PARAM,
+				detail.tool
+			);
+		}
 		return url;
 	}
 
 	/**
-	 * Open/close the error overlay. The state is local (see above), so the grid,
-	 * its widgets and their data all survive; the shallow history API keeps the
-	 * URL shareable and makes browser Back close the overlay.
+	 * Open/close the tool-call detail overlay. The state is local (see above), so
+	 * the grid, its widgets and their data all survive; the shallow history API
+	 * keeps the URL shareable and makes browser Back close the overlay.
 	 */
-	function onToolErrorsChange(tool: string | null): void {
-		if (tool !== null) {
-			if (tool === errorTool) return;
-			errorTool = tool;
+	function onToolDetailChange(detail: ToolCallDetail | null): void {
+		if (detail !== null) {
+			if (
+				toolDetail !== null &&
+				toolDetail.tool === detail.tool &&
+				toolDetail.mode === detail.mode
+			) {
+				return;
+			}
+			toolDetail = detail;
 			pushedByUs = true;
-			pushState(overlayUrl(tool), {});
+			pushState(overlayUrl(detail), {});
 			return;
 		}
-		if (errorTool === null) return;
-		errorTool = null;
+		if (toolDetail === null) return;
+		toolDetail = null;
 		if (pushedByUs) {
 			pushedByUs = false;
 			window.history.back();
@@ -106,7 +141,7 @@
 	$effect(() => {
 		const sync = () => {
 			pushedByUs = false;
-			errorTool = new URL(location.href).searchParams.get('toolErrors');
+			toolDetail = readToolDetail(new URL(location.href).searchParams);
 		};
 		window.addEventListener('popstate', sync);
 		return () => window.removeEventListener('popstate', sync);
@@ -137,6 +172,6 @@
 	{filter}
 	{scopes}
 	onFilterChange={onFilterChange}
-	{errorTool}
-	onToolErrorsChange={onToolErrorsChange}
+	{toolDetail}
+	onToolDetailChange={onToolDetailChange}
 />

@@ -1,11 +1,12 @@
 /**
- * Top-tools error-detail service (task #481).
+ * Top-tools call-detail service (task #481; all-calls mode #484).
  *
  * Resolves the window/scope + capped session set exactly like the Tier-P
- * aggregate (`services/dashboard-tools.ts`) and applies the optional
- * tool/agent/search filters + paging through the query layer, so the widget's
- * errors column and this detail's unfiltered total describe the same rows. No
- * caching: the detail is on-demand and behind a user action.
+ * aggregate (`services/dashboard-tools.ts`) and applies the requested mode
+ * (`errors` | `all`), the optional tool/agent/search filters and paging through
+ * the query layer, so the widget's errors column and this detail's unfiltered
+ * failed total describe the same rows. No caching: the detail is on-demand and
+ * behind a user action.
  */
 import {
 	MAX_TOOL_SESSIONS,
@@ -15,6 +16,7 @@ import {
 	clampErrorLimit,
 	clampErrorOffset,
 	DEFAULT_ERROR_LIMIT,
+	DEFAULT_TOOL_CALL_STATUS,
 	type ToolErrorsFilter,
 	type ToolErrorsPage,
 	type ToolErrorsQuery
@@ -34,10 +36,11 @@ function blankToNull(value: string | null | undefined): string | null {
 }
 
 /**
- * One page of failed tool calls for the selected window/scope, plus the
- * filtered total, the stable agent options and the Tier-P `capped` flag. Only
- * the most recent `maxSessions` in-range sessions contribute (the ceiling that
- * bounds a `period=all` `part` scan; the parameter is exposed for tests).
+ * One page of tool calls (failures only, or every call per `query.status`) for
+ * the selected window/scope, plus the filtered total, the stable agent options
+ * and the Tier-P `capped` flag. Only the most recent `maxSessions` in-range
+ * sessions contribute (the ceiling that bounds a `period=all` `part` scan; the
+ * parameter is exposed for tests).
  */
 export function getToolErrors(
 	filter: DashboardFilter,
@@ -51,7 +54,9 @@ export function getToolErrors(
 	const capped = ids.length > maxSessions;
 	const bounded = capped ? ids.slice(0, maxSessions) : ids;
 
+	const status = query.status ?? DEFAULT_TOOL_CALL_STATUS;
 	const normalized: ToolErrorsFilter = {
+		status,
 		tool: blankToNull(query.tool),
 		agent: blankToNull(query.agent),
 		search: blankToNull(query.search)
@@ -62,7 +67,7 @@ export function getToolErrors(
 	return {
 		rows: listToolErrors(bounded, normalized, offset, limit),
 		total: countToolErrors(bounded, normalized),
-		agents: listToolErrorAgents(bounded),
+		agents: listToolErrorAgents(bounded, status),
 		capped
 	};
 }

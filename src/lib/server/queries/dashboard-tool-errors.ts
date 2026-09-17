@@ -1,13 +1,15 @@
 /**
- * Tier-P read for the top-tools error detail (task #481).
+ * Tier-P read for the top-tools call detail (task #481; all-calls mode #484).
  *
- * Reads failed tool parts (`part.data.type = 'tool'` and
- * `part.data.state.status IN ('error', 'failed')`, the same definition the
- * top-tools aggregate uses) joined to `session` for the agent, restricted to
- * the session ids resolved by Tier-S ({@link listSessionIds}). The id list is
- * queried in chunks under SQLite's variable limit and the per-chunk partials
- * are merged in JS, so a `period=all` read stays bounded (the caller caps the
- * id set; see `MAX_TOOL_SESSIONS`). `event` stays untouched.
+ * Reads tool parts (`part.data.type = 'tool'`) joined to `session` for the
+ * agent, restricted to the session ids resolved by Tier-S ({@link listSessionIds}).
+ * The base predicate depends on the requested `status`: the default `errors`
+ * keeps the unified failure definition `part.data.state.status IN ('error',
+ * 'failed')` (the same definition the top-tools aggregate uses), while `all`
+ * drops the status constraint and returns every call. The id list is queried in
+ * chunks under SQLite's variable limit and the per-chunk partials are merged in
+ * JS, so a `period=all` read stays bounded (the caller caps the id set; see
+ * `MAX_TOOL_SESSIONS`). `event` stays untouched.
  *
  * Paging across chunks: each chunk is asked for its newest `offset + limit`
  * rows, the union is sorted newest-first and sliced globally. That is exact —
@@ -17,7 +19,12 @@
  */
 import { getDb } from '../db';
 import { jsonEquals, jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
-import type { ToolErrorEntry, ToolErrorsFilter } from '../../model/tool-errors';
+import {
+	DEFAULT_TOOL_CALL_STATUS,
+	type ToolCallStatus,
+	type ToolErrorEntry,
+	type ToolErrorsFilter
+} from '../../model/tool-errors';
 import {
 	chunk,
 	IN_CHUNK_SIZE,
@@ -38,13 +45,18 @@ const TOOL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
 )}), ''), '${UNKNOWN_LABEL}')`;
 /** Error text: `part.data.state.error`, or an empty string when absent. */
 const ERROR_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.error)}, '')`;
+/** Raw status: `part.data.state.status`, or an empty string when absent. */
+const STATUS_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.status)}, '')`;
 
-/** The constant `part` predicates every read in this module shares. */
-const BASE_WHERE = `${jsonEquals(
-	'part.data',
-	JSON_PATH.part.type,
-	PART_TYPE.tool
-)} AND ${jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES)}`;
+/**
+ * The constant `part` predicate every read in this module shares, for the
+ * requested mode: tool parts only, plus the failed pair unless `all` was asked.
+ */
+function baseWhere(status: ToolCallStatus): string {
+	const typePredicate = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
+	if (status === 'all') return typePredicate;
+	return `${typePredicate} AND ${jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES)}`;
+}
 
 /** Escape LIKE wildcards so a raw search term matches literally (`ESCAPE '\'`). */
 function escapeLike(value: string): string {
@@ -105,12 +117,13 @@ function mapRow(row: Row): ToolErrorEntry {
 		at: toCount(row.at),
 		agent: toText(row.agent),
 		tool: toText(row.tool),
+		status: toText(row.status),
 		error: toText(row.error)
 	};
 }
 
 /**
- * One global page of failed calls, newest first (`part.time_created` desc, then
+ * One global page of tool calls, newest first (`part.time_created` desc, then
  * `part.id` desc). Returns `[]` for an empty id set; `offset`/`limit` are
  * assumed already clamped by the caller.
  */
@@ -122,6 +135,7 @@ export function listToolErrors(
 ): ToolErrorEntry[] {
 	if (sessionIds.length === 0 || limit <= 0) return [];
 	const { clause, params } = buildFilters(filter);
+	const where = baseWhere(filter.status ?? DEFAULT_TOOL_CALL_STATUS);
 	// Fetch the per-chunk newest `offset + limit`; their union contains the
 	// global page (a row in the global top N is in its own chunk's top N).
 	const cap = offset + limit;
@@ -133,10 +147,11 @@ export function listToolErrors(
 				part.time_created AS at,
 				${AGENT_EXPR} AS agent,
 				${TOOL_EXPR} AS tool,
+				${STATUS_EXPR} AS status,
 				${ERROR_EXPR} AS error
 			FROM part
 			JOIN session ON session.id = part.session_id
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${BASE_WHERE}${clause}
+			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}
 			ORDER BY part.time_created DESC, part.id DESC
 			LIMIT :cap`;
 		const rows = getDb()
@@ -150,20 +165,21 @@ export function listToolErrors(
 	return collected.slice(offset, offset + limit);
 }
 
-/** Total failed calls matching every filter across the id set (single aggregate per chunk). */
+/** Total tool calls matching every filter across the id set (single aggregate per chunk). */
 export function countToolErrors(
 	sessionIds: readonly string[],
 	filter: ToolErrorsFilter
 ): number {
 	if (sessionIds.length === 0) return 0;
 	const { clause, params } = buildFilters(filter);
+	const where = baseWhere(filter.status ?? DEFAULT_TOOL_CALL_STATUS);
 	let total = 0;
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
 			SELECT count(*) AS count
 			FROM part
 			JOIN session ON session.id = part.session_id
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${BASE_WHERE}${clause}`;
+			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}`;
 		const row = getDb().query(sql).get(bindIds(params, ids)) as Row | null;
 		total += toCount(row?.count);
 	}
@@ -171,20 +187,24 @@ export function countToolErrors(
 }
 
 /**
- * Distinct agent labels in the base error set (period/scope only — tool, agent
- * and search are deliberately ignored so the option list stays stable while
- * the user filters). Ascending; `unknown` is included so blank agents can be
- * selected back.
+ * Distinct agent labels in the base set (period/scope + `status` only — tool,
+ * agent and search are deliberately ignored so the option list stays stable
+ * while the user filters). Ascending; `unknown` is included so blank agents can
+ * be selected back.
  */
-export function listToolErrorAgents(sessionIds: readonly string[]): string[] {
+export function listToolErrorAgents(
+	sessionIds: readonly string[],
+	status: ToolCallStatus = DEFAULT_TOOL_CALL_STATUS
+): string[] {
 	if (sessionIds.length === 0) return [];
+	const where = baseWhere(status);
 	const agents = new Set<string>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
 			SELECT DISTINCT ${AGENT_EXPR} AS agent
 			FROM part
 			JOIN session ON session.id = part.session_id
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${BASE_WHERE}`;
+			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}`;
 		const rows = getDb().query(sql).all(bindIds({}, ids)) as Row[];
 		for (const row of rows) {
 			const agent = toText(row.agent);

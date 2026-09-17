@@ -9,6 +9,7 @@
  */
 import type { Component } from 'svelte';
 import type { DashboardFilter } from '$lib/model/dashboard';
+import type { ToolCallStatus } from '$lib/model/tool-errors';
 import type { WidgetDef, WidgetId, WidgetPlacement } from '$lib/widgets/registry';
 
 /**
@@ -31,11 +32,12 @@ export interface WidgetBodyProps {
 	 */
 	onSettings?: () => void;
 	/**
-	 * Opens the in-place error detail for a tool (task #481). The shell derives
-	 * the overlay from the `?toolErrors=` URL param and supplies this for every
-	 * body; omitted only when the shell has no overlay hook.
+	 * Opens the in-place tool-call detail for a tool (task #481; modes #484).
+	 * The shell derives the overlay from the `?toolErrors=`/`?toolCalls=` URL
+	 * params and supplies this for every body; omitted only when the shell has no
+	 * overlay hook. `mode` selects failures only (`errors`) or every call (`all`).
 	 */
-	onOpenToolErrors?: (tool: string) => void;
+	onOpenToolDetail?: (tool: string, mode: ToolCallStatus) => void;
 }
 
 /** A width/height patch applied to one placement (task #449). */

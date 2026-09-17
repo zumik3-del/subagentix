@@ -384,6 +384,62 @@ describe('consistency with top-tools aggregate', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* All-calls mode: drops status predicate (task #484)                  */
+/* ------------------------------------------------------------------ */
+
+describe('all-calls mode', () => {
+	test('all mode includes completed parts that errors mode excludes', () => {
+		const ids = listSessionIds({});
+		const errorsRows = listToolErrors(ids, { status: 'errors' }, 0, 100);
+		const allRows = listToolErrors(ids, { status: 'all' }, 0, 100);
+		// p-ok (completed bash) should be absent from errors but present in all.
+		const errorsTools = new Set(errorsRows.map((r) => r.tool));
+		const allTools = new Set(allRows.map((r) => r.tool));
+		expect(errorsTools.has('bash')).toBe(false); // only bash in fixture is completed
+		expect(allTools.has('bash')).toBe(true);
+	});
+
+	test('all mode total equals the full tool-part count', () => {
+		const ids = listSessionIds({});
+		const errorsTotal = countToolErrors(ids, { status: 'errors' });
+		const allTotal = countToolErrors(ids, { status: 'all' });
+		// Fixture: p-ok (completed), p-err (error), p-failed (failed), p-err-ok (completed),
+		// p-blank-tool (error), p-null-tool (error) = 6 total tool parts.
+		expect(allTotal).toBe(6);
+		expect(errorsTotal).toBe(4);
+	});
+
+	test('all mode preserves newest-first ordering', () => {
+		const ids = listSessionIds({});
+		const rows = listToolErrors(ids, { status: 'all' }, 0, 100);
+		for (let i = 1; i < rows.length; i++) {
+			const prev = rows[i - 1];
+			const curr = rows[i];
+			expect(prev.at).toBeGreaterThanOrEqual(curr.at);
+		}
+	});
+
+	test('all mode preserves paging (limit/offset)', () => {
+		const ids = listSessionIds({});
+		const full = listToolErrors(ids, { status: 'all' }, 0, 100);
+		const paged = listToolErrors(ids, { status: 'all' }, 0, 2);
+		expect(paged).toHaveLength(2);
+		expect(paged[0].id).toBe(full[0].id);
+		expect(paged[1].id).toBe(full[1].id);
+	});
+
+	test('all mode agents list includes agents with only completed calls', () => {
+		const ids = listSessionIds({});
+		const errorsAgents = listToolErrorAgents(ids, 'errors');
+		const allAgents = listToolErrorAgents(ids, 'all');
+		// 'build' has only completed calls in s-ok, so absent from errors agents.
+		expect(errorsAgents).not.toContain('build');
+		// But present in all agents since build has completed calls.
+		expect(allAgents).toContain('build');
+	});
+});
+
+/* ------------------------------------------------------------------ */
 /* Read-only guarantee                                                  */
 /* ------------------------------------------------------------------ */
 

@@ -9,9 +9,39 @@
  * when `part.data.state.status` is `error` **or** `failed` (the same pair
  * `model/node.ts` uses), so the widget's errors column and this detail's
  * unfiltered total are the same number within the shared session ceiling.
+ *
+ * Since #484 the detail has two modes: `errors` (failed only, the default and
+ * the unchanged `?toolErrors=` deep link) and `all` (every tool call, the
+ * `?toolCalls=` deep link). The mode is the base `part` predicate, so rows,
+ * total and the agent options all honour it.
  */
 
-/** One failed tool call, flattened for the detail table. */
+/**
+ * Which tool-call rows the detail lists: `errors` (failed only) or `all`
+ * (every call). Sent as `?status=`, default {@link DEFAULT_TOOL_CALL_STATUS}.
+ */
+export type ToolCallStatus = 'errors' | 'all';
+
+/** Default `?status=` when absent/blank: failures only. */
+export const DEFAULT_TOOL_CALL_STATUS: ToolCallStatus = 'errors';
+
+/** True for the two supported `?status=` values. */
+export function isToolCallStatus(value: unknown): value is ToolCallStatus {
+	return value === 'errors' || value === 'all';
+}
+
+/**
+ * The overlay target the shell keeps in the URL: the tool and the mode it was
+ * opened in (`?toolErrors=` = failures, `?toolCalls=` = all calls).
+ */
+export interface ToolCallDetail {
+	/** Exact `part.data.tool` the overlay is filtered to. */
+	tool: string;
+	/** `errors` = failures only; `all` = every call. */
+	mode: ToolCallStatus;
+}
+
+/** One tool call, flattened for the detail table. */
 export interface ToolErrorEntry {
 	/** `part.id`; stable row key. */
 	id: string;
@@ -23,29 +53,38 @@ export interface ToolErrorEntry {
 	agent: string;
 	/** `part.data.tool`; `unknown` for a NULL/blank tool. */
 	tool: string;
+	/** Raw `part.data.state.status`; empty string when the part has no status. */
+	status: string;
 	/** `part.data.state.error`; empty string when the part carries no error text. */
 	error: string;
 }
 
 /**
  * The paged detail payload (`GET /api/dashboard/tool-errors`):
- * one page of failed calls plus the honest totals the filters were applied
- * against. `agents` is the stable agent option list (computed before the
- * tool/agent/search filters, so selecting an agent never collapses it).
+ * one page of tool calls (failures only or every call, per `status`) plus the
+ * honest totals the filters were applied against. `agents` is the stable agent
+ * option list (computed before the tool/agent/search filters, so selecting an
+ * agent never collapses it).
  */
 export interface ToolErrorsPage {
 	/** Current page, newest first. */
 	rows: ToolErrorEntry[];
 	/** Rows matching every active filter (not just the current page). */
 	total: number;
-	/** Distinct agents in the base error set, ascending. */
+	/** Distinct agents in the base set (per `status`), ascending. */
 	agents: string[];
 	/** True when the in-range session set was cut to `MAX_TOOL_SESSIONS`. */
 	capped: boolean;
 }
 
-/** Server-side filters for the error detail (all optional; blank = no filter). */
+/** Server-side filters for the tool-call detail (all optional; blank = no filter). */
 export interface ToolErrorsFilter {
+	/**
+	 * Base row predicate: `errors` keeps the unified failed definition,
+	 * `all` lists every `part.data.type = 'tool'` call. Absent = the default
+	 * ({@link DEFAULT_TOOL_CALL_STATUS}). Not a per-row filter.
+	 */
+	status?: ToolCallStatus;
 	/** Exact `part.data.tool`; `null`/blank = every tool. */
 	tool?: string | null;
 	/** Exact `session.agent`; `null`/blank = every agent. */

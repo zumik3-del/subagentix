@@ -1797,3 +1797,46 @@ describe('UI #212 — sidebar request race guards (SessionSidebar source)', () =
 		}
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* Deep-link tool-call overlay (task #484)                              */
+/* ------------------------------------------------------------------ */
+
+describe('tool-call overlay deep links (task #481/#484)', () => {
+	test('?toolErrors=<tool> resolves to mode errors', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The readToolDetail function must check TOOL_ERRORS_PARAM first and return mode 'errors'.
+		expect(source).toContain("const errorsTool = search.get(TOOL_ERRORS_PARAM);");
+		expect(source).toContain("if (errorsTool !== null && errorsTool !== '') return { tool: errorsTool, mode: 'errors' };");
+	});
+
+	test('?toolCalls=<tool> resolves to mode all', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The readToolDetail function must check TOOL_CALLS_PARAM and return mode 'all'.
+		expect(source).toContain("const callsTool = search.get(TOOL_CALLS_PARAM);");
+		expect(source).toContain("if (callsTool !== null && callsTool !== '') return { tool: callsTool, mode: 'all' };");
+	});
+
+	test('?toolErrors= wins over ?toolCalls= when both are present', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// errors is checked first, so it wins.
+		const errorsIndex = source.indexOf("search.get(TOOL_ERRORS_PARAM)");
+		const callsIndex = source.indexOf("search.get(TOOL_CALLS_PARAM)");
+		expect(errorsIndex).toBeGreaterThan(-1);
+		expect(callsIndex).toBeGreaterThan(-1);
+		expect(errorsIndex).toBeLessThan(callsIndex);
+	});
+
+	test('overlayUrl maps mode to the correct param name', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The overlayUrl function must set toolErrors for errors mode and toolCalls for all mode.
+		expect(source).toContain("detail.mode === 'errors' ? TOOL_ERRORS_PARAM : TOOL_CALLS_PARAM");
+	});
+
+	test('popstate handler re-seeds toolDetail from the URL', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// Browser Back/Forward must restore the overlay from the address bar.
+		expect(source).toContain('window.addEventListener(\'popstate\', sync)');
+		expect(source).toContain('readToolDetail(new URL(location.href).searchParams)');
+	});
+});
