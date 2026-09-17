@@ -1,12 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="subagentix">
-	<rect width="32" height="32" rx="7" fill="#101010" />
-	<g stroke="rgba(255,255,255,0.45)" stroke-width="2" stroke-linecap="round">
-		<line x1="13" y1="16" x2="21" y2="7" />
-		<line x1="13" y1="16" x2="21" y2="16" />
-		<line x1="13" y1="16" x2="21" y2="25" />
-	</g>
-	<circle cx="9" cy="16" r="4.5" fill="#f1a10d" />
-	<circle cx="24" cy="7" r="3.25" fill="#0091ff" />
-	<circle cx="24" cy="16" r="3.25" fill="#0091ff" />
-	<circle cx="24" cy="25" r="3.25" fill="#0091ff" />
+	<style>
+		.m {
+			fill: none;
+			stroke: #1f2328;
+			stroke-width: 2.3;
+			stroke-linejoin: round;
+			stroke-linecap: round;
+		}
+		.f {
+			fill: #1f2328;
+		}
+		@media (prefers-color-scheme: dark) {
+			.m {
+				stroke: #f0f6fc;
+			}
+			.f {
+				fill: #f0f6fc;
+			}
+		}
+	</style>
+	<path
+		class="m"
+		d="M11 5 L11 27 M11 16 C 17 16 17 7.5 23.5 7.5 M11 16 C 17 16 17 24.5 23.5 24.5"
+	/>
+	<circle class="f" cx="11" cy="5" r="3" />
+	<circle class="f" cx="11" cy="27" r="3" />
+	<circle class="f" cx="24.5" cy="7.5" r="2.8" />
+	<circle class="f" cx="24.5" cy="24.5" r="2.8" />
 </svg>
