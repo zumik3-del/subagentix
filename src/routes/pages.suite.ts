@@ -624,7 +624,7 @@ describe('server-leak guard (build/client/**)', () => {
 });
 
 describe('SSR #215 — dashboard home + header/Gantt session page', () => {
-	test('/ renders the dashboard shell with no session list; /sessions/[id] renders header + Gantt only', async () => {
+	test('/ renders the dashboard shell with no session list; /sessions/[id] renders header + Gantt or overview', async () => {
 		const dir = tempDir('subagentix-m3a-pages-');
 		const dbPath = join(dir, 'fixture.db');
 		buildPopulatedDb(dbPath);
@@ -660,6 +660,8 @@ describe('SSR #215 — dashboard home + header/Gantt session page', () => {
 			expect(detail.body).not.toContain('Turns (');
 			expect(detail.body).not.toContain('Load older turns');
 			expect(detail.body).not.toContain('Newer turns →');
+			// Task #535: the Gantt page links back to the same route's overview.
+			expect(detail.body).toContain('← Session overview');
 			// Task #237: no page-level Gantt <h2>, no Trigger / assistant-message subtitle.
 			expect(detail.body).not.toContain('<h2');
 			expect(detail.body).not.toContain('Trigger');
@@ -668,18 +670,30 @@ describe('SSR #215 — dashboard home + header/Gantt session page', () => {
 			const sessionPage = readFileSync(join(repoRoot, 'src/routes/sessions/[id]/+page.svelte'), 'utf8');
 			expect(sessionPage).toContain('background: var(--background-strong)');
 
-			// Without ?turn= the header stays and the page asks for a turn (no Gantt).
+			// Without ?turn= the header stays and the overview body renders
+			// (task #535): windowed turns, subagents and subtree totals.
 			const noTurn = await getHtml(server.base, '/sessions/root1');
 			expect(noTurn.status).toBe(200);
 			expect(noTurn.body).toMatch(/<h1[^>]*>Root one<\/h1>/);
-			expect(noTurn.body).toContain('Select a turn in the session tree to view its Gantt.');
+			expect(noTurn.body).toContain('aria-label="Session overview"');
 			expect(noTurn.body).not.toContain('aria-label="Turn wall-clock Gantt"');
+			// Turns section: one windowed turn linking to its Gantt.
+			expect(noTurn.body).toContain('Turns (1)');
+			expect(noTurn.body).toContain('href="/sessions/root1?turn=u1"');
+			expect(noTurn.body).toContain('1 assistant message');
+			// Subagents section: the child session row.
+			expect(noTurn.body).toContain('Subagents (1)');
+			expect(noTurn.body).toContain('href="/sessions/child1"');
+			// Subtree totals = root + child usage (505 + 80 tokens, 2 + 0.5 cost).
+			expect(noTurn.body).toContain('Subtree totals');
+			expect(noTurn.body).toContain('585');
+			expect(noTurn.body).toContain('$2.5000');
 
-			// A child session with no turns still renders its header (no turn list).
+			// A leaf session (no turns, no children) shows the laconic empty state.
 			const child = await getHtml(server.base, '/sessions/child1');
 			expect(child.status).toBe(200);
 			expect(child.body).toMatch(/<h1[^>]*>Child one<\/h1>/);
-			expect(child.body).toContain('Select a turn in the session tree to view its Gantt.');
+			expect(child.body).toContain('No turns or subagents.');
 			expect(child.body).not.toContain('Turns (');
 		} finally {
 			await server.stop();
