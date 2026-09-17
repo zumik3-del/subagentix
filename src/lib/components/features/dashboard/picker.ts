@@ -4,7 +4,7 @@
  *
  * Kept out of the Svelte body so the toggle/compare/size rules are testable
  * without a renderer or a DOM, mirroring the `top-tools.ts` helper split
- * (docs/ui-standards.md §10). No DOM, no Svelte and no `$lib/server` import.
+ * helper split. No DOM, no Svelte and no `$lib/server` import.
  */
 import { resolvePlacements } from '$lib/widgets/registry';
 import type { WidgetId, WidgetPlacement } from '$lib/widgets/registry';

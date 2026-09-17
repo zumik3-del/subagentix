@@ -9,7 +9,7 @@
  * the fallback, so precedence is URL > stored preference > hardcoded default.
  * The pure parse/serialise and option-building rules live here (no Svelte, DOM
  * or `$lib/server` import) so they stay unit-testable, mirroring the
- * `picker.ts` / `top-tools.ts` split (docs/ui-standards.md §10).
+ * `picker.ts` / `top-tools.ts` split.
  */
 import {
 	type DashboardFilter,

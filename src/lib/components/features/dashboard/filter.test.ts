@@ -17,7 +17,7 @@ import type { DirectorySummary } from '$lib/model/types';
  * (dashboard Phase 5, task #415; persisted preference task #457).
  *
  * Kept in a plain `.ts` module so URL parsing and option-building are
- * testable without a renderer or a DOM (docs/ui-standards.md §10).
+ * testable without a renderer or a DOM.
  */
 
 describe('DEFAULT_PERIOD', () => {

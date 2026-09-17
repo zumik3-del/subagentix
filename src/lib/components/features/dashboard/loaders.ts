@@ -5,7 +5,7 @@
  * is the single registration point. Phase 3 wired every registered widget to
  * the generic `WidgetBody` placeholder; Phase 4 swapped each entry for that
  * widget's body. Tasks #411/#412 registered the two time-series widgets and the
- * KPI/donut/bar widgets; #413 registers `top-tools`, completing the set.
+ * KPI/distribution/bar widgets; #413 registers `top-tools`, completing the set.
  */
 import type { WidgetLoaders } from './widget';
 

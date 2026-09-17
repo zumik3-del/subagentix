@@ -6,8 +6,7 @@
  * (`WidgetSettings`, immediate apply) write `dashboardWidgets`, and the landing
  * page writes `dashboardFilter` on a manual selector change.
  * `createCoalescingWriter` orders rapid changes so the last one always wins.
- * Client-safe: no DOM, no Svelte and no `$lib/server` import
- * (docs/ui-standards.md §10).
+ * Client-safe: no DOM, no Svelte and no `$lib/server` import.
  */
 import { isDashboardPeriod } from '$lib/model/dashboard';
 import type { DashboardFilter } from '$lib/model/dashboard';

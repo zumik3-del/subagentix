@@ -2,9 +2,9 @@
  * SSR render suite for dashboard widget primitives (dashboard Phase 3-4).
  *
  * Pins the rendered structure of the pure presentational components —
- * WidgetCard status branches, BarChart with/without detail, DonutChart
- * non-empty/empty/top-N aggregation, DayTable newest-first rows and fit
- * wiring — via Vite's SSR module runner. No DOM runtime, no DB.
+ * WidgetCard status branches, BarChart with/without detail, DayTable
+ * newest-first rows and fit wiring — via Vite's SSR module runner. No DOM
+ * runtime, no DB.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createServer, type ViteDevServer } from 'vite';
@@ -23,7 +23,6 @@ type RenderFn = (
 	let WidgetCard: unknown;
 	let SkeletonWidget: unknown;
 	let BarChart: unknown;
-	let DonutChart: unknown;
 	let DayTable: unknown;
 	let WidgetGrid: unknown;
 	let WidgetSettings: unknown;
@@ -50,11 +49,6 @@ beforeAll(async () => {
 	BarChart = (
 		(await vite.ssrLoadModule(
 			'/src/lib/components/features/dashboard/BarChart.svelte'
-		)) as { default: unknown }
-	).default;
-	DonutChart = (
-		(await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/DonutChart.svelte'
 		)) as { default: unknown }
 	).default;
 	DayTable = (
@@ -136,42 +130,6 @@ function renderBarChartWithDetail(): string {
 			label: 'Top tools',
 			limit: 10
 		}
-	}).body;
-}
-
-function renderDonutChart(props: Record<string, unknown> = {}): string {
-	return render(DonutChart, {
-		props: {
-			slices: [
-				{ label: 'agent-a', value: 80 },
-				{ label: 'agent-b', value: 60 },
-				{ label: 'agent-c', value: 40 }
-			],
-			label: 'Agent distribution',
-			unit: 'sessions',
-			...props
-		}
-	}).body;
-}
-
-function renderDonutChartEmpty(): string {
-	return render(DonutChart, {
-		props: {
-			slices: [],
-			label: 'Agent distribution',
-			unit: 'sessions'
-		}
-	}).body;
-}
-
-function renderDonutChartTopN(): string {
-	// 10 slices → top 5 + "Other"
-	const slices: { label: string; value: number }[] = Array.from({ length: 10 }, (_, i) => ({
-		label: `agent-${String.fromCharCode(97 + i)}`,
-		value: 100 - i * 5
-	}));
-	return render(DonutChart, {
-		props: { slices, label: 'Agent distribution', unit: 'sessions' }
 	}).body;
 }
 
@@ -353,54 +311,6 @@ describe('BarChart SSR', () => {
 		});
 		// Both bars should be present with different widths
 		expect(html).toContain('viewBox="0 0 100 1"');
-	});
-});
-
-// --- DonutChart --------------------------------------------------------------
-
-describe('DonutChart SSR', () => {
-	test('renders role="img" with summary aria-label', () => {
-		const html = renderDonutChart();
-		expect(html).toContain('role="img"');
-		expect(html).toContain('aria-label="Agent distribution:');
-	});
-
-	test('shows the empty state when total <= 0', () => {
-		const html = renderDonutChartEmpty();
-		expect(html).toContain('No data for this period.');
-	});
-
-	test('legend table has scope="row" and scope="col" headers', () => {
-		const html = renderDonutChart();
-		expect(html).toContain('scope="row"');
-		expect(html).toContain('scope="col"');
-	});
-
-	test('top-N aggregation merges excess slices into "Other"', () => {
-		const html = renderDonutChartTopN();
-		// With 10 slices and MAX_SLICES=6, should have 5 named + 1 Other
-		expect(html).toContain('>Other<');
-		// Should NOT contain all 10 individual agent labels
-		expect(html).not.toContain('>agent-j<'); // 10th agent should be merged
-	});
-
-	test('each arc slice has a path with arc geometry', () => {
-		const html = renderDonutChart();
-		expect(html).toContain('<path');
-		expect(html).toContain('donut__slice');
-	});
-
-	test('center total shows formatted sum', () => {
-		const html = renderDonutChart();
-		// Total = 80 + 60 + 40 = 180
-		expect(html).toContain('>180<');
-		expect(html).toContain('>sessions<');
-	});
-
-	test('uses --chart-* tokens for slice colors', () => {
-		const html = renderDonutChart();
-		expect(html).toContain('--chart-1');
-		expect(html).toContain('--chart-2');
 	});
 });
 

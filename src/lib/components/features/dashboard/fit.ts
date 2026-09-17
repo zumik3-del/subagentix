@@ -2,8 +2,8 @@
  * Pure whole-row fitting math for the dashboard widget bodies (task #444).
  *
  * Kept out of the Svelte bodies so the budget rule is testable without a
- * renderer or a DOM, mirroring the `top-tools.ts` / `picker.ts` helper split
- * (docs/ui-standards.md §10). No DOM, no Svelte and no `$lib/server` import:
+ * renderer or a DOM, mirroring the `top-tools.ts` / `picker.ts` helper split.
+ * No DOM, no Svelte and no `$lib/server` import:
  * the live measurement lives in `fit.svelte.ts`.
  */
 

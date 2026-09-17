@@ -7,7 +7,7 @@
 	 * landing page own the URL round-trip (`?period=&scope=`), so this component
 	 * never stores or persists state. The options are precomputed
 	 * (`PERIOD_OPTIONS`, `directoryOptions`) to keep the label rules out of the
-	 * markup (docs/ui-standards.md §10).
+	 * markup.
 	 */
 	import { isDashboardPeriod, type DashboardFilter } from '$lib/model/dashboard';
 	import { ALL_SCOPE_OPTION, PERIOD_OPTIONS, SCOPE_ALL, type FilterOption } from './filter';

@@ -3,41 +3,40 @@
  *
  * Kept out of the Svelte body so the count/error-share mapping and the
  * capped-note decision are testable without a renderer or a DOM, mirroring the
- * `data.svelte.ts` helper split (docs/ui-standards.md §10). No DOM, no Svelte
- * and no `$lib/server` import.
+ * `data.svelte.ts` helper split. No DOM, no Svelte and no `$lib/server` import.
  */
 import { MAX_TOOL_SESSIONS, type DashboardPeriod, type ToolUsage } from '$lib/model/dashboard';
 import { formatNumber } from '$lib/model/format';
 
-/** One `BarChart` row for the top-tools widget. */
-export interface TopToolBar {
+/** One table row for the top-tools widget. */
+export interface TopToolRow {
 	/** Tool name. */
-	label: string;
-	/** Call count (bar length and ranked value). */
-	value: number;
-	/** Tooltip with the exact error count behind the share. */
+	name: string;
+	/** Call count. */
+	count: number;
+	/** Errored calls, rendered in the dedicated errors column. */
+	errors: number;
+	/** Tooltip with the exact error count and share. */
 	title: string;
-	/** Visible error share, e.g. `12% errors`. */
-	detail: string;
 }
 
-/** Share of a tool's calls that errored, as a rounded percent label. */
-export function errorShareLabel(share: number): string {
+/** Share of a tool's calls that errored, as a rounded percent, e.g. `12%`. */
+export function errorPercent(share: number): string {
 	const percent = Number.isFinite(share) ? Math.round(share * 100) : 0;
-	return `${percent}% errors`;
+	return `${percent}%`;
 }
 
 /**
- * Map the Tier-P rows onto `BarChart` rows, preserving the server's rank order
- * (count desc, name asc). The bar value is the call count; the visible detail is
- * the error share and the tooltip carries the exact error count.
+ * Map the Tier-P rows onto table rows, preserving the server's rank order
+ * (count desc, name asc). The tooltip carries the error share; the errors
+ * column carries the raw errored-call count.
  */
-export function topToolBars(usage: ToolUsage): TopToolBar[] {
+export function topToolRows(usage: ToolUsage): TopToolRow[] {
 	return usage.tools.map((tool) => ({
-		label: tool.name,
-		value: tool.count,
-		title: `${formatNumber(tool.errors)} of ${formatNumber(tool.count)} calls errored`,
-		detail: errorShareLabel(tool.errorShare)
+		name: tool.name,
+		count: tool.count,
+		errors: tool.errors,
+		title: `${formatNumber(tool.errors)} of ${formatNumber(tool.count)} calls errored (${errorPercent(tool.errorShare)})`
 	}));
 }
 
