@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { WidgetPlacement } from '$lib/widgets/registry';
+import { WIDGET_IDS } from '$lib/widgets/registry';
 
 /**
  * Unit tests for the runtime settings store (task #257, ADR §4).
@@ -36,6 +37,7 @@ function freshSettingsModule() {
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: Array<{ id: string; width: number; height: number; x?: number; y?: number }> | null;
 			dashboardFilter?: { period: string; scope: string | null } | null;
+			dashboardWidgetSettings?: Record<string, Record<string, boolean>> | null;
 		};
 		updateStoredSettings: (patch: {
 			dbPath?: string | null;
@@ -43,24 +45,28 @@ function freshSettingsModule() {
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: unknown;
 			dashboardFilter?: { period: string; scope: string | null } | null;
+			dashboardWidgetSettings?: Record<string, Record<string, boolean>> | null;
 		}) => {
 			dbPath?: string | null;
 			ziptaskBaseUrl?: string | null;
 			ziptaskEnabled?: boolean | null;
 			dashboardWidgets?: unknown;
 			dashboardFilter?: { period: string; scope: string | null } | null;
+			dashboardWidgetSettings?: Record<string, Record<string, boolean>> | null;
 		};
 		resolveDbPath: () => string;
 		resolveZiptaskBaseUrl: () => string | null;
 		resolveZiptaskEnabled: () => boolean;
 		resolveDashboardWidgets: () => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
 		resolveDashboardFilter: () => { period: string; scope: string | null };
+		resolveDashboardWidgetSettings: () => Record<string, Record<string, boolean>>;
 		onSettingsChange: (cb: (next: { dbPath?: string | null; ziptaskBaseUrl?: string | null }) => void) => () => void;
 		normaliseDbPath: (value: unknown) => string;
 		normaliseZiptaskBaseUrl: (value: unknown) => string;
 		normaliseZiptaskEnabled: (value: unknown) => boolean;
 		normaliseDashboardWidgets: (value: unknown) => Array<{ id: string; width: number; height: number; x?: number; y?: number }>;
 		normaliseDashboardFilter: (value: unknown) => { period: string; scope: string | null };
+		normaliseDashboardWidgetSettings: (value: unknown) => Record<string, Record<string, boolean>>;
 		SettingsValidationError: new (message: string, field: string) => { message: string; field: string };
 	}>;
 }
@@ -162,7 +168,7 @@ test('updateStoredSettings writes and the next read returns the value', async ()
 	// File actually exists on disk.
 	expect(existsSync(file)).toBe(true);
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-	expect(disk).toHaveProperty('version', 2);
+	expect(disk).toHaveProperty('version', 3);
 	expect(disk.dbPath).toBe('/tmp/a.db');
 });
 
@@ -606,7 +612,7 @@ test('legacy string[] file degrades gracefully on read', async () => {
 	]);
 });
 
-test('version 2 is written on every updateStoredSettings call', async () => {
+test('version 3 is written on every updateStoredSettings call', async () => {
 	const dir = tempDir();
 	const file = join(dir, 'v2.json');
 	process.env.SETTINGS_FILE = file;
@@ -614,7 +620,7 @@ test('version 2 is written on every updateStoredSettings call', async () => {
 
 	mod.updateStoredSettings({ dbPath: '/tmp/test.db' });
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-	expect(disk.version).toBe(2);
+	expect(disk.version).toBe(3);
 });
 
 /* ------------------------------------------------------------------ */
@@ -788,7 +794,7 @@ test('updateStoredSettings accepts dashboardFilter and persists it', async () =>
 	expect(mod.getStoredSettings().dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
 	expect(existsSync(file)).toBe(true);
 	const disk = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>;
-	expect(disk).toHaveProperty('version', 2);
+	expect(disk).toHaveProperty('version', 3);
 	expect((disk.dashboardFilter as { period: string; scope: string | null })).toEqual({
 		period: '30d',
 		scope: '/repo/a'
@@ -856,4 +862,146 @@ test('dashboardFilter round-trips through PUT → GET unchanged', async () => {
 	mod.updateStoredSettings({ dashboardFilter: original });
 	const readBack = mod.getStoredSettings().dashboardFilter;
 	expect(readBack).toEqual(original);
+});
+
+/* ------------------------------------------------------------------ */
+/* normaliseDashboardWidgetSettings validators                         */
+/* ------------------------------------------------------------------ */
+
+test('normaliseDashboardWidgetSettings rejects a non-object', async () => {
+	for (const value of [null, 'kpi', 42, true, []] as unknown[]) {
+		const mod = await freshSettingsModule();
+		expect(() => mod.normaliseDashboardWidgetSettings(value)).toThrow(/dashboardWidgetSettings/);
+	}
+});
+
+test('normaliseDashboardWidgetSettings rejects an array', async () => {
+	const mod = await freshSettingsModule();
+	expect(() => mod.normaliseDashboardWidgetSettings(['kpi'] as unknown)).toThrow(/dashboardWidgetSettings/);
+});
+
+test('normaliseDashboardWidgetSettings rejects more than MAX_DASHBOARD_WIDGETS entries', async () => {
+	const mod = await freshSettingsModule();
+	const tooMany = Object.fromEntries(
+		Array.from({ length: 25 }, (_, i) => [`widget-${i}`, { basic: true }])
+	);
+	expect(() => mod.normaliseDashboardWidgetSettings(tooMany)).toThrow(/at most 24/);
+});
+
+test('normaliseDashboardWidgetSettings drops unknown widget ids', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgetSettings({
+		ghost: { basic: true },
+		'top-tools': { basic: true }
+	});
+	expect(result).not.toHaveProperty('ghost');
+	expect(result).toHaveProperty('top-tools');
+});
+
+test('normaliseDashboardWidgetSettings drops unknown per-widget keys', async () => {
+	const mod = await freshSettingsModule();
+	const result = mod.normaliseDashboardWidgetSettings({
+		'top-tools': { exotic: true, basic: true }
+	});
+	// exotic is not a declared key for top-tools, so it is dropped.
+	expect(result['top-tools']).not.toHaveProperty('exotic');
+	expect(result['top-tools']).toHaveProperty('basic', true);
+});
+
+test('normaliseDashboardWidgetSettings drops non-boolean values (falls back to defaults via coerce)', async () => {
+	const mod = await freshSettingsModule();
+	// coerceWidgetSettingValues drops non-boolean leaves, falling back to registry default.
+	// normaliseDashboardWidgetSettings itself only validates the outer shape; coercion
+	// happens inside. The resulting map has the widget entry (since coerce returns defaults,
+	// which is non-empty), but with defaults only for the bad keys.
+	const result = mod.normaliseDashboardWidgetSettings({
+		'top-tools': { basic: 'yes' as unknown as boolean, mcp: 1 as unknown as boolean }
+	});
+	const defs = (await import('$lib/widgets/registry')).widgetSettingDefs('top-tools');
+	for (const def of defs) {
+		expect(result['top-tools'][def.key]).toBe(def.default);
+	}
+});
+
+test('a per-widget map that empties after coercion is dropped from the result', async () => {
+	const mod = await freshSettingsModule();
+	// A widget with no declared settings (e.g. kpi) coerced from anything returns {}.
+	// An entry whose coerced values are all empty gets dropped entirely.
+	const result = mod.normaliseDashboardWidgetSettings({
+		kpi: { exotic: true }
+	});
+	expect(result).not.toHaveProperty('kpi');
+});
+
+/* ------------------------------------------------------------------ */
+/* resolveDashboardWidgetSettings                                      */
+/* ------------------------------------------------------------------ */
+
+test('resolveDashboardWidgetSettings returns an entry for every registered widget id', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'resolve-all.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const resolved = mod.resolveDashboardWidgetSettings();
+	for (const id of WIDGET_IDS) {
+		expect(resolved).toHaveProperty(id);
+	}
+});
+
+test('resolveDashboardWidgetSettings returns registry defaults when nothing stored', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'resolve-defaults.json');
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	const resolved = mod.resolveDashboardWidgetSettings();
+	const { widgetSettingDefs } = await import('$lib/widgets/registry');
+	for (const id of WIDGET_IDS) {
+		const defs = widgetSettingDefs(id);
+		const values = resolved[id];
+		for (const def of defs) {
+			expect(values[def.key]).toBe(def.default);
+		}
+		if (defs.length === 0) {
+			expect(values).toEqual({});
+		}
+	}
+});
+
+/* ------------------------------------------------------------------ */
+/* Back-compat: v2 file loads with defaults for new fields             */
+/* ------------------------------------------------------------------ */
+
+test('a v2 settings file (no dashboardWidgetSettings) loads with default widget settings and keeps placements/filter intact', async () => {
+	const dir = tempDir();
+	const file = join(dir, 'v2-compat.json');
+	writeFileSync(
+		file,
+		JSON.stringify({
+			version: 2,
+			dashboardWidgets: [{ id: 'kpi', width: 2, height: 5 }],
+			dashboardFilter: { period: '30d', scope: '/repo/legacy' }
+		}),
+		'utf8'
+	);
+	process.env.SETTINGS_FILE = file;
+	const mod = await freshSettingsModule();
+
+	// Placements and filter survive from the v2 file.
+	const widgets = mod.resolveDashboardWidgets();
+	expect(widgets).toHaveLength(1);
+	expect(widgets[0].id).toBe('kpi');
+	expect(mod.resolveDashboardFilter()).toEqual({ period: '30d', scope: '/repo/legacy' });
+
+	// dashboardWidgetSettings falls back to defaults for every widget.
+	const resolved = mod.resolveDashboardWidgetSettings();
+	const { widgetSettingDefs } = await import('$lib/widgets/registry');
+	for (const id of WIDGET_IDS) {
+		const defs = widgetSettingDefs(id);
+		const values = resolved[id];
+		for (const def of defs) {
+			expect(values[def.key]).toBe(def.default);
+		}
+	}
 });

@@ -40,7 +40,7 @@
 
 <div class="filter-selector">
 	<select
-		class="filter-selector__select"
+		class="ui-select filter-selector__select"
 		aria-label="Period"
 		value={filter.period}
 		onchange={(event) => onPeriodChange(event.currentTarget.value)}
@@ -51,7 +51,7 @@
 	</select>
 
 	<select
-		class="filter-selector__select"
+		class="ui-select filter-selector__select"
 		aria-label="Project"
 		value={filter.scope ?? SCOPE_ALL}
 		onchange={(event) => onScopeChange(event.currentTarget.value)}
@@ -69,16 +69,8 @@
 		gap: var(--space-2);
 	}
 
+	/* Sizing only — the control box comes from .ui-select. */
 	.filter-selector__select {
 		max-width: 14rem;
-		padding: var(--space-1) var(--space-2);
-		background: var(--surface-base);
-		color: var(--text-base);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		font-size: var(--font-size-small);
-		line-height: var(--line-height-normal);
-		cursor: pointer;
 	}
 </style>

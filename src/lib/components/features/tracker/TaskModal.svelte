@@ -8,6 +8,7 @@
 	 * from an `$effect`; SSR renders the loading state.
 	 */
 	import { isTaskDetail, type TrackerTaskDetail } from '$lib/model/tracker';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 	import TaskDetailView from './TaskDetailView.svelte';
 
@@ -118,8 +119,13 @@
 	>
 		<header class="ui-modal__head">
 			<h3 class="ui-modal__title">Task #{id}</h3>
-			<button type="button" class="ui-btn" aria-label={`Close task #${id}`} onclick={onClose}>
-				Close
+			<button
+				type="button"
+				class="ui-icon-btn"
+				aria-label={`Close task #${id}`}
+				onclick={onClose}
+			>
+				<Icon name="close" />
 			</button>
 		</header>
 		<div class="ui-modal__body">

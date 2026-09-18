@@ -254,7 +254,7 @@ describe('NodeDetailPanel SSR — steps and tool/MCP calls', () => {
 });
 
 describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => {
-	test('renders Retries on its own row and the other three sections below, before the Steps table', () => {
+	test('renders Retries on its own row and the other two sections below, before the Steps table', () => {
 		const html = renderPanel(
 			makeDetail({
 				steps: [makeStep({ id: 's1', index: 0 }), makeStep({ id: 's2', index: 1 })],
@@ -266,26 +266,24 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 			}),
 			'https://zt.example'
 		);
-		// One merged strip: identity, then Retries, then the three other columns.
+		// One merged strip: identity, then Retries, then the two other columns.
 		const classTokens = [...html.matchAll(/class="([^"]*)"/g)].map((match) =>
 			match[1].split(/\s+/)
 		);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-strip')).length).toBe(1);
 		expect(classTokens.filter((tokens) => tokens.includes('identity')).length).toBe(1);
 		expect(classTokens.filter((tokens) => tokens.includes('summary-row')).length).toBe(3);
-		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(3);
-		// All four headings render, including the empty tracker/permission states.
+		expect(classTokens.filter((tokens) => tokens.includes('summary-col')).length).toBe(2);
+		// Both headings render, including the empty tracker state.
 		expect(html).toContain('Retries (1)');
 		expect(html).toContain('Markers (1)');
 		expect(html).toContain('Tracker links');
 		expect(html).toContain('No tracker link.');
-		expect(html).toContain('Permissions (0)');
-		expect(html).toContain('No permission prompts recorded.');
 		// The strip precedes the Steps table in document order.
 		expect(html.indexOf('summary-strip')).toBeLessThan(html.indexOf('Steps &amp; actions ('));
 	});
 
-	test('all four columns always render; empty Retries shows the muted placeholder', () => {
+	test('all columns always render; empty Retries shows the muted placeholder', () => {
 		const html = renderPanel(makeDetail());
 		expect(html).toContain('Retries (0)');
 		expect(html).toContain('No retries.');
@@ -293,8 +291,6 @@ describe('NodeDetailPanel SSR — summary strip above Steps (task #223)', () => 
 		expect(html).toContain('No compaction or removed-content markers.');
 		expect(html).toContain('Tracker links');
 		expect(html).toContain('No tracker link.');
-		expect(html).toContain('Permissions (0)');
-		expect(html).toContain('No permission prompts recorded.');
 	});
 
 	test('the strip is a responsive auto-fit grid (source)', () => {
@@ -345,33 +341,6 @@ describe('NodeDetailPanel SSR — merged Steps & actions table', () => {
 		expect(html).toContain('id="action-a2"');
 		// Tool calls stay Reason links inside the step, not separate rows.
 		expect(html).toContain('reason-link');
-	});
-
-	test('carries the permission prompt onto the tool row and summary column', () => {
-		const html = renderPanel(
-			makeDetail({
-				steps: [makeStep({ id: 's1', index: 0 })],
-				toolCalls: [
-					makeTool({
-						id: 't9',
-						name: 'bash',
-						stepId: 's1',
-						permission: {
-							requestId: 'per_1',
-							permission: 'bash',
-							patterns: ['rm*'],
-							reply: 'reject',
-							askedAt: 1,
-							repliedAt: 2
-						}
-					})
-				]
-			})
-		);
-		expect(html).toContain('Permissions (1)');
-		expect(html).toContain('ui-badge--perm');
-		expect(html).toContain('permission: reject');
-		expect(html).toContain('ask: reject');
 	});
 });
 
@@ -671,6 +640,22 @@ describe('TaskModal SSR — dialog shell and loading state', () => {
 		expect(html).toContain('Task #185');
 		expect(html).toContain('Loading…');
 	});
+
+	test('header has the icon close control with task-id-specific aria-label and no footer', () => {
+		const html = render(TaskModal, { props: { id: '185' } }).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close task #185"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+		expect(html).not.toContain('ui-modal__foot');
+	});
+
+	test('header is a single row: title + close in one .ui-modal__head', () => {
+		const html = render(TaskModal, { props: { id: '185' } }).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html.match(/<h3[^>]*>/g)?.length ?? 0).toBe(1);
+	});
 });
 
 describe('NodeDetailPanel SSR — raw JSON, escaping and raw-HTML hygiene', () => {
@@ -767,20 +752,21 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 	test('the IO blocks render the full value when active and the raw-JSON toggle lives in RawJsonBlock', () => {
 		// The label + ScrollView + expand-toggle chrome moved into IoBlock; the
 		// value decision (`? full : truncated`) and the toggle wiring moved into
-		// ToolCallCard with the tool-call card (ADR 2.4), because `children`
-		// carries the already-decided text. The raw-JSON section + its collapsed
-		// toggle moved into RawJsonBlock (ADR 2.5).
+		// the shared ToolCallDetail with the tool-call card (#538), because
+		// `children` carries the already-decided text. The raw-JSON section + its
+		// collapsed toggle moved into RawJsonBlock (ADR 2.5).
 		const ioBlock = componentSource('../lib/components/composites/IoBlock.svelte');
+		const toolCallDetail = componentSource('../lib/components/composites/ToolCallDetail.svelte');
 		const rawJson = componentSource('../lib/components/features/node-detail/RawJsonBlock.svelte');
 		expect(ioBlock).toContain('<span class="io-label">{label}</span>');
 		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
 		expect(ioBlock).toContain('aria-expanded={expanded}');
 		expect(ioBlock).toContain('onclick={onToggle}');
 		expect(ioBlock).toContain("name={expanded ? 'collapse' : 'expand'}");
-		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:input`)}');
-		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:output`)}');
-		expect(toolCallCard).toContain('? call.input : input.text');
-		expect(toolCallCard).toContain('? call.output : output.text');
+		expect(toolCallDetail).toContain('onToggle={() => onToggleExpanded(`${call.id}:input`)}');
+		expect(toolCallDetail).toContain('onToggle={() => onToggleExpanded(`${call.id}:output`)}');
+		expect(toolCallDetail).toContain('? call.input : input.text');
+		expect(toolCallDetail).toContain('? call.output : output.text');
 		expect(rawJson).toContain('onclick={() => (showRaw = !showRaw)}');
 		expect(rawJson).toContain('{#if showRaw}');
 	});

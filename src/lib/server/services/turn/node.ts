@@ -2,7 +2,7 @@
  * Node assembly: build one session's {@link Node} DTO plus the steps, tool
  * calls, markers and actions it owns.
  */
-import type { Marker, Node, NodeFlag, NodeStatus, PermissionInfo, TimeFlag } from '../../../model/types';
+import type { Marker, Node, NodeFlag, NodeStatus, TimeFlag } from '../../../model/types';
 import { buildActions } from './actions';
 import { buildSteps, linkTools } from './steps';
 import { buildToolCalls } from './tool-calls';
@@ -14,7 +14,6 @@ export function buildSessionNode(
 	startOverride: number | null,
 	spawnCount: number,
 	subagentType: string | null,
-	index: Map<string, PermissionInfo>,
 	now: number
 ): BuiltNode {
 	const session = sd.session;
@@ -50,7 +49,7 @@ export function buildSessionNode(
 	const steps = buildSteps(sd, restrict, compactionTimes, now);
 	const actions = buildActions(sd, restrict);
 	const callMessage = new Map<string, string>();
-	const allCalls = buildToolCalls(sd, restrict, index, now);
+	const allCalls = buildToolCalls(sd, restrict, now);
 	for (const part of toolParts) callMessage.set(part.id, part.messageId);
 	linkTools(
 		steps.map((step) => ({ step, messageId: step.messageId })),

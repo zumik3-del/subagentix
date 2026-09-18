@@ -1,41 +1,50 @@
 <script lang="ts">
 	/**
-	 * Per-widget size settings dialog (task #449).
+	 * Per-widget settings dialog (task #449; schema-driven in #520).
 	 *
-	 * Opened by the gear on a `WidgetCard` and mounted by `Dashboard`. It applies
-	 * immediately: a Width/Height change calls `onChange` at once — there is no
-	 * draft and no Apply/Cancel. The shell patches the placements optimistically
-	 * (so the grid re-lays out instantly) and persists through the coalescing
-	 * writer, surfacing a failure in `error`; the size controls stay enabled
-	 * while a save is in flight so rapid `+`/`−` clicks coalesce instead of
-	 * losing the last one. Focus handling follows docs/ui-standards.md §9: dialog
-	 * semantics, Escape close, a Tab trap, initial focus and focus return to the
-	 * gear, and no markup while closed.
+	 * Opened by the gear on a `WidgetCard` and mounted by `Dashboard`. The rows
+	 * come from the registry — `widgetSettingDefs(widget.id)` in declaration
+	 * order — so a widget gets its controls for free and the dialog never
+	 * changes when a new setting is added. It applies immediately: a toggle
+	 * calls `onChange(key, value)` at once, there is no draft and no Apply/Cancel.
+	 * The shell updates its settings map optimistically and persists through the
+	 * coalescing writer, surfacing a failure in `error`. A widget with no
+	 * declared settings still opens the dialog and shows the `No settings yet.`
+	 * placeholder.
+	 *
+	 * Size is drag/resize only (epic #462): the old Width/Height controls were
+	 * removed in #520. Focus handling follows docs/ui-standards.md §9: dialog
+	 * semantics, Escape close, a Tab trap (checkboxes are focusable), initial
+	 * focus and focus return to the gear, and no markup while closed.
 	 */
 	import { tick } from 'svelte';
-	import { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH } from '$lib/widgets/registry';
-	import type { WidgetDef, WidgetPlacement } from '$lib/widgets/registry';
-	import type { WidgetSizePatch } from './widget';
+	import Icon from '$lib/components/primitives/Icon.svelte';
+	import {
+		widgetSettingDefs,
+		type WidgetDef,
+		type WidgetSettingValues
+	} from '$lib/widgets/registry';
+	import { resolveWidgetSettingValues } from '$lib/widgets/settings';
 
 	interface Props {
 		open: boolean;
-		/** Registry entry of the widget being sized. */
+		/** Registry entry of the widget being configured. */
 		widget?: WidgetDef;
-		/** Current placement of that widget; the controls edit it. */
-		placement?: WidgetPlacement;
+		/** This widget's current settings; missing keys resolve to their defaults. */
+		settings?: WidgetSettingValues;
 		/** True while the shared save writer has a request in flight. */
 		saving?: boolean;
 		/** Last save failure, shown inside the dialog. */
 		error?: string | null;
-		/** Apply one size change (immediate; the shell persists it). */
-		onChange: (patch: WidgetSizePatch) => void;
+		/** Apply one setting change (immediate; the shell persists it). */
+		onChange: (key: string, value: boolean) => void;
 		onClose: () => void;
 	}
 
 	let {
 		open,
 		widget,
-		placement,
+		settings = {},
 		saving = false,
 		error = null,
 		onChange,
@@ -46,15 +55,13 @@
 	let previouslyFocused: HTMLElement | null = null;
 	let wasOpen = false;
 
-	/**
-	 * Width options derived from the shared bound (`WIDGET_MAX_WIDTH`), so the
-	 * select can never disagree with the grid's column count. The last option is
-	 * labelled "(full)" — the row span is `GRID_COLUMNS` sixth-width blocks.
-	 */
-	const widthOptions = Array.from({ length: WIDGET_MAX_WIDTH }, (_, index) => index + 1);
+	/** Registry-declared rows, in declaration order (`[]` -> placeholder). */
+	let defs = $derived(widget ? widgetSettingDefs(widget.id) : []);
+	/** Effective values: stored overrides merged with the registry defaults. */
+	let values = $derived(widget ? resolveWidgetSettingValues(widget.id, settings) : {});
 
 	$effect(() => {
-		const isOpen = open && widget !== undefined && placement !== undefined;
+		const isOpen = open && widget !== undefined;
 		if (isOpen && !wasOpen) {
 			wasOpen = true;
 			previouslyFocused =
@@ -66,13 +73,8 @@
 		}
 	});
 
-	function setWidth(value: string): void {
-		onChange({ width: Number(value) });
-	}
-
-	function stepHeight(delta: number): void {
-		if (!placement) return;
-		onChange({ height: placement.height + delta });
+	function controlId(key: string): string {
+		return `${widget?.id ?? ''}-${key}`;
 	}
 
 	function onDialogKeydown(event: KeyboardEvent): void {
@@ -101,7 +103,7 @@
 	}
 </script>
 
-{#if open && widget && placement}
+{#if open && widget}
 	<div class="ui-modal">
 		<button
 			type="button"
@@ -119,10 +121,16 @@
 			onkeydown={onDialogKeydown}
 		>
 			<header class="ui-modal__head">
-				<div class="widget-settings__heading">
-					<h2 class="ui-modal__title" id="widget-settings-title">{widget.title}</h2>
-					<p class="widget-settings__sub">Widget settings</p>
-				</div>
+				<h2 class="ui-modal__title" id="widget-settings-title">{widget.title}</h2>
+				<p class="widget-settings__sub">Widget settings</p>
+				<button
+					type="button"
+					class="ui-icon-btn"
+					aria-label={`Close ${widget.title} settings`}
+					onclick={onClose}
+				>
+					<Icon name="close" />
+				</button>
 			</header>
 
 			<div class="ui-modal__body">
@@ -130,56 +138,31 @@
 					{#if error}
 						<p class="widget-settings__error" aria-live="polite">{error}</p>
 					{/if}
-					<div class="widget-settings__fields">
-						<span class="widget-field">
-							<label class="widget-field__label" for={`width-${widget.id}`}>Width</label>
-							<select
-								id={`width-${widget.id}`}
-								class="widget-select"
-								value={String(placement.width)}
-								onchange={(event) => setWidth(event.currentTarget.value)}
-							>
-								{#each widthOptions as option (option)}
-									<option value={String(option)}>
-										{option} block{option === 1 ? '' : 's'}{option === WIDGET_MAX_WIDTH
-											? ' (full)'
-											: ''}
-									</option>
-								{/each}
-							</select>
-						</span>
-
-						<span class="widget-field">
-							<span class="widget-field__label" id={`height-${widget.id}`}>Height</span>
-							<span class="widget-stepper" role="group" aria-labelledby={`height-${widget.id}`}>
-								<button
-									type="button"
-									class="widget-step"
-									aria-label={`Decrease ${widget.title} height`}
-									disabled={placement.height <= widget.minHeight}
-									onclick={() => stepHeight(-1)}
-								>
-									−
-								</button>
-								<span class="widget-step__value" aria-live="polite">{placement.height}</span>
-								<button
-									type="button"
-									class="widget-step"
-									aria-label={`Increase ${widget.title} height`}
-									disabled={placement.height >= WIDGET_MAX_HEIGHT}
-									onclick={() => stepHeight(1)}
-								>
-									+
-								</button>
-							</span>
-						</span>
-					</div>
+					{#if defs.length === 0}
+						<p class="widget-settings__empty">No settings yet.</p>
+					{:else}
+						<div class="widget-settings__fields">
+							{#each defs as def (def.key)}
+								<label class="ui-checkbox" for={controlId(def.key)}>
+									<input
+										class="ui-checkbox__input"
+										type="checkbox"
+										id={controlId(def.key)}
+										checked={values[def.key]}
+										onchange={(event) => onChange(def.key, event.currentTarget.checked)}
+									/>
+									<span class="widget-setting__text">
+										<span class="widget-setting__label">{def.label}</span>
+										{#if def.hint}
+											<span class="widget-setting__hint">{def.hint}</span>
+										{/if}
+									</span>
+								</label>
+							{/each}
+						</div>
+					{/if}
 				</div>
 			</div>
-
-			<footer class="ui-modal__foot">
-				<button type="button" class="ui-btn close" onclick={onClose}>Close</button>
-			</footer>
 		</div>
 	</div>
 {/if}
@@ -190,17 +173,15 @@
 		width: min(22rem, calc(100vw - 2rem));
 	}
 
-	.widget-settings__heading {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-		min-width: 0;
-	}
-
+	/* Secondary text: right-aligned element of the single-line header row. */
 	.widget-settings__sub {
 		margin: 0;
+		margin-inline-start: auto;
+		align-self: flex-start;
 		font-size: var(--font-size-small);
 		color: var(--text-weak);
+		text-align: right;
+		white-space: nowrap;
 	}
 
 	.widget-settings__error {
@@ -212,74 +193,33 @@
 		color: var(--color-danger-strong);
 	}
 
-	.widget-settings__fields {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-4);
-	}
-
-	.widget-field {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: var(--space-2);
-	}
-
-	.widget-field__label {
+	.widget-settings__empty {
+		margin: 0;
 		font-size: var(--font-size-small);
 		color: var(--text-weak);
 	}
 
-	.widget-select {
-		padding: var(--space-1) var(--space-2);
-		background: var(--surface-base);
-		color: var(--text-strong);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
+	.widget-settings__fields {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
+	}
+
+	/* A labelled checkbox row: label/hint text only — the row box, alignment
+	   and checkbox accent come from the shared `.ui-checkbox` primitive. */
+	.widget-setting__text {
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+	}
+
+	.widget-setting__label {
 		font-size: var(--font-size-small);
-	}
-
-	.widget-stepper {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-	}
-
-	.widget-step {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		width: var(--space-5);
-		height: var(--space-5);
-		padding: 0;
-		background: var(--surface-raised-base);
 		color: var(--text-base);
-		border: 1px solid var(--border-weak-base);
-		border-radius: var(--radius-sm);
-		font: inherit;
-		line-height: 1;
-		cursor: pointer;
 	}
 
-	.widget-step:hover:not(:disabled) {
-		background: var(--surface-raised-base-hover);
-		color: var(--text-strong);
-	}
-
-	.widget-step:disabled {
-		cursor: default;
-		color: var(--text-weaker);
-	}
-
-	.widget-step__value {
-		min-width: 1.5ch;
-		text-align: center;
-		font-size: var(--font-size-small);
-		font-variant-numeric: tabular-nums;
-	}
-
-	.close {
-		margin-inline-start: auto;
+	.widget-setting__hint {
+		font-size: var(--font-size-xs);
+		color: var(--text-weak);
 	}
 </style>

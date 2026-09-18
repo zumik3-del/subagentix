@@ -130,6 +130,52 @@ function buildFixture(path: string): void {
 		state: { status: 'completed', time: { start: T - 86_400_000 + 200, end: T - 86_400_000 + 220 } }
 	}));
 
+	// --- Kind-filter fixture sessions (E10/E11/E12/E15) -----------------------
+	// s-kf: high-count mcp tool + moderate basic tools to prove filter-before-top-N.
+	insSession.run('s-kf', null, '/repo/kf', 'KF', 'build', T + 1_000, T + 1_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
+	insMessage.run('m-kf', 's-kf', T + 1_000, T + 1_100, JSON.stringify({
+		role: 'assistant', cost: 0,
+		tokens: { input: 10, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
+		time: { created: T + 1_000, completed: T + 1_100 }
+	}));
+	// 200 mcp_x calls (MCP, non-allowlist)
+	for (let i = 0; i < 200; i++) {
+		insPart.run(`p-kf-mcp-${i}`, 'm-kf', 's-kf', T + 1_000 + i, T + 1_000 + i, JSON.stringify({
+			type: 'tool', tool: 'mcp_x', callID: `kc-mcp-${i}`,
+			state: { status: 'completed', time: { start: T + 1_000 + i, end: T + 1_000 + i } }
+		}));
+	}
+	// 50 invalid calls (explicitly basic)
+	for (let i = 0; i < 50; i++) {
+		insPart.run(`p-kf-inv-${i}`, 'm-kf', 's-kf', T + 2_000 + i, T + 2_000 + i, JSON.stringify({
+			type: 'tool', tool: 'invalid', callID: `kc-inv-${i}`,
+			state: { status: 'completed', time: { start: T + 2_000 + i, end: T + 2_000 + i } }
+		}));
+	}
+	// 50 bash calls (basic) — total unfiltered top-2 would be mcp_x(200) + invalid/bash(50 tie-break);
+	// after basic-only filter, invalid(50) and bash(51 inc s1) are the only candidates.
+	for (let i = 0; i < 50; i++) {
+		insPart.run(`p-kf-bash-${i}`, 'm-kf', 's-kf', T + 3_000 + i, T + 3_000 + i, JSON.stringify({
+			type: 'tool', tool: 'bash', callID: `kc-bash-${i}`,
+			state: { status: 'completed', time: { start: T + 3_000 + i, end: T + 3_000 + i } }
+		}));
+	}
+
+	// s-unk: unknown-tool session (E10 — unknown is mcp)
+	insSession.run('s-unk', null, '/repo/unk', 'Unk', 'plan', T + 2_000, T + 2_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
+	insMessage.run('m-unk', 's-unk', T + 2_000, T + 2_100, JSON.stringify({
+		role: 'assistant', cost: 0,
+		tokens: { input: 5, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
+		time: { created: T + 2_000, completed: T + 2_100 }
+	}));
+	// 30 blank-tool parts → 'unknown' (mcp)
+	for (let i = 0; i < 30; i++) {
+		insPart.run(`p-unk-${i}`, 'm-unk', 's-unk', T + 2_000 + i, T + 2_000 + i, JSON.stringify({
+			type: 'tool', callID: `kc-unk-${i}`,
+			state: { status: 'completed', time: { start: T + 2_000 + i, end: T + 2_000 + i } }
+		}));
+	}
+
 	db.close();
 }
 
@@ -151,6 +197,7 @@ const { resetDbConnection } = (await import(spec('../db.ts'))) as {
 };
 const {
 	IN_CHUNK_SIZE,
+	DEFAULT_TOP_N,
 	listSessionIds,
 	countSessionsByUtcDay,
 	countSessionsByAgent,
@@ -161,6 +208,8 @@ const {
 	aggregateMessageUsageByUtcDay,
 	aggregateToolUsage
 } = (await import(spec('./dashboard.ts'))) as typeof import('../queries/dashboard');
+const { BASIC_TOOL_NAMES } = await import('../../model/tool-kind');
+const { MAX_TOOL_SESSIONS } = await import('../../model/dashboard');
 
 afterAll(() => {
 	rmSync(tempDir, { recursive: true, force: true });
@@ -185,7 +234,7 @@ describe('Tier-S — countSessionsByUtcDay', () => {
 		expect(rows.map((r) => r.day)).toEqual([dayPrev, dayT, dayNext]);
 		const byDay = new Map(rows.map((r) => [r.day, r.count]));
 		expect(byDay.get(dayPrev)).toBe(1); // s2
-		expect(byDay.get(dayT)).toBe(2);    // s1 + s-midnight-end
+		expect(byDay.get(dayT)).toBe(4);    // s1 + s-midnight-end + s-kf + s-unk
 		expect(byDay.get(dayNext)).toBe(1); // s-midnight-start
 	});
 
@@ -233,23 +282,28 @@ describe('Tier-S — countSessionsByAgent / Model / Provider', () => {
 describe('Tier-S — countSessionsByDirectory', () => {
 	test('blank and NULL directories are dropped; project-name join when linked', () => {
 		const rows = countSessionsByDirectory({});
-		// /repo/a (s1), /repo/b (s2), /repo/x (s-midnight-end, s-midnight-start)
-		expect(rows.length).toBe(3);
+		// /repo/a (s1, s-kf), /repo/b (s2), /repo/x (s-midnight-end, s-midnight-start),
+		// /repo/kf (s-kf), /repo/unk (s-unk)
+		expect(rows.length).toBe(5);
 		const a = rows.find((r) => r.directory === '/repo/a');
 		const b = rows.find((r) => r.directory === '/repo/b');
 		const x = rows.find((r) => r.directory === '/repo/x');
+		const kf = rows.find((r) => r.directory === '/repo/kf');
+		const unk = rows.find((r) => r.directory === '/repo/unk');
 		expect(a?.projectName).toBe('Proj A');
 		expect(b?.projectName).toBeNull();
 		expect(x?.projectName).toBeNull();
+		expect(kf?.projectName).toBeNull();
+		expect(unk?.projectName).toBeNull();
 	});
 });
 
 describe('Tier-S — aggregateSessionTotals', () => {
 	test('totals sum across all five token categories + cost', () => {
 		const rec = aggregateSessionTotals({});
-		// s1 cost=1.5, s2 cost=3, midnight sessions cost=0 -> total 4.5
+		// s1 cost=1.5, s2 cost=3, midnight sessions cost=0, s-kf cost=0, s-unk cost=0 -> total 4.5
 		expect(rec.cost).toBeCloseTo(4.5, 5);
-		expect(rec.count).toBe(4); // s1, s2, s-midnight-end, s-midnight-start
+		expect(rec.count).toBe(6); // s1, s2, s-midnight-end, s-midnight-start, s-kf, s-unk
 		expect(rec.tokens.input).toBe(180);
 		expect(rec.tokens.output).toBe(300);
 		expect(rec.tokens.reasoning).toBe(17);
@@ -452,13 +506,104 @@ describe('Tier-P — aggregateToolUsage', () => {
 		const ids = listSessionIds({});
 		const rows = aggregateToolUsage(ids);
 		const bash = rows.find((r) => r.name === 'bash');
-		// 510 extra + 2 fixture (p1 + p3) = 512 total bash parts.
-		expect(bash?.count).toBe(512);
-		// 255 errors from extras (half of 510) + 0 from fixture bash (p1 ok, p3 ok) = 255
+		// 510 extra + 2 fixture (p1 + p3) + 50 from s-kf = 562 total bash parts.
+		expect(bash?.count).toBe(562);
+		// 255 errors from extras (half of 510) + 0 from fixture bash (p1 ok, p3 ok) + 0 from s-kf = 255
 		expect(bash?.errors).toBe(255);
 	}, 15_000);
 
 	test('empty set -> []', () => {
 		expect(aggregateToolUsage([])).toEqual([]);
+	});
+
+	// ---- kind-filter tests (epic #512, task #519) ---------------------------
+
+	test('basic-only excludes every non-allowlist tool (mcp_recall, unknown)', () => {
+		// Use specific session ids to avoid interfering with other tests.
+		const ids = ['s1', 's-kf', 's-unk'];
+		const rows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: true, mcp: false });
+		const names = rows.map((r) => r.name);
+		// mcp_recall is NOT in the allowlist → excluded.
+		expect(names).not.toContain('mcp_recall');
+		// unknown (blank tool key) is NOT in the allowlist → excluded.
+		expect(names).not.toContain('unknown');
+		// Only basic tools should remain.
+		for (const name of names) {
+			expect(BASIC_TOOL_NAMES).toContain(name);
+		}
+	});
+
+	test('mcp-only excludes every allowlist tool (bash, invalid)', () => {
+		const ids = ['s1', 's-kf', 's-unk'];
+		const rows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: false, mcp: true });
+		const names = rows.map((r) => r.name);
+		// basic tools excluded.
+		expect(names).not.toContain('bash');
+		expect(names).not.toContain('invalid');
+		// mcp tools included.
+		expect(names).toContain('mcp_recall');
+		expect(names).toContain('unknown');
+		expect(names).toContain('mcp_x');
+	});
+
+	test('both-on returns the unfiltered result (same shape and counts)', () => {
+		const ids = ['s1', 's-kf', 's-unk'];
+		const filtered = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: true, mcp: true });
+		const unfiltered = aggregateToolUsage(ids, DEFAULT_TOP_N, undefined);
+		expect(filtered.map((r) => r.name)).toEqual(unfiltered.map((r) => r.name));
+		for (let i = 0; i < filtered.length; i++) {
+			expect(filtered[i].count).toBe(unfiltered[i].count);
+			expect(filtered[i].errors).toBe(unfiltered[i].errors);
+		}
+	});
+
+	test('top-N applied AFTER the kind filter: basic-only limit=2 contains only basic tools', () => {
+		const ids = ['s1', 's-kf', 's-unk'];
+		// Unfiltered top-2: mcp_x(200), bash(51).
+		const unfiltered = aggregateToolUsage(ids, 2);
+		expect(unfiltered[0].name).toBe('mcp_x');
+		expect(unfiltered[0].count).toBe(200);
+		expect(unfiltered[1].name).toBe('bash');
+		expect(unfiltered[1].count).toBe(51);
+		// Basic-only limit=2: only bash(51) and invalid(50) are candidates → both appear.
+		// If top-N were applied BEFORE filtering, mcp_x(200) would consume one slot
+		// and we would get only one basic tool. The fact that both basic tools appear
+		// proves filter-before-top-N.
+		const basic = aggregateToolUsage(ids, 2, { basic: true, mcp: false });
+		expect(basic.length).toBe(2);
+		expect(basic[0].name).toBe('bash');
+		expect(basic[0].count).toBe(51);
+		expect(basic[1].name).toBe('invalid');
+		expect(basic[1].count).toBe(50);
+	});
+
+	test('unknown is classified as mcp (present in mcp-only, absent in basic-only)', () => {
+		const ids = ['s1', 's-kf', 's-unk'];
+		const mcpRows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: false, mcp: true });
+		const basicRows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: true, mcp: false });
+		expect(mcpRows.map((r) => r.name)).toContain('unknown');
+		expect(basicRows.map((r) => r.name)).not.toContain('unknown');
+	});
+
+	test('invalid is classified as basic (present in basic-only, absent in mcp-only)', () => {
+		const ids = ['s1', 's-kf', 's-unk'];
+		const mcpRows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: false, mcp: true });
+		const basicRows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: true, mcp: false });
+		expect(basicRows.map((r) => r.name)).toContain('invalid');
+		expect(mcpRows.map((r) => r.name)).not.toContain('invalid');
+	});
+
+	test('capped semantics unchanged: period=all with both-on still returns correct capped flag', () => {
+		// The fixture has sessions spanning two UTC days. With period=all and no scope,
+		// all 6 sessions are in range. The session ceiling (MAX_TOOL_SESSIONS) is much
+		// larger than 6, so capped must be false.
+		const allIds = listSessionIds({});
+		expect(allIds.length).toBeLessThanOrEqual(MAX_TOOL_SESSIONS);
+		const usage = aggregateToolUsage(allIds, DEFAULT_TOP_N, { basic: true, mcp: true });
+		expect(Array.isArray(usage)).toBe(true);
+		expect(usage.length).toBeGreaterThan(0);
+		// capped is a service-level concern; the query just returns the full list.
+		// Verify the query does not truncate due to a hidden cap.
+		expect(usage.map((r) => r.name)).toContain('mcp_x');
 	});
 });

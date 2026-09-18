@@ -13,7 +13,6 @@
  */
 import { nodeTrackerRefs } from '../../model/tracker';
 import type { NodeDetail } from '../../model/types';
-import { buildPermissionIndex } from '../permission-store';
 import {
 	getActionParts,
 	getCompactionParts,
@@ -130,7 +129,6 @@ export function buildNodeDetail(
 		isRoot ? trigger.startedAt : null,
 		spawnEdges.length,
 		spawnEdges.find((edge) => edge.subagentType)?.subagentType ?? null,
-		buildPermissionIndex(),
 		now
 	);
 

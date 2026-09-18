@@ -9,6 +9,7 @@
 	 * The parent owns `open` and closes it.
 	 */
 	import { onDestroy, tick } from 'svelte';
+	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
 
 	type Tab = 'opencode' | 'ziptask';
@@ -475,6 +476,9 @@
 		>
 			<header class="ui-modal__head">
 				<h2 class="ui-modal__title" id="settings-title">Settings</h2>
+				<button type="button" class="ui-icon-btn" aria-label="Close settings" onclick={onClose}>
+					<Icon name="close" />
+				</button>
 			</header>
 
 			<div
@@ -561,8 +565,9 @@
 							</div>
 						{:else}
 							<div id="panel-ziptask" role="tabpanel" aria-labelledby="tab-ziptask" tabindex="0">
-								<label class="toggle">
+								<label class="ui-checkbox">
 									<input
+										class="ui-checkbox__input"
 										type="checkbox"
 										bind:checked={ziptaskEnabled}
 										disabled={loading || saving}
@@ -603,9 +608,6 @@
 				{#if notice}
 					<p class="ui-notice" role="status" aria-live="polite">{notice}</p>
 				{/if}
-				<button type="button" class="ui-btn" onclick={onClose} disabled={saving}>
-					Cancel
-				</button>
 				<button
 					type="button"
 					class="ui-btn ui-btn--primary"
@@ -693,17 +695,6 @@
 	.field-label {
 		font-size: var(--font-size-small);
 		color: var(--text-weak);
-	}
-
-	.toggle {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		cursor: pointer;
-	}
-
-	.toggle input {
-		accent-color: var(--border-selected);
 	}
 
 	.candidates {

@@ -66,7 +66,8 @@ describe('GET /api/settings', () => {
 			ziptaskEnabled: null,
 			agentsPath: null,
 			dashboardWidgets: null,
-			dashboardFilter: null
+			dashboardFilter: null,
+			dashboardWidgetSettings: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'default',
@@ -74,7 +75,8 @@ describe('GET /api/settings', () => {
 			ziptaskEnabled: 'default',
 			agentsPath: 'none',
 			dashboardWidgets: 'default',
-			dashboardFilter: 'default'
+			dashboardFilter: 'default',
+			dashboardWidgetSettings: 'default'
 		});
 	});
 
@@ -100,7 +102,8 @@ describe('GET /api/settings', () => {
 			ziptaskEnabled: null,
 			agentsPath: null,
 			dashboardWidgets: null,
-			dashboardFilter: null
+			dashboardFilter: null,
+			dashboardWidgetSettings: null
 		});
 		expect(body.source).toEqual({
 			dbPath: 'file',
@@ -108,7 +111,8 @@ describe('GET /api/settings', () => {
 			ziptaskEnabled: 'default',
 			agentsPath: 'none',
 			dashboardWidgets: 'default',
-			dashboardFilter: 'default'
+			dashboardFilter: 'default',
+			dashboardWidgetSettings: 'default'
 		});
 	});
 });
@@ -133,7 +137,7 @@ describe('PUT /api/settings', () => {
 		expect(body.stored.dbPath).toBe('/tmp/partial.db');
 		// File on disk reflects the write.
 		expect(JSON.parse(readFileSync(SETTINGS_FILE, 'utf8').trim())).toMatchObject({
-			version: 2,
+			version: 3,
 			dbPath: '/tmp/partial.db'
 		});
 	});
@@ -488,5 +492,100 @@ describe('SettingsModal server-only leak guard', () => {
 			.filter((line) => /^\s*import\b/.test(line))
 			.join('\n');
 		expect(imports).not.toMatch(/\$lib\/server|bun:sqlite|opencode\.db|OPENCODE_DB/);
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* PUT /api/settings — dashboardWidgetSettings                        */
+/* ------------------------------------------------------------------ */
+
+describe('PUT /api/settings — dashboardWidgetSettings', () => {
+	test('valid map persists and is echoed by GET with source=file', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardWidgetSettings: { 'top-tools': { basic: false, mcp: true } } })
+			})
+		});
+		expect(putResp.status).toBe(200);
+		const body = (await putResp.json()) as Record<string, unknown>;
+		const stored = body.stored as Record<string, unknown>;
+		expect(stored.dashboardWidgetSettings).toEqual({ 'top-tools': { basic: false, mcp: true } });
+		const source = body.source as Record<string, unknown>;
+		expect(source.dashboardWidgetSettings).toBe('file');
+		expect(stored.dashboardWidgets).toBeNull();
+	});
+
+	test('PUT is partial: other stored fields remain unchanged', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		// First, seed a dbPath.
+		await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dbPath: '/tmp/partial.db' })
+			})
+		});
+		// Now PUT only dashboardWidgetSettings.
+		const putResp = await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardWidgetSettings: { 'top-tools': { basic: true } } })
+			})
+		});
+		expect(putResp.status).toBe(200);
+		const body = (await putResp.json()) as Record<string, unknown>;
+		const stored = body.stored as Record<string, unknown>;
+		expect(stored.dbPath).toBe('/tmp/partial.db');
+		expect(stored.dashboardWidgetSettings).toEqual({ 'top-tools': { basic: true, mcp: true } });
+	});
+
+	test('non-object value → 400 {error, field: "dashboardWidgetSettings"}', async () => {
+		for (const payload of [
+			{ dashboardWidgetSettings: 'kpi' },
+			{ dashboardWidgetSettings: 42 },
+			{ dashboardWidgetSettings: [] },
+			{ dashboardWidgetSettings: null }
+		] as Record<string, unknown>[]) {
+			const putResp = await settingsRoute.PUT({
+				request: new Request('http://localhost/api/settings', {
+					method: 'PUT',
+					headers: { 'content-type': 'application/json' },
+					body: JSON.stringify(payload)
+				})
+			});
+			// null is the "clear" signal → 200; everything else is 400.
+			if (payload.dashboardWidgetSettings === null) {
+				expect(putResp.status).toBe(200);
+			} else {
+				expect(putResp.status).toBe(400);
+				const body = (await putResp.json()) as { error: string; field?: string };
+				expect(body.field).toBe('dashboardWidgetSettings');
+			}
+		}
+	});
+
+	test('GET source is default with no override, file after stored override', async () => {
+		if (existsSync(SETTINGS_FILE)) rmSync(SETTINGS_FILE, { force: true });
+		// No override → source = default.
+		let resp = settingsRoute.GET({});
+		expect(resp.status).toBe(200);
+		let body = (await resp.json()) as Record<string, unknown>;
+		expect((body.source as Record<string, unknown>).dashboardWidgetSettings).toBe('default');
+
+		// After PUT → source = file.
+		await settingsRoute.PUT({
+			request: new Request('http://localhost/api/settings', {
+				method: 'PUT',
+				headers: { 'content-type': 'application/json' },
+				body: JSON.stringify({ dashboardWidgetSettings: { 'top-tools': { basic: false } } })
+			})
+		});
+		resp = settingsRoute.GET({});
+		body = (await resp.json()) as Record<string, unknown>;
+		expect((body.source as Record<string, unknown>).dashboardWidgetSettings).toBe('file');
 	});
 });

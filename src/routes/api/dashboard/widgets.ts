@@ -1,9 +1,10 @@
 /**
  * Dashboard widget endpoint composition (dashboard Phase 1/2, task #405).
  *
- * The single place that maps a widget id + filter onto its Tier S/M/P data. The
- * payload builder for a widget is selected from `WIDGET_DEFS[].tier` in
- * `src/lib/widgets/registry.ts`, and every load is wrapped in the short-TTL
+ * The single place that maps a widget id + filter onto its payload. The payload
+ * builder for a widget is selected straight from the id-keyed `WIDGET_BUILDERS`
+ * map below (`WidgetDef.tier` in `src/lib/widgets/registry.ts` is descriptive
+ * metadata only), and every load is wrapped in the short-TTL
  * `services/dashboard-cache.ts`, so the SQL and the DTO shapes stay in the
  * services (`services/dashboard*.ts`) — this module never re-implements an
  * aggregate, it only projects the service DTOs onto the whitelisted fields the
@@ -13,8 +14,12 @@
  * never reach the client bundle.
  */
 import { json } from '@sveltejs/kit';
-import { isDashboardPeriod, type DashboardFilter } from '$lib/model/dashboard';
-import type { TokenCounts } from '$lib/model/token';
+import {
+	isDashboardPeriod,
+	type DashboardFilter,
+	type KpiData,
+	type WidgetDataMap
+} from '$lib/model/dashboard';
 import { invalidRequest } from '$lib/server/http';
 import { listDirectoriesCached } from '$lib/server/queries/directories';
 import { loadDashboardAggregate } from '$lib/server/services/dashboard-cache';
@@ -26,17 +31,8 @@ import {
 } from '$lib/server/services/dashboard';
 import { getCostPerDay, getMessageTotals } from '$lib/server/services/dashboard-message';
 import { getTopTools } from '$lib/server/services/dashboard-tools';
-import { isWidgetId, WIDGET_DEFS, type WidgetId, type WidgetTier } from '$lib/widgets/registry';
-
-/** Windowed KPI payload: Tier-S session count + Tier-M cost/token sums. */
-export interface KpiData {
-	/** In-window/scope sessions (`session` rows, Tier S). */
-	sessions: number;
-	/** Summed `message.data.cost` (Tier M). */
-	cost: number;
-	/** Summed `message.data.tokens.*` (Tier M). */
-	tokens: TokenCounts;
-}
+import { isWidgetId, type WidgetId, type WidgetSettingValues } from '$lib/widgets/registry';
+import { parseWidgetSettingParams, widgetSettingSignature } from '$lib/widgets/settings';
 
 /** The validated response envelope (AC-1). */
 export interface DashboardEnvelope {
@@ -48,7 +44,26 @@ export interface DashboardEnvelope {
 }
 
 /** Build one widget's payload from the services; no caching here. */
-type WidgetDataBuilder = (filter: DashboardFilter, now: number) => unknown;
+type WidgetDataBuilder = (
+	filter: DashboardFilter,
+	now: number,
+	settings: WidgetSettingValues
+) => unknown;
+
+/**
+ * One payload builder per widget id, each returning its own
+ * {@link WidgetDataMap} payload — the map is what pins a builder to its widget,
+ * so a payload that drifts from the shared contract fails here. The third
+ * `settings` argument is the widget's resolved setting map; a builder that
+ * declares no settings simply omits the parameter.
+ */
+type WidgetBuilders = {
+	[K in WidgetId]: (
+		filter: DashboardFilter,
+		now: number,
+		settings: WidgetSettingValues
+	) => WidgetDataMap[K];
+};
 
 /** Windowed KPI: message-derived cost/tokens (Tier M) + session count (Tier S). */
 function buildKpi(filter: DashboardFilter, now: number): KpiData {
@@ -67,58 +82,52 @@ function buildKpi(filter: DashboardFilter, now: number): KpiData {
 }
 
 /**
- * Payload builders grouped by the registry's dominant tier (`WidgetDef.tier`),
- * so the dispatch below is literally keyed off `WIDGET_DEFS[].tier`. `kpi` sits
- * in the M group because its dominant source is `message` (spec §2.3); its
- * builder additionally reads the cheap Tier-S session count.
+ * Payload builders keyed by widget id: one entry per registered widget, each
+ * returning its own {@link WidgetDataMap} payload. The `WidgetBuilders` type
+ * pins every id to the payload its registry descriptor declares, so a widget
+ * added to the registry without a builder is a compile error. `kpi`'s dominant
+ * source is `message`; its builder additionally reads the cheap `session`
+ * count. `WidgetDef.tier` stays registry metadata and is never read for
+ * dispatch.
  */
-const TIER_BUILDERS: Record<WidgetTier, Partial<Record<WidgetId, WidgetDataBuilder>>> = {
-	S: {
-		'sessions-per-day': (filter, now) =>
-			getSessionsPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
-		'agent-distribution': (filter, now) =>
-			getAgentDistribution(filter, now).map((row) => ({ name: row.name, count: row.count })),
-		'top-projects': (filter, now) =>
-			getTopDirectories(filter, now).map((row) => ({
-				directory: row.directory,
-				projectName: row.projectName,
-				count: row.count
+const WIDGET_BUILDERS: WidgetBuilders = {
+	kpi: buildKpi,
+	'sessions-per-day': (filter, now) =>
+		getSessionsPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
+	'cost-per-day': (filter, now) =>
+		getCostPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value })),
+	'top-tools': (filter, now, settings) => {
+		const usage = getTopTools(filter, now, settings);
+		return {
+			capped: usage.capped,
+			tools: usage.tools.map((tool) => ({
+				name: tool.name,
+				count: tool.count,
+				errors: tool.errors,
+				errorShare: tool.errorShare
 			}))
+		};
 	},
-	M: {
-		kpi: buildKpi,
-		'cost-per-day': (filter, now) =>
-			getCostPerDay(filter, now).map((bucket) => ({ day: bucket.day, value: bucket.value }))
-	},
-	P: {
-		'top-tools': (filter, now) => {
-			const usage = getTopTools(filter, now);
-			return {
-				capped: usage.capped,
-				tools: usage.tools.map((tool) => ({
-					name: tool.name,
-					count: tool.count,
-					errors: tool.errors,
-					errorShare: tool.errorShare
-				}))
-			};
-		}
-	}
+	'agent-distribution': (filter, now) =>
+		getAgentDistribution(filter, now).map((row) => ({ name: row.name, count: row.count })),
+	'top-projects': (filter, now) =>
+		getTopDirectories(filter, now).map((row) => ({
+			directory: row.directory,
+			projectName: row.projectName,
+			count: row.count
+		}))
 };
 
 /**
- * Resolve a registered widget id to its tier payload builder via the registry,
- * so the registry stays the single source of widget identity/tier. Throws (a
- * 500, never a partial response) if a registered widget has no builder.
+ * Resolve a widget id to its payload builder straight from the id-keyed
+ * {@link WIDGET_BUILDERS} map (no tier lookup). A registered id that somehow has
+ * no builder throws — a 500, never a partial response — so the map stays the one
+ * dispatch source.
  */
 function builderFor(widgetId: WidgetId): WidgetDataBuilder {
-	const def = WIDGET_DEFS.find((candidate) => candidate.id === widgetId);
-	if (def === undefined) {
-		throw new Error(`Widget "${widgetId}" is not registered.`);
-	}
-	const builder = TIER_BUILDERS[def.tier][widgetId];
+	const builder: WidgetDataBuilder | undefined = WIDGET_BUILDERS[widgetId];
 	if (builder === undefined) {
-		throw new Error(`Widget "${widgetId}" has no Tier-${def.tier} payload builder.`);
+		throw new Error(`Widget "${widgetId}" has no payload builder.`);
 	}
 	return builder;
 }
@@ -128,10 +137,20 @@ function builderFor(widgetId: WidgetId): WidgetDataBuilder {
  * requested with the same filter would collide. Namespace the cache-only key
  * with the widget id (NUL-separated, so it can never equal a real directory
  * scope); the loader still resolves the real filter from its closure, so the
- * namespace never reaches a query or a response.
+ * namespace never reaches a query or a response. The widget's settings
+ * signature is appended too, so two settings maps for the same widget get
+ * distinct entries (a toggle is a cache miss, never stale for the TTL).
  */
-function widgetCacheFilter(widgetId: WidgetId, filter: DashboardFilter): DashboardFilter {
-	return { period: filter.period, scope: `${filter.scope ?? '*'}\u0000${widgetId}` };
+function widgetCacheFilter(
+	widgetId: WidgetId,
+	filter: DashboardFilter,
+	settings: WidgetSettingValues
+): DashboardFilter {
+	const signature = widgetSettingSignature(widgetId, settings);
+	return {
+		period: filter.period,
+		scope: `${filter.scope ?? '*'}\u0000${widgetId}\u0000${signature}`
+	};
 }
 
 interface CachedWidgetData {
@@ -142,19 +161,22 @@ interface CachedWidgetData {
 /**
  * Load one widget's payload through the short-TTL dashboard cache. `refresh`
  * (`?refresh=1`) bypasses the TTL without clearing other widgets' entries.
- * `now` is injectable so tests can pin the window deterministically; the
- * returned `generatedAt` is when the payload was produced, not served.
+ * `settings` is the widget's parsed setting map; it feeds both the builder and
+ * the cache key. `now` is injectable so tests can pin the window
+ * deterministically; the returned `generatedAt` is when the payload was
+ * produced, not served.
  */
 export function loadWidgetData(
 	widgetId: WidgetId,
 	filter: DashboardFilter,
+	settings: WidgetSettingValues,
 	refresh: boolean,
 	now = Date.now()
 ): Promise<DashboardEnvelope> {
 	const builder = builderFor(widgetId);
 	return loadDashboardAggregate<CachedWidgetData>(
-		widgetCacheFilter(widgetId, filter),
-		() => ({ generatedAt: now, data: builder(filter, now) }),
+		widgetCacheFilter(widgetId, filter, settings),
+		() => ({ generatedAt: now, data: builder(filter, now, settings) }),
 		{ refresh, now }
 	).then((entry) => ({ widgetId, generatedAt: entry.generatedAt, data: entry.data }));
 }
@@ -164,26 +186,20 @@ const DEFAULT_PERIOD = '30d';
 /** `?scope=` value meaning "every directory" (maps to `filter.scope = null`). */
 const ALL_SCOPES = 'all';
 
-/** A validated request, or the 400/404 response to return instead. */
-export type DashboardRequest =
-	| { ok: true; widgetId: WidgetId; filter: DashboardFilter }
+/** A validated filter, or the 400 response to return instead. */
+export type DashboardFilterRequest =
+	| { ok: true; filter: DashboardFilter }
 	| { ok: false; response: Response };
 
 /**
- * Validate `[widget]`, `?period=` and `?scope=`. An unknown widget id is a 404;
- * a value outside the period enum or a scope that is not a known directory is a
- * 400 `{ error, field }`. A blank/absent period or scope falls back to the
- * documented defaults (`30d`, all directories) rather than erroring, so an
- * empty query string is still a valid request.
+ * Validate `?period=` and `?scope=` on their own — shared by the widget
+ * endpoint and the top-tools error detail endpoint, so both reject a bad filter
+ * identically. A value outside the period enum or a scope that is not a known
+ * directory is a 400 `{ error, field }`; a blank/absent period or scope falls
+ * back to the documented defaults (`30d`, all directories) rather than
+ * erroring, so an empty query string is still a valid request.
  */
-export function resolveDashboardRequest(widgetParam: string, url: URL): DashboardRequest {
-	if (!isWidgetId(widgetParam)) {
-		return {
-			ok: false,
-			response: json({ error: `Unknown widget "${widgetParam}".` }, { status: 404 })
-		};
-	}
-
+export function resolveFilter(url: URL): DashboardFilterRequest {
 	const periodParam = url.searchParams.get('period');
 	const period = periodParam === null || periodParam === '' ? DEFAULT_PERIOD : periodParam;
 	if (!isDashboardPeriod(period)) {
@@ -207,5 +223,35 @@ export function resolveDashboardRequest(widgetParam: string, url: URL): Dashboar
 		scope = scopeParam;
 	}
 
-	return { ok: true, widgetId: widgetParam, filter: { period, scope } };
+	return { ok: true, filter: { period, scope } };
+}
+
+/** A validated widget request, or the 400/404 response to return instead. */
+export type DashboardRequest =
+	| { ok: true; widgetId: WidgetId; filter: DashboardFilter; settings: WidgetSettingValues }
+	| { ok: false; response: Response };
+
+/**
+ * Validate `[widget]` on top of {@link resolveFilter}. An unknown widget id is
+ * a 404; a bad period/scope is the 400 the shared filter validation returns.
+ * The widget's `w.<key>=1|0` settings are parsed leniently
+ * ({@link parseWidgetSettingParams}): absent/unknown params are ignored and a
+ * malformed value falls back to the registry default, so a stale deep link is
+ * never a 400.
+ */
+export function resolveDashboardRequest(widgetParam: string, url: URL): DashboardRequest {
+	if (!isWidgetId(widgetParam)) {
+		return {
+			ok: false,
+			response: json({ error: `Unknown widget "${widgetParam}".` }, { status: 404 })
+		};
+	}
+	const resolved = resolveFilter(url);
+	if (!resolved.ok) return resolved;
+	return {
+		ok: true,
+		widgetId: widgetParam,
+		filter: resolved.filter,
+		settings: parseWidgetSettingParams(widgetParam, url.searchParams)
+	};
 }

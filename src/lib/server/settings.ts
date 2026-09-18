@@ -13,8 +13,9 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { DEFAULT_FILTER, SCOPE_ALL } from '$lib/components/features/dashboard/filter';
 import { isDashboardPeriod } from '$lib/model/dashboard';
 import type { DashboardFilter } from '$lib/model/dashboard';
-import { DEFAULT_WIDGETS, resolvePlacements } from '$lib/widgets/registry';
-import type { WidgetPlacement } from '$lib/widgets/registry';
+import { DEFAULT_WIDGETS, isWidgetId, resolvePlacements, WIDGET_IDS } from '$lib/widgets/registry';
+import type { WidgetId, WidgetPlacement, WidgetSettingValues } from '$lib/widgets/registry';
+import { coerceWidgetSettingValues, resolveWidgetSettingValues } from '$lib/widgets/settings';
 
 /** Hardcoded fallback when neither the file nor `OPENCODE_DB` supplies a path. */
 export const DEFAULT_DB_PATH = '/home/opencode/.local/share/opencode/opencode.db';
@@ -33,7 +34,8 @@ export type SettingsField =
 	| 'ziptaskEnabled'
 	| 'agentsPath'
 	| 'dashboardWidgets'
-	| 'dashboardFilter';
+	| 'dashboardFilter'
+	| 'dashboardWidgetSettings';
 
 export interface StoredSettings {
 	dbPath?: string | null;
@@ -42,6 +44,7 @@ export interface StoredSettings {
 	agentsPath?: string | null;
 	dashboardWidgets?: WidgetPlacement[] | null;
 	dashboardFilter?: DashboardFilter | null;
+	dashboardWidgetSettings?: Record<string, WidgetSettingValues> | null;
 }
 
 /** Validation failure carrying the offending field for the 400 API contract. */
@@ -253,6 +256,42 @@ export function normaliseDashboardFilter(value: unknown): DashboardFilter {
 	return { period, scope };
 }
 
+/**
+ * Validate/normalise a `dashboardWidgetSettings` value; throws
+ * `SettingsValidationError` for a non-object payload.
+ *
+ * The stored shape is widget id -> setting key -> boolean. Only registered ids
+ * and declared keys survive, a non-boolean leaf falls back to the registry
+ * default, and a per-widget map that ends up empty is dropped so the file stays
+ * clean (design §2 / E1-E3). A map with more raw entries than
+ * {@link MAX_DASHBOARD_WIDGETS} is rejected for parity with
+ * `dashboardWidgets` (E30).
+ */
+export function normaliseDashboardWidgetSettings(
+	value: unknown
+): Record<string, WidgetSettingValues> {
+	if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+		throw new SettingsValidationError(
+			'dashboardWidgetSettings must be an object keyed by widget id.',
+			'dashboardWidgetSettings'
+		);
+	}
+	const record = value as Record<string, unknown>;
+	if (Object.keys(record).length > MAX_DASHBOARD_WIDGETS) {
+		throw new SettingsValidationError(
+			`dashboardWidgetSettings must contain at most ${MAX_DASHBOARD_WIDGETS} entries.`,
+			'dashboardWidgetSettings'
+		);
+	}
+	const out: Record<string, WidgetSettingValues> = {};
+	for (const [id, raw] of Object.entries(record)) {
+		if (!isWidgetId(id)) continue;
+		const values = coerceWidgetSettingValues(id, raw);
+		if (Object.keys(values).length > 0) out[id] = values;
+	}
+	return out;
+}
+
 /** Pick the known keys off a parsed file, dropping values that fail validation. */
 function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 	const out: StoredSettings = {};
@@ -292,6 +331,13 @@ function normaliseStored(raw: Record<string, unknown>): StoredSettings {
 			out.dashboardFilter = normaliseDashboardFilter(raw.dashboardFilter);
 		} catch {
 			// A hand-edited invalid filter degrades to the first-visit default.
+		}
+	}
+	if (raw.dashboardWidgetSettings !== undefined) {
+		try {
+			out.dashboardWidgetSettings = normaliseDashboardWidgetSettings(raw.dashboardWidgetSettings);
+		} catch {
+			// A hand-edited invalid map degrades to the registry defaults.
 		}
 	}
 	return out;
@@ -346,13 +392,16 @@ function emit(next: StoredSettings): void {
 function writeSettingsFile(settings: StoredSettings): void {
 	const file = settingsFilePath();
 	mkdirSync(dirname(file), { recursive: true });
-	const payload: Record<string, unknown> = { version: 2 };
+	const payload: Record<string, unknown> = { version: 3 };
 	if (settings.dbPath !== undefined) payload.dbPath = settings.dbPath;
 	if (settings.ziptaskBaseUrl !== undefined) payload.ziptaskBaseUrl = settings.ziptaskBaseUrl;
 	if (settings.ziptaskEnabled !== undefined) payload.ziptaskEnabled = settings.ziptaskEnabled;
 	if (settings.agentsPath !== undefined) payload.agentsPath = settings.agentsPath;
 	if (settings.dashboardWidgets !== undefined) payload.dashboardWidgets = settings.dashboardWidgets;
 	if (settings.dashboardFilter !== undefined) payload.dashboardFilter = settings.dashboardFilter;
+	if (settings.dashboardWidgetSettings !== undefined) {
+		payload.dashboardWidgetSettings = settings.dashboardWidgetSettings;
+	}
 	const tmp = `${file}.tmp-${process.pid}`;
 	writeFileSync(tmp, `${JSON.stringify(payload, null, 2)}\n`, { mode: 0o600 });
 	renameSync(tmp, file);
@@ -387,6 +436,15 @@ export function updateStoredSettings(patch: StoredSettings): StoredSettings {
 	if (Object.prototype.hasOwnProperty.call(patch, 'dashboardFilter')) {
 		next.dashboardFilter =
 			patch.dashboardFilter === null ? null : normaliseDashboardFilter(patch.dashboardFilter);
+	}
+	if (
+		Object.prototype.hasOwnProperty.call(patch, 'dashboardWidgetSettings') &&
+		patch.dashboardWidgetSettings !== undefined
+	) {
+		next.dashboardWidgetSettings =
+			patch.dashboardWidgetSettings === null
+				? null
+				: normaliseDashboardWidgetSettings(patch.dashboardWidgetSettings);
 	}
 	writeSettingsFile(next);
 	cachedPath = settingsFilePath();
@@ -443,6 +501,22 @@ export function resolveDashboardWidgets(): WidgetPlacement[] {
  */
 export function resolveDashboardFilter(): DashboardFilter {
 	return { ...(getStoredSettings().dashboardFilter ?? DEFAULT_FILTER) };
+}
+
+/**
+ * Effective per-widget setting values: an entry for **every** registered id,
+ * the registry defaults merged with any stored override (via the single merge
+ * site, {@link resolveWidgetSettingValues}). A widget with no declared settings
+ * resolves to `{}`; a widget with no stored override resolves to its defaults.
+ * There is no environment layer — this is UI state.
+ */
+export function resolveDashboardWidgetSettings(): Record<WidgetId, WidgetSettingValues> {
+	const stored = getStoredSettings().dashboardWidgetSettings ?? {};
+	const resolved = {} as Record<WidgetId, WidgetSettingValues>;
+	for (const id of WIDGET_IDS) {
+		resolved[id] = resolveWidgetSettingValues(id, stored[id]);
+	}
+	return resolved;
 }
 
 /** Subscribe to successful settings writes; returns an unsubscribe function. */

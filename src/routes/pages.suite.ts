@@ -624,7 +624,7 @@ describe('server-leak guard (build/client/**)', () => {
 });
 
 describe('SSR #215 — dashboard home + header/Gantt session page', () => {
-	test('/ renders the dashboard shell with no session list; /sessions/[id] renders header + Gantt only', async () => {
+	test('/ renders the dashboard shell with no session list; /sessions/[id] renders header + Gantt or overview', async () => {
 		const dir = tempDir('subagentix-m3a-pages-');
 		const dbPath = join(dir, 'fixture.db');
 		buildPopulatedDb(dbPath);
@@ -660,6 +660,8 @@ describe('SSR #215 — dashboard home + header/Gantt session page', () => {
 			expect(detail.body).not.toContain('Turns (');
 			expect(detail.body).not.toContain('Load older turns');
 			expect(detail.body).not.toContain('Newer turns →');
+			// Task #535: the Gantt page links back to the same route's overview.
+			expect(detail.body).toContain('← Session overview');
 			// Task #237: no page-level Gantt <h2>, no Trigger / assistant-message subtitle.
 			expect(detail.body).not.toContain('<h2');
 			expect(detail.body).not.toContain('Trigger');
@@ -668,18 +670,30 @@ describe('SSR #215 — dashboard home + header/Gantt session page', () => {
 			const sessionPage = readFileSync(join(repoRoot, 'src/routes/sessions/[id]/+page.svelte'), 'utf8');
 			expect(sessionPage).toContain('background: var(--background-strong)');
 
-			// Without ?turn= the header stays and the page asks for a turn (no Gantt).
+			// Without ?turn= the header stays and the overview body renders
+			// (task #535): windowed turns, subagents and subtree totals.
 			const noTurn = await getHtml(server.base, '/sessions/root1');
 			expect(noTurn.status).toBe(200);
 			expect(noTurn.body).toMatch(/<h1[^>]*>Root one<\/h1>/);
-			expect(noTurn.body).toContain('Select a turn in the session tree to view its Gantt.');
+			expect(noTurn.body).toContain('aria-label="Session overview"');
 			expect(noTurn.body).not.toContain('aria-label="Turn wall-clock Gantt"');
+			// Turns section: one windowed turn linking to its Gantt.
+			expect(noTurn.body).toContain('Turns (1)');
+			expect(noTurn.body).toContain('href="/sessions/root1?turn=u1"');
+			expect(noTurn.body).toContain('1 assistant message');
+			// Subagents section: the child session row.
+			expect(noTurn.body).toContain('Subagents (1)');
+			expect(noTurn.body).toContain('href="/sessions/child1"');
+			// Subtree totals = root + child usage (505 + 80 tokens, 2 + 0.5 cost).
+			expect(noTurn.body).toContain('Subtree totals');
+			expect(noTurn.body).toContain('585');
+			expect(noTurn.body).toContain('$2.5000');
 
-			// A child session with no turns still renders its header (no turn list).
+			// A leaf session (no turns, no children) shows the laconic empty state.
 			const child = await getHtml(server.base, '/sessions/child1');
 			expect(child.status).toBe(200);
 			expect(child.body).toMatch(/<h1[^>]*>Child one<\/h1>/);
-			expect(child.body).toContain('Select a turn in the session tree to view its Gantt.');
+			expect(child.body).toContain('No turns or subagents.');
 			expect(child.body).not.toContain('Turns (');
 		} finally {
 			await server.stop();
@@ -1795,5 +1809,48 @@ describe('UI #212 — sidebar request race guards (SessionSidebar source)', () =
 			expect(body.match(/requestSeq\.get\(key\) !== seq/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
 			expect(body).toContain('requestSeq.get(key) === seq');
 		}
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* Deep-link tool-call overlay (task #484)                              */
+/* ------------------------------------------------------------------ */
+
+describe('tool-call overlay deep links (task #481/#484)', () => {
+	test('?toolErrors=<tool> resolves to mode errors', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The readToolDetail function must check TOOL_ERRORS_PARAM first and return mode 'errors'.
+		expect(source).toContain("const errorsTool = search.get(TOOL_ERRORS_PARAM);");
+		expect(source).toContain("if (errorsTool !== null && errorsTool !== '') return { tool: errorsTool, mode: 'errors' };");
+	});
+
+	test('?toolCalls=<tool> resolves to mode all', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The readToolDetail function must check TOOL_CALLS_PARAM and return mode 'all'.
+		expect(source).toContain("const callsTool = search.get(TOOL_CALLS_PARAM);");
+		expect(source).toContain("if (callsTool !== null && callsTool !== '') return { tool: callsTool, mode: 'all' };");
+	});
+
+	test('?toolErrors= wins over ?toolCalls= when both are present', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// errors is checked first, so it wins.
+		const errorsIndex = source.indexOf("search.get(TOOL_ERRORS_PARAM)");
+		const callsIndex = source.indexOf("search.get(TOOL_CALLS_PARAM)");
+		expect(errorsIndex).toBeGreaterThan(-1);
+		expect(callsIndex).toBeGreaterThan(-1);
+		expect(errorsIndex).toBeLessThan(callsIndex);
+	});
+
+	test('overlayUrl maps mode to the correct param name', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// The overlayUrl function must set toolErrors for errors mode and toolCalls for all mode.
+		expect(source).toContain("detail.mode === 'errors' ? TOOL_ERRORS_PARAM : TOOL_CALLS_PARAM");
+	});
+
+	test('popstate handler re-seeds toolDetail from the URL', () => {
+		const source = readFileSync(join(repoRoot, 'src/routes/+page.svelte'), 'utf8');
+		// Browser Back/Forward must restore the overlay from the address bar.
+		expect(source).toContain('window.addEventListener(\'popstate\', sync)');
+		expect(source).toContain('readToolDetail(new URL(location.href).searchParams)');
 	});
 });

@@ -8,20 +8,25 @@
 	 * after the first intersection and in the `$effect` cleanup, and the load
 	 * is guarded, so a host never imports twice or writes state after destroy.
 	 *
-	 * Data fetching belongs to the widget body (`useWidgetData`, task #410) —
-	 * this component only gates mount/import and forwards `widgetProps`.
+	 * Every body is content-only and is wrapped in the generic `WidgetShell`,
+	 * which owns `useWidgetData` and the card chrome (task #490; the last
+	 * self-shelled bodies migrated in #491).
+	 *
+	 * Data fetching belongs to `WidgetShell` (`useWidgetData`, task #410) — this
+	 * component only gates mount/import and forwards `widgetProps`.
 	 */
 	import type { WidgetDef } from '$lib/widgets/registry';
 	import type { WidgetBodyProps, WidgetComponent, WidgetLoader } from './widget';
 	import SkeletonWidget from './SkeletonWidget.svelte';
 	import WidgetCard from './WidgetCard.svelte';
+	import WidgetShell from './WidgetShell.svelte';
 
 	interface Props {
 		/** Registry entry; supplies the skeleton title and body dimensions. */
 		def: WidgetDef;
 		/** Vite code-split loader; when absent the host stays a skeleton. */
 		load?: WidgetLoader;
-		/** Props forwarded to the loaded widget body (widget, filter, refreshToken). */
+		/** Props forwarded to the loaded widget body (widget, filter, refreshToken, settings). */
 		widgetProps: WidgetBodyProps;
 	}
 
@@ -77,7 +82,7 @@
 
 <div class="widget-host" bind:this={host}>
 	{#if Widget}
-		<Widget {...widgetProps} />
+		<WidgetShell {...widgetProps} body={Widget} />
 	{:else if failed}
 		<WidgetCard
 			title={def.title}

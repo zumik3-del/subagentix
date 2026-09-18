@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { PageProps } from './$types';
 	import Gantt from '$lib/components/features/gantt/Gantt.svelte';
+	import SessionOverview from '$lib/components/features/session/SessionOverview.svelte';
 	import { displayAgent } from '$lib/model/agent';
 	import { clock } from '$lib/model/clock.svelte';
 	import {
@@ -65,6 +66,14 @@
 
 	{#if data.gantt}
 		<section class="selected">
+			<!-- Lightweight way back to the overview (task #535): same route, no
+			     new segment — dropping `?turn=` restores the session body. -->
+			<a
+				class="ui-link-btn overview-link"
+				href={`/sessions/${encodeURIComponent(data.session.id)}`}
+			>
+				← Session overview
+			</a>
 			<!-- Non-blocking (task #385): the model streams in as a promise, so the
 			     header above renders immediately and this section shows a skeleton
 			     until it resolves. SSR renders the pending branch and hydration
@@ -93,7 +102,12 @@
 			{/await}
 		</section>
 	{:else}
-		<p class="empty">Select a turn in the session tree to view its Gantt.</p>
+		<SessionOverview
+			session={data.session}
+			turns={data.turns}
+			turnWindow={data.turnWindow}
+			subagents={data.children}
+		/>
 	{/if}
 </main>
 
@@ -193,6 +207,13 @@
 		padding-top: 0;
 	}
 
+	/* `ui-link-btn` is action-styled; as an anchor it needs the underline off. */
+	.overview-link {
+		display: inline-block;
+		margin-bottom: var(--space-2);
+		text-decoration: none;
+	}
+
 	/* Loading skeleton for the streamed Gantt model (task #385). It mirrors the
 	   chart card surface so the swap to the real chart does not shift layout. */
 	.gantt-loading {
@@ -252,13 +273,5 @@
 		background: var(--color-danger-surface);
 		border: 1px solid var(--color-danger-border);
 		border-radius: var(--radius-lg);
-	}
-
-	.empty {
-		color: var(--text-weak);
-		border: 1px dashed var(--border-weak-base);
-		border-radius: var(--radius-lg);
-		padding: var(--space-8);
-		text-align: center;
 	}
 </style>

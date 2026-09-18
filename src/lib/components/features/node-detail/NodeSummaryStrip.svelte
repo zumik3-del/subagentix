@@ -2,15 +2,15 @@
 	/**
 	 * Node summary strip (extracted from `NodeDetailPanel`, ADR 2.2).
 	 *
-	 * The `Node summary` section: the identity row plus four single-line
-	 * summary columns (Retries, Markers, Tracker links, Permissions). Pure
+	 * The `Node summary` section: the identity row plus the single-line
+	 * summary columns (Retries, Markers, Tracker links). Pure
 	 * presentation — the panel root owns the derivations (`retryGroups`,
-	 * `trackerRefs`, `refBase`, `permissionRows`) and the tracker callback and
+	 * `trackerRefs`, `refBase`) and the tracker callback and
 	 * passes them down. The line items are authored here and framed by
 	 * `SummaryLine`, which owns the `.line` wrapper, the overflow counter and
 	 * the `clampLine` action.
 	 */
-	import type { NodeDetail, PermissionInfo } from '$lib/model/types';
+	import type { NodeDetail } from '$lib/model/types';
 	import { clock } from '$lib/model/clock.svelte';
 	import { formatClock } from '$lib/model/format';
 	import type { ToolRetryGroup } from '$lib/model/node';
@@ -23,8 +23,6 @@
 		retryGroups: ToolRetryGroup[];
 		trackerRefs: string[];
 		refBase: string | null;
-		/** Permission prompts recorded on the node's tool calls. */
-		permissionRows: PermissionInfo[];
 		/** Feature toggle: when false the tracker column is hidden. */
 		ziptaskEnabled: boolean;
 		/** Open the task-detail modal for an inferred ref (owned by `Gantt`). */
@@ -36,7 +34,6 @@
 		retryGroups,
 		trackerRefs,
 		refBase,
-		permissionRows,
 		ziptaskEnabled,
 		onOpenTask
 	}: Props = $props();
@@ -106,31 +103,6 @@
 					</SummaryLine>
 				</section>
 			{/if}
-			<section class="summary-col">
-				<SummaryLine signal={detail} overflow={permissionRows.length > 0}>
-					<h4 class="line-label">Permissions ({permissionRows.length})</h4>
-					{#if permissionRows.length === 0}
-						<span class="empty">No permission prompts recorded.</span>
-					{:else}
-						<ul class="line-list">
-							{#each permissionRows as permission (permission.requestId)}
-								<li class="line-item" data-overflow-item>
-									<span
-										class={`ui-badge ${permission.reply === 'reject' ? 'ui-badge--removed' : 'ui-badge--perm'}`}
-									>
-										{permission.reply ?? 'pending'}
-									</span>
-									<span class="muted">
-										{permission.permission || 'permission'}{permission.patterns.length
-											? ` · ${permission.patterns.join(', ')}`
-											: ''}
-									</span>
-								</li>
-							{/each}
-						</ul>
-					{/if}
-				</SummaryLine>
-			</section>
 		</div>
 	</div>
 </section>

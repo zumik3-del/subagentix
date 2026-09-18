@@ -1,17 +1,20 @@
 /**
- * Shared dashboard persistence (task #449; filter preference #457).
+ * Shared dashboard persistence (task #449; filter preference #457; per-widget
+ * settings #516).
  *
  * One `PUT /api/settings` path for the dashboard's persisted UI state: the
  * global picker (`WidgetsModal`, draft + Apply) and the per-widget gear
- * (`WidgetSettings`, immediate apply) write `dashboardWidgets`, and the landing
- * page writes `dashboardFilter` on a manual selector change.
+ * (`WidgetSettings`, immediate apply) write `dashboardWidgets`, the gear also
+ * writes `dashboardWidgetSettings`, and the landing page writes
+ * `dashboardFilter` on a manual selector change.
  * `createCoalescingWriter` orders rapid changes so the last one always wins.
  * Client-safe: no DOM, no Svelte and no `$lib/server` import.
  */
 import { isDashboardPeriod } from '$lib/model/dashboard';
 import type { DashboardFilter } from '$lib/model/dashboard';
-import { resolvePlacements } from '$lib/widgets/registry';
-import type { WidgetPlacement } from '$lib/widgets/registry';
+import { resolvePlacements, WIDGET_IDS } from '$lib/widgets/registry';
+import type { WidgetId, WidgetPlacement, WidgetSettingValues } from '$lib/widgets/registry';
+import { coerceWidgetSettingValues } from '$lib/widgets/settings';
 
 /** The server-normalised `dashboardWidgets`, falling back to the sent list. */
 function savedPlacements(body: unknown, sent: readonly WidgetPlacement[]): WidgetPlacement[] {
@@ -37,6 +40,27 @@ function savedFilter(body: unknown, sent: DashboardFilter): DashboardFilter {
 }
 
 /**
+ * The server-normalised per-widget settings map, falling back to the sent map.
+ * The server echoes the effective map for every registered id; each entry is
+ * coerced through the shared pure contract so a malformed response degrades to
+ * the registry defaults instead of leaking a bad value.
+ */
+function savedWidgetSettings(
+	body: unknown,
+	sent: Record<WidgetId, WidgetSettingValues>
+): Record<WidgetId, WidgetSettingValues> {
+	const raw =
+		body !== null && typeof body === 'object'
+			? (body as { dashboardWidgetSettings?: unknown }).dashboardWidgetSettings
+			: undefined;
+	if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return { ...sent };
+	const record = raw as Record<string, unknown>;
+	const resolved = {} as Record<WidgetId, WidgetSettingValues>;
+	for (const id of WIDGET_IDS) resolved[id] = coerceWidgetSettingValues(id, record[id]);
+	return resolved;
+}
+
+/**
  * Persist the full placement list under `dashboardWidgets` and return the
  * server-normalised placements. Throws an `Error` carrying the server's
  * `error` message (or the HTTP status) on a non-OK response.
@@ -56,6 +80,29 @@ export async function saveDashboardWidgets(
 	}
 	const data = (await response.json()) as { dashboardWidgets?: unknown };
 	return savedPlacements(data, placements);
+}
+
+/**
+ * Persist the full per-widget settings map under `dashboardWidgetSettings` and
+ * return the server-normalised map (an entry per registered id). Throws an
+ * `Error` carrying the server's `error` message (or the HTTP status) on a
+ * non-OK response.
+ */
+export async function saveDashboardWidgetSettings(
+	all: Record<WidgetId, WidgetSettingValues>,
+	fetchImpl: typeof fetch = fetch
+): Promise<Record<WidgetId, WidgetSettingValues>> {
+	const response = await fetchImpl('/api/settings', {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ dashboardWidgetSettings: all })
+	});
+	if (!response.ok) {
+		const data = (await response.json().catch(() => ({}))) as { error?: string };
+		throw new Error(data.error ?? `Could not save widget settings (${response.status}).`);
+	}
+	const data = (await response.json()) as { dashboardWidgetSettings?: unknown };
+	return savedWidgetSettings(data, all);
 }
 
 /**

@@ -1,33 +1,30 @@
 <script lang="ts">
 	/**
-	 * Agent-distribution widget body (dashboard Phase 4, task #412).
+	 * Agent-distribution widget body (dashboard Phase 4, task #412; pure renderer
+	 * from the widget engine, task #491).
 	 *
-	 * Table-only: `useWidgetData` fetches `/api/dashboard/agent-distribution`
-	 * for the shared filter and `WidgetCard` renders the loading/error/empty
-	 * states. The ready payload is rendered as a rank-ordered table (agent, count
+	 * Content-only: `WidgetShell` owns the fetch and the card chrome, so this
+	 * component renders the ready payload as a rank-ordered table (agent, count
 	 * and share) — no chart library, no SVG. Rows are trimmed to the whole rows
 	 * the card height can show (`useRowFit` after mount; SSR shows all rows).
+	 *
+	 * It stays a separate body from `top-projects` (task #491): that widget draws
+	 * inline-SVG bars (`BarChart`) rather than a table, so the two share no
+	 * markup — only the `figure`/`useRowFit` scaffolding already factored into
+	 * those primitives. A forced merge would need a per-cell view-kind switch,
+	 * which the widget engine deliberately avoids.
 	 */
-	import type { DistributionEntry } from '$lib/model/dashboard';
-	import type { WidgetBodyProps } from './widget';
-	import { useWidgetData } from './data.svelte';
-	import WidgetCard from './WidgetCard.svelte';
+	import type { WidgetRenderProps } from './widget';
 	import { formatNumber } from '$lib/model/format';
 	import { useRowFit } from './fit.svelte';
 
-	let { widget, filter, refreshToken, onSettings }: WidgetBodyProps = $props();
-
-	const query = useWidgetData<DistributionEntry[]>({
-		source: () => widget.source,
-		filter: () => filter,
-		refreshToken: () => refreshToken
-	});
+	let { data }: WidgetRenderProps<'agent-distribution'> = $props();
 
 	/** The `--chart-*` tokens available for the row swatches (spec §2.6). */
 	const CHART_TOKENS = 7;
 
 	/** Rank-ordered rows from the API (count desc, then name asc). */
-	let rows = $derived(query.data ?? []);
+	let rows = $derived(data);
 
 	/** Total sessions across the rows; the share denominator. */
 	let total = $derived(rows.reduce((sum, row) => sum + row.count, 0));
@@ -44,48 +41,37 @@
 	}
 </script>
 
-<WidgetCard
-	title={widget.title}
-	status={query.status}
-	error={query.error ?? undefined}
-	refreshing={query.refreshing}
-	onRefresh={query.refresh}
-	{onSettings}
->
-	{#if query.data}
-		{#if rows.length === 0}
-			<p class="distribution__empty">No data for this period.</p>
-		{:else}
-			<figure class="distribution" bind:this={list}>
-				<table class="distribution__table">
-					<caption class="sr-only">Agent distribution</caption>
-					<thead class="sr-only">
-						<tr>
-							<th scope="col">Name</th>
-							<th scope="col">Sessions</th>
-							<th scope="col">Share</th>
-						</tr>
-					</thead>
-					<tbody>
-						{#each visible as row, index (row.name)}
-							<tr>
-								<td class="distribution__swatch">
-									<span
-										class="ui-swatch"
-										style={`background:var(--chart-${(index % CHART_TOKENS) + 1})`}
-									></span>
-								</td>
-								<th scope="row" class="distribution__name">{row.name}</th>
-								<td class="distribution__count">{formatNumber(row.count)}</td>
-								<td class="distribution__share">{share(row.count)}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			</figure>
-		{/if}
-	{/if}
-</WidgetCard>
+{#if rows.length === 0}
+	<p class="distribution__empty">No data for this period.</p>
+{:else}
+	<figure class="distribution" bind:this={list}>
+		<table class="distribution__table">
+			<caption class="sr-only">Agent distribution</caption>
+			<thead class="sr-only">
+				<tr>
+					<th scope="col">Name</th>
+					<th scope="col">Sessions</th>
+					<th scope="col">Share</th>
+				</tr>
+			</thead>
+			<tbody>
+				{#each visible as row, index (row.name)}
+					<tr>
+						<td class="distribution__swatch">
+							<span
+								class="ui-swatch"
+								style={`background:var(--chart-${(index % CHART_TOKENS) + 1})`}
+							></span>
+						</td>
+						<th scope="row" class="distribution__name">{row.name}</th>
+						<td class="distribution__count">{formatNumber(row.count)}</td>
+						<td class="distribution__share">{share(row.count)}</td>
+					</tr>
+				{/each}
+			</tbody>
+		</table>
+	</figure>
+{/if}
 
 <style>
 	/* Fills the card body so `clientHeight` is the available row budget; the

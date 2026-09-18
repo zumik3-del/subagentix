@@ -245,7 +245,7 @@ describe('PUT /api/settings — dashboardWidgets', () => {
 			})
 		});
 		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
-		expect(disk.version).toBe(2);
+		expect(disk.version).toBe(3);
 		expect(disk.dashboardWidgets).toEqual([
 			{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 },
 			{ id: 'top-tools', width: 3, height: 6, x: 0, y: 4 }
@@ -474,7 +474,7 @@ describe('PUT /api/settings — dashboardFilter', () => {
 			})
 		});
 		const disk = JSON.parse(readFileSync(SETTINGS_FILE, 'utf8')) as Record<string, unknown>;
-		expect(disk.version).toBe(2);
+		expect(disk.version).toBe(3);
 		expect(disk.dashboardFilter).toEqual({ period: '30d', scope: '/repo/a' });
 	});
 

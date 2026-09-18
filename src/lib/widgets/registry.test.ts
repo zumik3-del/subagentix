@@ -12,7 +12,8 @@ import {
 	WIDGET_MAX_HEIGHT,
 	WIDGET_MAX_WIDTH,
 	WIDGET_MIN_HEIGHT,
-	WIDGET_MIN_WIDTH
+	WIDGET_MIN_WIDTH,
+	widgetSource
 } from './registry';
 import {
 	GRID_COLUMNS,
@@ -58,14 +59,14 @@ describe('WIDGET_DEFS', () => {
 		expect(new Set(ids).size).toBe(ids.length);
 	});
 
-	test('every def has a title, valid numeric width/height, a valid tier and an endpoint source', () => {
+	test('every def has a title, valid numeric width/height, a valid tier and a derived endpoint', () => {
 		const tiers: Array<'S' | 'M' | 'P'> = ['S', 'M', 'P'];
 		for (const def of WIDGET_DEFS) {
 			expect(def.title.length, def.id).toBeGreaterThan(0);
 			expect(typeof def.width, def.id).toBe('number');
 			expect(typeof def.height, def.id).toBe('number');
 			expect(tiers, def.id).toContain(def.tier);
-			expect(def.source, def.id).toBe(`/api/dashboard/${def.id}`);
+			expect(widgetSource(def.id), def.id).toBe(`/api/dashboard/${def.id}`);
 		}
 	});
 

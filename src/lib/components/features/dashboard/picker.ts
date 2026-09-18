@@ -25,19 +25,6 @@ export function toggleWidgetSelection(
 	return resolvePlacements([...next.values()]);
 }
 
-/** Apply a width/height patch to one placement, keeping registry order. */
-export function updatePlacement(
-	selected: readonly WidgetPlacement[],
-	id: WidgetId,
-	patch: Partial<Pick<WidgetPlacement, 'width' | 'height'>>
-): WidgetPlacement[] {
-	return resolvePlacements(
-		selected.map((placement) =>
-			placement.id === id ? { ...placement, ...patch } : placement
-		)
-	);
-}
-
 /**
  * Whether two placement selections contain the same widgets at the same size
  * and position (input order/duplicates aside). Drives the modal's dirty state:

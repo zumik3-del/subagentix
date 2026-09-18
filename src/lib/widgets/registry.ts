@@ -1,16 +1,18 @@
 /**
- * Dashboard widget registry (dashboard Phase 1, task #402; resizable in #438).
+ * Dashboard widget registry (dashboard Phase 1, task #402; resizable in #438;
+ * single descriptor registry in #489).
  *
  * The single client-safe source of widget identity, aggregation tier, default
- * placement and default membership, mirroring spec §2.1. Imported by both SSR
- * and client code (and by the settings store for ordering), so it must stay
- * free of `$lib/server` / DB imports and of any DOM/Svelte dependency. Pure and
- * deterministic; no I/O.
+ * placement, default membership and body loader, mirroring spec §2.1. Imported
+ * by both SSR and client code (and by the settings store for ordering), so it
+ * must stay free of `$lib/server` / DB imports and of any DOM/Svelte runtime
+ * import. Pure and deterministic; no I/O. Each per-widget `load` is a Vite
+ * dynamic `import()` — the code-split boundary is evaluated only when a body is
+ * mounted, so no widget module enters the SSR graph or the initial bundle.
  *
  * Geometry (column count, row/gap px, size bounds) comes from the pure
- * `layout.ts` module so the model, the CSS fallback and the future gridstack
- * config share one source; the bounds are re-exported here for existing
- * consumers.
+ * `layout.ts` module so the model, the CSS fallback and the gridstack config
+ * share one source; the bounds are re-exported here for existing consumers.
  */
 import {
 	GRID_COLUMNS,
@@ -19,6 +21,8 @@ import {
 	WIDGET_MIN_HEIGHT,
 	WIDGET_MIN_WIDTH
 } from '$lib/components/features/dashboard/layout';
+import { type ToolUsage, type WidgetDataMap } from '$lib/model/dashboard';
+import { formatCost, formatNumber } from '$lib/model/format';
 
 /**
  * Size bounds re-exported from `layout.ts` (the shared geometry source): width
@@ -27,20 +31,137 @@ import {
  */
 export { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH, WIDGET_MIN_HEIGHT, WIDGET_MIN_WIDTH };
 
-/** The v1 dashboard widgets. Registry order is picker order. */
-export type WidgetId =
-	| 'kpi'
-	| 'sessions-per-day'
-	| 'cost-per-day'
-	| 'top-tools'
-	| 'agent-distribution'
-	| 'top-projects';
-
 /**
  * Dominant aggregation source tier (spec §2.3): `S` = `session` scan (cheap),
  * `M` = `message` day buckets (medium), `P` = `part` tool frequency (heavy).
+ * Metadata only: the descriptor does not use it to dispatch a payload.
  */
 export type WidgetTier = 'S' | 'M' | 'P';
+
+/**
+ * A per-widget setting field's value type. Only `boolean` exists in v1; the
+ * union is the additive seam for `number`/`select` later, so the settings
+ * dialog and the persistence normaliser stay schema-driven (epic #512).
+ */
+export type WidgetSettingType = 'boolean';
+
+/**
+ * One registry-declared setting on a widget descriptor. Declaration order is
+ * render order; `key` is both the persisted map key and the `w.<key>` request
+ * suffix, so it is stable once shipped.
+ */
+export interface WidgetSettingDef {
+	/** Stable key: persisted map key and `w.<key>` request-param suffix. */
+	key: string;
+	/** Value type (v1: `boolean` only). */
+	type: WidgetSettingType;
+	/** Dialog row label. */
+	label: string;
+	/** Optional one-line helper text. */
+	hint?: string;
+	/** Registry-owned default; always present. */
+	default: boolean;
+}
+
+/** Effective/persisted setting values for one widget, keyed by {@link WidgetSettingDef.key}. */
+export type WidgetSettingValues = Record<string, boolean>;
+
+/**
+ * The v1 widget catalog: one descriptor per widget, keyed by its stable id (the
+ * `dashboardWidgets` persistence value). Declaration order is registry order
+ * (also picker order). Each descriptor carries its card metadata, an optional
+ * payload-emptiness rule (`isEmpty`), an optional `params` record of extra
+ * props for a shared parameterized body (task #491), an optional ordered
+ * `settings` schema for the per-widget settings dialog (task #515) and a
+ * co-located lazy `load` — the Vite code-split boundary for that widget's body.
+ *
+ * Every v1 body is a pure `{ data }` renderer wrapped by `WidgetShell`
+ * (task #490/#491), so a descriptor carries no chrome or fetch config; the
+ * shell owns both.
+ */
+export const WIDGET_REGISTRY = {
+	kpi: {
+		title: 'Cost & tokens',
+		width: 6,
+		height: 4,
+		minHeight: 4,
+		tier: 'M',
+		load: () => import('$lib/components/features/dashboard/KpiWidget.svelte')
+	},
+	'sessions-per-day': {
+		title: 'Sessions per day',
+		width: 3,
+		height: 6,
+		minHeight: 6,
+		tier: 'S',
+		/**
+		 * Shared body: `DayTableWidget` is parameterized by `label`/`formatValue`
+		 * only, so this day table and `cost-per-day` register the same component
+		 * with different params (task #491).
+		 */
+		params: { label: 'Sessions', formatValue: formatNumber },
+		load: () => import('$lib/components/features/dashboard/DayTableWidget.svelte')
+	},
+	'cost-per-day': {
+		title: 'Cost per day',
+		width: 3,
+		height: 6,
+		minHeight: 6,
+		tier: 'M',
+		/** Same shared body as `sessions-per-day`; only the params differ. */
+		params: { label: 'Cost', formatValue: formatCost },
+		load: () => import('$lib/components/features/dashboard/DayTableWidget.svelte')
+	},
+	'top-tools': {
+		title: 'Top tools',
+		width: 3,
+		height: 6,
+		minHeight: 4,
+		tier: 'P',
+		/** A capped top-tools payload with no rows is empty. */
+		isEmpty: (data: ToolUsage) => data.tools.length === 0,
+		/** Which tool kinds the aggregate includes (task #515). */
+		settings: [
+			{ key: 'basic', type: 'boolean', label: 'Basic tools', default: true },
+			{ key: 'mcp', type: 'boolean', label: 'MCP tools', default: true }
+		],
+		load: () => import('$lib/components/features/dashboard/TopToolsWidget.svelte')
+	},
+	'agent-distribution': {
+		title: 'Agent distribution',
+		width: 2,
+		height: 6,
+		minHeight: 4,
+		tier: 'S',
+		load: () => import('$lib/components/features/dashboard/AgentDistributionWidget.svelte')
+	},
+	'top-projects': {
+		title: 'Top projects',
+		width: 3,
+		height: 6,
+		minHeight: 2,
+		tier: 'S',
+		load: () => import('$lib/components/features/dashboard/TopProjectsWidget.svelte')
+	}
+} as const;
+
+/**
+ * The closed set of widget ids, derived from the registry keys. Adding a widget
+ * is adding one descriptor: the union (and every `WidgetDataMap` payload entry)
+ * follows from it.
+ */
+export type WidgetId = keyof typeof WIDGET_REGISTRY;
+
+/**
+ * One registered widget: its descriptor plus the registry key it lives under.
+ * A mapped union, so each id keeps its own literal type (`id: 'kpi'`, ...).
+ */
+export type WidgetDef = {
+	[K in WidgetId]: { id: K } & (typeof WIDGET_REGISTRY)[K];
+}[WidgetId];
+
+/** The `WidgetDef` member for one id; narrows `isEmpty` to that widget's payload. */
+export type WidgetDefFor<K extends WidgetId> = Extract<WidgetDef, { id: K }>;
 
 /** Clamp a width to the supported block range (non-finite -> minimum). */
 export function clampWidth(value: number): number {
@@ -84,96 +205,81 @@ export interface WidgetPlacement {
 	y?: number;
 }
 
-/** One registrable dashboard widget. */
-export interface WidgetDef {
-	/** Stable identifier; also the `dashboardWidgets` persistence value. */
-	id: WidgetId;
-	/** Human-readable card title. */
-	title: string;
-	/** Registry-default width in sixth-width blocks (1–6). */
-	width: number;
-	/** Registry-default height in 3rem rows (1–16). */
-	height: number;
-	/** Smallest height (rows) at which this widget's body stays legible. */
-	minHeight: number;
-	/** Dominant aggregation source tier (`S` | `M` | `P`). */
-	tier: WidgetTier;
-	/** Widget data endpoint: `/api/dashboard/<id>`. */
-	source: string;
-}
-
 /**
- * Every v1 widget, in registry (picker) order. Optional catalog extensions
- * (top models, token mix, activity heatmap) are intentionally not registered
- * here (spec §3). The `width`/`height` are the per-widget registry defaults
- * (task #438); the first-visit arrangement is {@link DEFAULT_WIDGETS}.
+ * Every v1 widget descriptor, in registry (picker) order. Optional catalog
+ * extensions (top models, token mix, activity heatmap) are intentionally not
+ * registered here (spec §3). The `width`/`height` are the per-widget registry
+ * defaults (task #438); the first-visit arrangement is {@link DEFAULT_WIDGETS}.
  */
-export const WIDGET_DEFS: readonly WidgetDef[] = [
-	{
-		id: 'kpi',
-		title: 'Cost & tokens',
-		width: 6,
-		height: 4,
-		minHeight: 4,
-		tier: 'M',
-		source: '/api/dashboard/kpi'
-	},
-	{
-		id: 'sessions-per-day',
-		title: 'Sessions per day',
-		width: 3,
-		height: 6,
-		minHeight: 6,
-		tier: 'S',
-		source: '/api/dashboard/sessions-per-day'
-	},
-	{
-		id: 'cost-per-day',
-		title: 'Cost per day',
-		width: 3,
-		height: 6,
-		minHeight: 6,
-		tier: 'M',
-		source: '/api/dashboard/cost-per-day'
-	},
-	{
-		id: 'top-tools',
-		title: 'Top tools',
-		width: 3,
-		height: 6,
-		minHeight: 4,
-		tier: 'P',
-		source: '/api/dashboard/top-tools'
-	},
-	{
-		id: 'agent-distribution',
-		title: 'Agent distribution',
-		width: 2,
-		height: 6,
-		minHeight: 4,
-		tier: 'S',
-		source: '/api/dashboard/agent-distribution'
-	},
-	{
-		id: 'top-projects',
-		title: 'Top projects',
-		width: 3,
-		height: 6,
-		minHeight: 2,
-		tier: 'S',
-		source: '/api/dashboard/top-projects'
-	}
-];
+export const WIDGET_DEFS: readonly WidgetDef[] = (Object.keys(WIDGET_REGISTRY) as WidgetId[]).map(
+	(id) => ({ id, ...WIDGET_REGISTRY[id] }) as WidgetDef
+);
 
 const WIDGET_DEF_BY_ID: ReadonlyMap<WidgetId, WidgetDef> = new Map(
 	WIDGET_DEFS.map((def) => [def.id, def] as const)
 );
 
-/** Look up a registry def by id; throws for an id the registry does not define. */
-export function findWidgetDef(id: WidgetId): WidgetDef {
+/**
+ * Look up a registry def by id; throws for an id the registry does not define.
+ * The return type narrows to the matching descriptor, so a literal id exposes
+ * that widget's `isEmpty` payload type.
+ */
+export function findWidgetDef<K extends WidgetId>(id: K): WidgetDefFor<K> {
 	const def = WIDGET_DEF_BY_ID.get(id);
 	if (!def) throw new Error(`Unknown widget id: ${id}`);
-	return def;
+	return def as WidgetDefFor<K>;
+}
+
+/**
+ * The descriptor's optional emptiness rule, narrowed to one widget id
+ * (`undefined` = the data hook's default: null/undefined/empty array).
+ *
+ * `isEmpty` is optional, so the `WidgetDef` union hides it behind a variant; a
+ * generic `WidgetShell<K>` needs it keyed by the same id as its payload type.
+ * By construction the entry for `id` holds the rule its payload expects, so the
+ * accessor can safely expose it as `WidgetDataMap[K]`.
+ */
+export function widgetIsEmpty<K extends WidgetId>(
+	id: K
+): ((data: WidgetDataMap[K]) => boolean) | undefined {
+	return (
+		WIDGET_REGISTRY[id] as unknown as {
+			isEmpty?: (data: WidgetDataMap[K]) => boolean;
+		}
+	).isEmpty;
+}
+
+/**
+ * The descriptor's optional extra props for a shared parameterized body, as a
+ * plain record (`{}` when the widget declares none). `params` is optional, so
+ * the `WidgetDef` union hides it behind a variant; a generic `WidgetShell<K>`
+ * cannot read it directly. The shared bodies (e.g. `DayTableWidget`) declare
+ * their own typed props and receive these through the shell's spread — this is
+ * regular component props, not a view schema.
+ */
+export function widgetParams<K extends WidgetId>(id: K): Record<string, unknown> {
+	return (WIDGET_REGISTRY[id] as unknown as { params?: Record<string, unknown> }).params ?? {};
+}
+
+/**
+ * The descriptor's registry-declared setting defs, in declaration order
+ * (`[]` when the widget declares none). `settings` is optional, so the
+ * `WidgetDef` union hides it behind a variant; the settings dialog and the
+ * persistence normaliser both read it through here, so a new widget only
+ * declares the array and the dialog follows.
+ */
+export function widgetSettingDefs<K extends WidgetId>(id: K): readonly WidgetSettingDef[] {
+	return (
+		WIDGET_REGISTRY[id] as unknown as { settings?: readonly WidgetSettingDef[] }
+	).settings ?? [];
+}
+
+/**
+ * True when the widget declares at least one setting. A schema-less widget
+ * still opens the dialog, which shows its empty-state placeholder.
+ */
+export function widgetHasSettings<K extends WidgetId>(id: K): boolean {
+	return widgetSettingDefs(id).length > 0;
 }
 
 /** Every registered id, in registry order. */
@@ -184,6 +290,15 @@ const WIDGET_ID_SET: ReadonlySet<string> = new Set(WIDGET_IDS);
 /** Type guard for untrusted input (settings file, URL, API payloads). */
 export function isWidgetId(value: unknown): value is WidgetId {
 	return typeof value === 'string' && WIDGET_ID_SET.has(value);
+}
+
+/**
+ * The widget's data endpoint, derived from its id (spec §2.1). The endpoint
+ * format lives here once instead of being stored on every descriptor; the
+ * server route is `/api/dashboard/[widget]`.
+ */
+export function widgetSource(id: WidgetId): string {
+	return `/api/dashboard/${id}`;
 }
 
 /**

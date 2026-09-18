@@ -26,6 +26,7 @@ type RenderFn = (
 	let DayTable: unknown;
 	let WidgetGrid: unknown;
 	let WidgetSettings: unknown;
+	let WidgetsModal: unknown;
 
 beforeAll(async () => {
 	vite = await createServer({
@@ -66,6 +67,11 @@ beforeAll(async () => {
 			'/src/lib/components/features/dashboard/WidgetSettings.svelte'
 		)) as { default: unknown }
 	).default;
+	WidgetsModal = (
+		(await vite.ssrLoadModule(
+			'/src/lib/components/features/dashboard/WidgetsModal.svelte'
+		)) as { default: unknown }
+	).default;
 }, 60_000);
 
 afterAll(async () => {
@@ -95,7 +101,7 @@ function countClass(html: string, token: string): number {
 
 // --- Fixtures ----------------------------------------------------------------
 
-const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, tier: 'M', source: '/api/dashboard/kpi' };
+const WIDGET_DEF = { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, tier: 'M' };
 
 function renderWidgetCard(props: Record<string, unknown> = {}): string {
 	return render(WidgetCard, {
@@ -364,70 +370,38 @@ describe('DayTable SSR', () => {
 	});
 });
 
-// --- loaders.ts registration assertions --------------------------------------
+// --- registry descriptor loaders ---------------------------------------------
 
-describe('loaders.ts maps widget ids to correct bodies', () => {
-	test('kpi routes to KpiWidget', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['kpi']).toBeDefined();
+describe('registry descriptors map widget ids to co-located body loaders', () => {
+	async function registryDefs(): Promise<Array<{ id: string; load?: unknown }>> {
+		const mod = await vite.ssrLoadModule('/src/lib/widgets/registry.ts');
+		return (mod as { WIDGET_DEFS: Array<{ id: string; load?: unknown }> }).WIDGET_DEFS;
+	}
+
+	test('every registered id carries a load function', async () => {
+		const defs = await registryDefs();
+		for (const id of [
+			'kpi',
+			'sessions-per-day',
+			'cost-per-day',
+			'top-tools',
+			'agent-distribution',
+			'top-projects'
+		]) {
+			expect(typeof defs.find((def) => def.id === id)?.load, id).toBe('function');
+		}
 	});
 
-	test('sessions-per-day routes to SessionsPerDayWidget', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['sessions-per-day']).toBeDefined();
-	});
-
-	test('cost-per-day routes to CostPerDayWidget', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['cost-per-day']).toBeDefined();
-	});
-
-	test('top-tools routes to TopToolsWidget (not WidgetBody)', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['top-tools']).toBeDefined();
-	});
-
-	test('agent-distribution routes to AgentDistributionWidget', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['agent-distribution']).toBeDefined();
-	});
-
-	test('top-projects routes to TopProjectsWidget', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		expect(loaders['top-projects']).toBeDefined();
-	});
-
-	test('all six registered ids match the registry', async () => {
-		const mod = await vite.ssrLoadModule(
-			'/src/lib/components/features/dashboard/loaders.ts'
-		);
-		const loaders = (mod as { WIDGET_LOADERS: Record<string, unknown> }).WIDGET_LOADERS;
-		const registeredIds = Object.keys(loaders);
-		expect(registeredIds).toContain('kpi');
-		expect(registeredIds).toContain('sessions-per-day');
-		expect(registeredIds).toContain('cost-per-day');
-		expect(registeredIds).toContain('top-tools');
-		expect(registeredIds).toContain('agent-distribution');
-		expect(registeredIds).toContain('top-projects');
-		expect(registeredIds.length).toBe(6);
+	test('the registry defines exactly the six v1 widget ids', async () => {
+		const defs = await registryDefs();
+		expect(defs.map((def) => def.id)).toEqual([
+			'kpi',
+			'sessions-per-day',
+			'cost-per-day',
+			'top-tools',
+			'agent-distribution',
+			'top-projects'
+		]);
 	});
 });
 
@@ -565,7 +539,7 @@ describe('WidgetSettings SSR', () => {
 		const html = render(WidgetSettings, {
 			props: {
 				open: false,
-				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', source: '/api/dashboard/kpi' },
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
 				placement: { id: 'kpi', width: 4, height: 2 },
 				onChange: () => {},
 				onClose: () => {}
@@ -581,7 +555,7 @@ describe('WidgetSettings SSR', () => {
 		const html = render(WidgetSettings, {
 			props: {
 				open: true,
-				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M', source: '/api/dashboard/kpi' },
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
 				placement: { id: 'kpi', width: 4, height: 2 },
 				onChange: () => {},
 				onClose: () => {}
@@ -592,6 +566,81 @@ describe('WidgetSettings SSR', () => {
 		expect(html).toContain('aria-labelledby="widget-settings-title"');
 		expect(html).toContain('>Cost &amp; tokens<');
 		expect(html).toContain('Widget settings');
+	});
+
+	test('header has the icon close control with widget-title-specific aria-label and no footer', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: true,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close Cost &amp; tokens settings"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+		expect(html).not.toContain('ui-modal__foot');
+	});
+
+	test('header is a single row: title + subtitle + close in one .ui-modal__head', () => {
+		const html = render(WidgetSettings, {
+			props: {
+				open: true,
+				widget: { id: 'kpi', title: 'Cost & tokens', width: 4, height: 2, minHeight: 2, tier: 'M' },
+				placement: { id: 'kpi', width: 4, height: 2 },
+				onChange: () => {},
+				onClose: () => {}
+			}
+		}).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html).toContain('widget-settings__sub');
+		expect(html.match(/<h2[^>]*>/g)?.length ?? 0).toBe(1);
+	});
+});
+
+// --- WidgetsModal SSR ---------------------------------------------------------
+
+describe('WidgetsModal SSR', () => {
+	const baseProps = {
+		open: true,
+		selected: [],
+		onApply: () => {},
+		onClose: () => {}
+	};
+
+	test('renders dialog shell with role=dialog and aria-modal when open', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('role="dialog"');
+		expect(html).toContain('aria-modal="true"');
+		expect(html).toContain('aria-labelledby="widgets-title"');
+		expect(html).toContain('>Widgets<');
+	});
+
+	test('header has the icon close control with widget-picker-specific aria-label and no footer Close/Cancel', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-icon-btn');
+		expect(html).toContain('aria-label="Close widget picker"');
+		expect(html).not.toContain('>Close<');
+		expect(html).not.toContain('>Cancel<');
+	});
+
+	test('footer carries Restore defaults + Apply (no Cancel)', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-modal__foot');
+		expect(html).toContain('Restore defaults');
+		expect(html).toContain('>Apply<');
+		expect(html).not.toContain('>Cancel<');
+	});
+
+	test('header is a single row: title + close in one .ui-modal__head', () => {
+		const html = render(WidgetsModal, { props: baseProps }).body;
+		expect(html).toContain('ui-modal__head');
+		expect(html).toContain('ui-modal__title');
+		expect(html.match(/<h2[^>]*>/g)?.length ?? 0).toBe(1);
 	});
 });
 
@@ -615,5 +664,287 @@ describe('WidgetCard gear control SSR (task #449)', () => {
 		});
 		expect(html).not.toContain('widget-card__settings');
 		expect(html).not.toContain('aria-haspopup="dialog"');
+	});
+});
+
+// --- DayTableWidget SSR -------------------------------------------------------
+
+describe('DayTableWidget SSR (task #491)', () => {
+	let DayTableWidget: unknown;
+
+	beforeAll(async () => {
+		DayTableWidget = (
+			(await vite.ssrLoadModule(
+				'/src/lib/components/features/dashboard/DayTableWidget.svelte'
+			)) as { default: unknown }
+		).default;
+	}, 60_000);
+
+	test('renders sessions table with formatNumber by default', () => {
+		const html = render(DayTableWidget, {
+			props: {
+				data: [
+					{ day: '2026-01-01', value: 10 },
+					{ day: '2026-01-02', value: 20 },
+					{ day: '2026-01-03', value: 15 }
+				],
+				label: 'Sessions',
+				formatValue: (v: number) => v.toString()
+			}
+		}).body;
+		// Newest-first order.
+		expect(html).toContain('>2026-01-03<');
+		expect(html).toContain('>2026-01-02<');
+		expect(html).toContain('>2026-01-01<');
+		// Values rendered via formatValue.
+		expect(html).toContain('>15<');
+		expect(html).toContain('>20<');
+		expect(html).toContain('>10<');
+		// Table structure present.
+		expect(html).toContain('day-table__table');
+		expect(html).toContain('scope="row"');
+	});
+
+	test('renders cost table with formatCost-style formatter', () => {
+		const html = render(DayTableWidget, {
+			props: {
+				data: [
+					{ day: '2026-01-01', value: 1.2345 },
+					{ day: '2026-01-02', value: 2.5678 }
+				],
+				label: 'Cost',
+				formatValue: (v: number) => `$${v.toFixed(4)}`
+			}
+		}).body;
+		expect(html).toContain('>2026-01-02<');
+		expect(html).toContain('>2026-01-01<');
+		expect(html).toContain('$2.5678');
+		expect(html).toContain('$1.2345');
+	});
+
+	test('renders empty state when data is empty', () => {
+		const html = render(DayTableWidget, {
+			props: {
+				data: [],
+				label: 'Sessions',
+				formatValue: (v: number) => v.toString()
+			}
+		}).body;
+		expect(html).not.toContain('<table');
+		expect(html).toContain('day-table__empty');
+		expect(html).toContain('No data for this period.');
+	});
+});
+
+// --- KpiWidget SSR ------------------------------------------------------------
+
+describe('KpiWidget SSR (task #491)', () => {
+	let KpiWidget: unknown;
+
+	beforeAll(async () => {
+		KpiWidget = (
+			(await vite.ssrLoadModule(
+				'/src/lib/components/features/dashboard/KpiWidget.svelte'
+			)) as { default: unknown }
+		).default;
+	}, 60_000);
+
+	test('renders session count, cost and token total tiles', () => {
+		const html = render(KpiWidget, {
+			props: {
+				data: {
+					sessions: 42,
+					cost: 1.2345,
+					tokens: { input: 100, output: 50, reasoning: 10, cacheRead: 5, cacheWrite: 2 }
+				}
+			}
+		}).body;
+		expect(html).toContain('kpi__tiles');
+		expect(html).toContain('>42<'); // sessions
+		expect(html).toContain('Cost (gross)');
+		expect(html).toContain('Total tokens');
+		expect(html).toContain('kpi__tile');
+	});
+
+	test('renders the token mix bar SVG', () => {
+		const html = render(KpiWidget, {
+			props: {
+				data: {
+					sessions: 10,
+					cost: 0.5,
+					tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+				}
+			}
+		}).body;
+		expect(html).toContain('kpi__mix-svg');
+		expect(html).toContain('viewBox="0 0 100 1"');
+		expect(html).toContain('kpi__mix-seg');
+	});
+
+	test('renders the token breakdown list', () => {
+		const html = render(KpiWidget, {
+			props: {
+				data: {
+					sessions: 10,
+					cost: 0.5,
+					tokens: { input: 100, output: 50, reasoning: 0, cacheRead: 0, cacheWrite: 0 }
+				}
+			}
+		}).body;
+		expect(html).toContain('kpi__breakdown');
+		expect(html).toContain('kpi__breakdown-item');
+	});
+});
+
+// --- TopToolsWidget SSR -------------------------------------------------------
+
+describe('TopToolsWidget SSR (task #491)', () => {
+	let TopToolsWidget: unknown;
+
+	beforeAll(async () => {
+		TopToolsWidget = (
+			(await vite.ssrLoadModule(
+				'/src/lib/components/features/dashboard/TopToolsWidget.svelte'
+			)) as { default: unknown }
+		).default;
+	}, 60_000);
+
+	test('renders tool rows in a table', () => {
+		const html = render(TopToolsWidget, {
+			props: {
+				data: {
+					tools: [
+						{ name: 'bash', count: 100, errors: 5, errorShare: 0.05 },
+						{ name: 'read', count: 50, errors: 0, errorShare: 0 }
+					],
+					capped: false
+				},
+				filter: { period: '7d' as const, scope: null }
+			}
+		}).body;
+		expect(html).toContain('top-tools__table');
+		expect(html).toContain('>bash<');
+		expect(html).toContain('>read<');
+		expect(html).toContain('top-tools__count');
+		expect(html).toContain('top-tools__errors');
+	});
+
+	test('renders the capped note when capped=true with period=all', () => {
+		const html = render(TopToolsWidget, {
+			props: {
+				data: { tools: [], capped: true },
+				filter: { period: 'all' as const, scope: null }
+			}
+		}).body;
+		expect(html).toContain('top-tools__note');
+		expect(html).toContain('Approximate');
+	});
+
+	test('no note rendered when not capped and period is bounded', () => {
+		const html = render(TopToolsWidget, {
+			props: {
+				data: { tools: [], capped: false },
+				filter: { period: '7d' as const, scope: null }
+			}
+		}).body;
+		expect(html).not.toContain('top-tools__note');
+	});
+});
+
+// --- AgentDistributionWidget SSR ----------------------------------------------
+
+describe('AgentDistributionWidget SSR (task #491)', () => {
+	let AgentDistributionWidget: unknown;
+
+	beforeAll(async () => {
+		AgentDistributionWidget = (
+			(await vite.ssrLoadModule(
+				'/src/lib/components/features/dashboard/AgentDistributionWidget.svelte'
+			)) as { default: unknown }
+		).default;
+	}, 60_000);
+
+	test('renders agent rows with name, count and share', () => {
+		const html = render(AgentDistributionWidget, {
+			props: {
+				data: [
+					{ name: 'agnes', count: 100 },
+					{ name: 'opus', count: 50 }
+				]
+			}
+		}).body;
+		expect(html).toContain('distribution__table');
+		expect(html).toContain('>agnes<');
+		expect(html).toContain('>opus<');
+		expect(html).toContain('distribution__count');
+		expect(html).toContain('distribution__share');
+	});
+
+	test('renders empty state when data is empty', () => {
+		const html = render(AgentDistributionWidget, {
+			props: {
+				data: []
+			}
+		}).body;
+		expect(html).not.toContain('<table');
+		expect(html).toContain('distribution__empty');
+		expect(html).toContain('No data for this period.');
+	});
+});
+
+// --- TopProjectsWidget SSR ----------------------------------------------------
+
+describe('TopProjectsWidget SSR (task #491)', () => {
+	let TopProjectsWidget: unknown;
+
+	beforeAll(async () => {
+		TopProjectsWidget = (
+			(await vite.ssrLoadModule(
+				'/src/lib/components/features/dashboard/TopProjectsWidget.svelte'
+			)) as { default: unknown }
+		).default;
+	}, 60_000);
+
+	test('renders project bars with short labels and full-path titles', () => {
+		const html = render(TopProjectsWidget, {
+			props: {
+				data: [
+					{ directory: '/repo/a', projectName: 'Project A', count: 100 },
+					{ directory: '/repo/b/sub', projectName: null, count: 50 }
+				]
+			}
+		}).body;
+		expect(html).toContain('bar-chart__table');
+		expect(html).toContain('>Project A<');
+		// When projectName is null, the basename is used.
+		expect(html).toContain('>sub<');
+		expect(html).toContain('bar-chart__label');
+		expect(html).toContain('bar-chart__bar');
+	});
+
+	test('renders empty state when data is empty', () => {
+		const html = render(TopProjectsWidget, {
+			props: {
+				data: []
+			}
+		}).body;
+		expect(html).toContain('bar-chart__empty');
+		expect(html).toContain('No data for this period.');
+	});
+});
+
+// --- WidgetShell SSR invariant ------------------------------------------------
+
+describe('WidgetShell SSR contract (task #490/#491)', () => {
+	test('every registered widget has a corresponding body component that can be loaded', async () => {
+		const { WIDGET_IDS } = await import('$lib/widgets/registry');
+		for (const id of WIDGET_IDS) {
+			const def = (await import('$lib/widgets/registry')).WIDGET_REGISTRY[id];
+			// The load function should resolve without throwing.
+			await expect(async () => {
+				const mod = await def.load();
+				expect(mod.default).toBeDefined();
+			}).not.toThrow();
+		}
 	});
 });

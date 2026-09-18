@@ -73,11 +73,6 @@
 					</button>
 					{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
 					{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
-					{#if call.permission}
-						<span class="ui-badge ui-badge--perm"
-							>ask{call.permission.reply ? `: ${call.permission.reply}` : ''}</span
-						>
-					{/if}
 					<span class="muted">{call.status}</span>
 				{:else}
 					<span class="row-icon">

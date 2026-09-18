@@ -764,7 +764,7 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 				Object.fromEntries(Object.entries(s).filter(([k]) => !['flags'].includes(k)))
 			),
 			toolCalls: (detail.toolCalls as Record<string, unknown>[]).map((t) =>
-				Object.fromEntries(Object.entries(t).filter(([k]) => !['flags', 'permission'].includes(k)))
+				Object.fromEntries(Object.entries(t).filter(([k]) => !['flags'].includes(k)))
 			),
 			markers: detail.markers,
 			actions: detail.actions

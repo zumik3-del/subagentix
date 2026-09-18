@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { toggleWidgetSelection, samePlacements, updatePlacement } from './picker';
+import { toggleWidgetSelection, samePlacements } from './picker';
 import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/registry';
 /**
  * Unit tests for the pure dashboard widget-picker selection logic
@@ -155,42 +155,6 @@ import { WIDGET_IDS, type WidgetId, type WidgetPlacement } from '$lib/widgets/re
 		const a: WidgetPlacement[] = [{ id: 'kpi', width: 6, height: 4, x: 0, y: 0 }];
 		const b: WidgetPlacement[] = [{ id: 'kpi', width: 2, height: 6, x: 1, y: 1 }];
 		expect(samePlacements(a, b)).toBe(false);
-	});
-});
-
-	describe('updatePlacement()', () => {
-	test('patches width while preserving other fields', () => {
-		const input: WidgetPlacement[] = [{ id: 'kpi', width: 6, height: 4 }];
-		const next = updatePlacement(input, 'kpi', { width: 2 });
-		// resolvePlacements re-resolves; kpi(2x4) auto-positions at (0,0).
-		expect(next).toEqual([{ id: 'kpi', width: 2, height: 4, x: 0, y: 0 }]);
-	});
-
-	test('patches height while preserving other fields', () => {
-		const input: WidgetPlacement[] = [{ id: 'kpi', width: 6, height: 4 }];
-		const next = updatePlacement(input, 'kpi', { height: 5 });
-		expect(next).toEqual([{ id: 'kpi', width: 6, height: 5, x: 0, y: 0 }]);
-	});
-
-	test('patches both width and height', () => {
-		const input: WidgetPlacement[] = [{ id: 'kpi', width: 6, height: 4 }];
-		const next = updatePlacement(input, 'kpi', { width: 3, height: 6 });
-		expect(next).toEqual([{ id: 'kpi', width: 3, height: 6, x: 0, y: 0 }]);
-	});
-
-	test('does not mutate the input array', () => {
-		const input: readonly WidgetPlacement[] = [{ id: 'kpi', width: 6, height: 4 }];
-		updatePlacement(input, 'kpi', { width: 2 });
-		expect(input).toEqual([{ id: 'kpi', width: 6, height: 4 }]);
-	});
-
-	test('keeps registry order', () => {
-		const input: WidgetPlacement[] = [
-			{ id: 'top-tools', width: 2, height: 3 },
-			{ id: 'kpi', width: 4, height: 2 }
-		];
-		const next = updatePlacement(input, 'top-tools', { width: 3 });
-		expect(next.map((p) => p.id)).toEqual(['kpi', 'top-tools']);
 	});
 });
 

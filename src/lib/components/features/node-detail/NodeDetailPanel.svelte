@@ -67,7 +67,6 @@
 
 	/** Steps & actions timeline: row filters + free-text search (client-side). */
 	let kindFilter = $state<RowFilter>('all');
-	let permissionOnly = $state(false);
 	let actionSearch = $state('');
 
 	/** Expanded rows/blobs, keyed by step row key or `<callId>:<field>`. */
@@ -94,7 +93,7 @@
 
 	// Hierarchical Steps & actions timeline: a start marker, the numbered LLM
 	// steps, and (nested, collapsed by default) each step's tool calls and
-	// non-tool actions. Filters: row kind, permission-only, free-text search.
+	// non-tool actions. Filters: row kind, free-text search.
 	const rows = $derived(detail ? buildNodeRows(detail) : []);
 	const stepCount = $derived(rows.filter((row) => row.kind === 'step').length);
 	const itemCount = $derived(
@@ -102,9 +101,6 @@
 			(count, row) => count + row.children.length + (row.kind === 'step' ? 0 : 1),
 			0
 		)
-	);
-	const permissionRows = $derived(
-		(detail?.toolCalls ?? []).filter((call) => call.permission).map((call) => call.permission!)
 	);
 	/** Whether the node recorded anything at all (drives the empty state). */
 	const hasContent = $derived(
@@ -128,10 +124,13 @@
 				return row.kind === 'step';
 			case 'tool':
 				return row.kind === 'tool';
-			case 'files':
-				return row.kind === 'file' || row.kind === 'patch';
 			case 'misc':
+				// `Other` is the catch-all for everything that is neither a step,
+				// tool, text nor reasoning action: file/patch actions and the
+				// remaining marker kinds, plus agent/compaction/start/prompt rows.
 				return (
+					row.kind === 'file' ||
+					row.kind === 'patch' ||
 					row.kind === 'agent' ||
 					row.kind === 'compaction' ||
 					row.kind === 'start' ||
@@ -141,11 +140,8 @@
 				return row.kind === kindFilter;
 		}
 	}
-	function permissionAllows(row: NodeRow): boolean {
-		return !(permissionOnly && row.kind === 'tool' && !row.call?.permission);
-	}
 	function leafMatches(row: NodeRow, query: string): boolean {
-		return kindMatches(row) && permissionAllows(row) && (query === '' || searchText(row).includes(query));
+		return kindMatches(row) && (query === '' || searchText(row).includes(query));
 	}
 	function searchText(row: NodeRow): string {
 		return `${row.label} ${row.summary}`.toLowerCase();
@@ -157,8 +153,7 @@
 		for (const row of rows) {
 			if (row.kind === 'step') {
 				const children = row.children.filter((child) => leafMatches(child, query));
-				const showStep =
-					(kindFilter === 'all' || kindFilter === 'step') && query === '' && !permissionOnly;
+				const showStep = (kindFilter === 'all' || kindFilter === 'step') && query === '';
 				if (children.length > 0 || showStep) out.push({ row, children, open: isOpen(row) });
 			} else if (leafMatches(row, query)) {
 				out.push({ row, children: [], open: isOpen(row) });
@@ -262,7 +257,6 @@
 			{retryGroups}
 			{trackerRefs}
 			{refBase}
-			{permissionRows}
 			{ziptaskEnabled}
 			{onOpenTask}
 		/>
@@ -274,12 +268,10 @@
 			{hasContent}
 			{usageColumns}
 			{kindFilter}
-			{permissionOnly}
 			{actionSearch}
 			{allExpanded}
 			onSearch={(value) => (actionSearch = value)}
 			onFilter={(value) => (kindFilter = value)}
-			onTogglePermission={() => (permissionOnly = !permissionOnly)}
 			onToggleAll={toggleAll}
 			onToggleRow={toggleRow}
 			onFocusCall={focusCall}

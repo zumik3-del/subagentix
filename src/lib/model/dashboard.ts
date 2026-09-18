@@ -5,8 +5,9 @@
  * client widgets, so it must stay free of `$lib/server` / DB imports and of any
  * DOM/Svelte dependency. Pure and deterministic; no I/O.
  */
+import { utcDayStart, type DayBucket } from './chart';
 import type { TokenCounts } from './token';
-import { utcDayStart } from './chart';
+import type { WidgetId } from '$lib/widgets/registry';
 
 /**
  * Fixed period presets (spec §2.2); `all` is unbounded history and `today` is
@@ -136,6 +137,20 @@ export interface MessageUsageTotals {
 }
 
 /**
+ * Windowed KPI payload: the Tier-S session count paired with the Tier-M
+ * cost/token sums. Replaces the two private copies that used to live in the
+ * server builder and in `KpiWidget.svelte` (task #488).
+ */
+export interface KpiData {
+	/** In-window/scope sessions (`session` rows, Tier S). */
+	sessions: number;
+	/** Summed `message.data.cost` (Tier M). */
+	cost: number;
+	/** Summed `message.data.tokens.*` (Tier M). */
+	tokens: TokenCounts;
+}
+
+/**
  * Hard ceiling on the sessions a Tier-P (top-tools) read may scan. `period=all`
  * has no time bound, and `part` has no time/tool index, so without a ceiling the
  * scan would grow without limit with history (~285k rows today, one row per tool
@@ -165,3 +180,29 @@ export interface ToolUsage {
 	/** True when the in-range session set was cut to {@link MAX_TOOL_SESSIONS}. */
 	capped: boolean;
 }
+
+/**
+ * Widget id -> `/api/dashboard/<id>` payload type — the single client-safe
+ * source of truth shared by the server payload builders
+ * (`routes/api/dashboard/widgets.ts`) and the widget bodies (task #488).
+ *
+ * Keyed by {@link WidgetId}, so the mapped type refuses to compile when a
+ * registered widget id has no payload entry here (the indexed access fails),
+ * keeping the map exhaustive over the widget set.
+ */
+export type WidgetDataMap = {
+	[K in WidgetId]: {
+		/** KPI tiles + token mix (Tier S/M). */
+		kpi: KpiData;
+		/** Dense UTC-day session counts (Tier S). */
+		'sessions-per-day': DayBucket[];
+		/** Dense UTC-day cost sums (Tier M). */
+		'cost-per-day': DayBucket[];
+		/** Capped top-tools rows (Tier P). */
+		'top-tools': ToolUsage;
+		/** Ranked agent distribution (Tier S). */
+		'agent-distribution': DistributionEntry[];
+		/** Ranked directory distribution (Tier S). */
+		'top-projects': TopDirectoryEntry[];
+	}[K];
+};

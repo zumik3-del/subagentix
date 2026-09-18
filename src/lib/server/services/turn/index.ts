@@ -8,11 +8,10 @@
  * ends in the future or before their start are clamped and flagged.
  *
  * This module is the public surface of the split domain: it orchestrates the
- * scope, node, edge and permission-index modules and composes the final DTO.
+ * scope, node and edge modules and composes the final DTO.
  */
 import type { Action, GanttModel, Marker, Node, Step, ToolCall } from '../../../model/types';
 import { nodeTrackerRefs, turnTrackerRefs } from '../../../model/tracker';
-import { buildPermissionIndex } from '../../permission-store';
 import {
 	getActionParts,
 	getCompactionParts,
@@ -44,7 +43,6 @@ export function buildTurnModel(
 	triggerMessageId: string
 ): GanttModel | null {
 	const now = Date.now();
-	const permissionIndex = buildPermissionIndex();
 	// One cached query returns the subtree and every delegation edge in it; the
 	// root edges are the subset owned by the root session (task #386).
 	const { subtree, edges: subtreeEdges } = loadSessionGraph(rootSessionId);
@@ -130,7 +128,6 @@ export function buildTurnModel(
 			startOverride,
 			spawnCounts.get(data.session.id) ?? 0,
 			subagentTypeByChild.get(data.session.id) ?? null,
-			permissionIndex,
 			now
 		);
 		nodes.push(built.node);
