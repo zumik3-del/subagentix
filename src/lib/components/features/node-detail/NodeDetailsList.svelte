@@ -4,12 +4,12 @@
 	 *
 	 * The `Details (N)` section: tool calls + non-tool actions, chronologically,
 	 * each with a stable DOM anchor the table rows scroll to. Pure presentation
-	 * — the panel root owns the `detailEntries`, `expanded`, `copiedCallId` and
-	 * `flashId` state plus the `copyCall` / `toggleExpanded` handlers and passes
-	 * them down. Every `<li>` is rendered by `ToolCallCard` / `ActionCard`.
+	 * — the panel root owns the `detailEntries`, `expanded` and `flashId` state
+	 * plus the `toggleExpanded` handler and passes them down. Every `<li>` is
+	 * rendered by `ToolCallCard` / `ActionCard`; the copy button lives inside
+	 * the shared `ToolCallDetail` (task #541).
 	 */
 	import type { DetailEntry } from '$lib/model/node';
-	import type { ToolCall } from '$lib/model/types';
 	import ToolCallCard from './ToolCallCard.svelte';
 	import ActionCard from './ActionCard.svelte';
 
@@ -17,27 +17,15 @@
 		detailEntries: DetailEntry[];
 		/** Expanded rows/blobs, keyed by step row key or `<id>:<field>`. */
 		expanded: Record<string, boolean>;
-		/** Tool-call id whose copy just succeeded (drives the check-icon feedback). */
-		copiedCallId: string | null;
 		/** Details block just jumped to; drives the temporary grey flash. */
 		flashId: string | null;
 		/** Node start, used as the duration fallback for an untimed tool call. */
 		nodeStartedAt: number;
-		/** Copy a call's full text dump (state stays in the panel root). */
-		onCopy: (call: ToolCall) => void;
 		/** Toggle the expanded state for a `<id>:<field>` key. */
 		onToggleExpanded: (key: string) => void;
 	}
 
-	let {
-		detailEntries,
-		expanded,
-		copiedCallId,
-		flashId,
-		nodeStartedAt,
-		onCopy,
-		onToggleExpanded
-	}: Props = $props();
+	let { detailEntries, expanded, flashId, nodeStartedAt, onToggleExpanded }: Props = $props();
 </script>
 
 <section class="block">
@@ -51,10 +39,8 @@
 					<ToolCallCard
 						call={entry.call}
 						{expanded}
-						copied={copiedCallId === entry.call.id}
 						{flashId}
 						{nodeStartedAt}
-						{onCopy}
 						{onToggleExpanded}
 					/>
 				{:else}
