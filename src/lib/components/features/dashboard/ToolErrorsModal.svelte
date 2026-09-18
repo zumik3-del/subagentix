@@ -16,6 +16,12 @@
 	 * `errors` mode only failed calls appear (Time, Agent, Error text, Session).
 	 * The copy (subtitle, total, empty state) follows the mode.
 	 *
+	 * Since #538 each operation row is a keyboard-activatable toggle (click or
+	 * Enter/Space) that reveals one full-width detail row rendering the shared
+	 * `ToolCallDetail`; at most the clicked row is open and its input/output
+	 * blobs expand independently. The Session cell is plain monospace text
+	 * (no `/sessions/...` link).
+	 *
 	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
 	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
 	 * a Tab trap, initial focus and focus return to the opener, and no markup
@@ -30,6 +36,7 @@
 	import { clock } from '$lib/model/clock.svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import ToolCallDetail from '$lib/components/composites/ToolCallDetail.svelte';
 	import { ALL_SCOPE_OPTION, PERIOD_OPTIONS, SCOPE_ALL, type FilterOption } from './filter';
 	import { appendToolErrorRows, buildToolErrorsUrl, type ToolErrorViewFilters } from './tool-errors';
 
@@ -78,6 +85,11 @@
 	let loadingMore = $state(false);
 	/** A failed "Load more"; the already-loaded rows stay on screen. */
 	let loadMoreError = $state<string | null>(null);
+
+	/** The one expanded operation row (`null` = none); reveals its detail card. */
+	let expandedDetailId = $state<string | null>(null);
+	/** Input/output blob expansion inside the revealed `ToolCallDetail`. */
+	let expandedBlocks = $state<Record<string, boolean>>({});
 
 	/** Monotonic request id, so a late response can never overwrite a newer one. */
 	let requestSeq = 0;
@@ -156,6 +168,10 @@
 		// the fresh page can page again.
 		loadingMore = false;
 		loadMoreError = null;
+		// A filter change replaces the rows, so an expanded row and its blobs
+		// can never point at the new page.
+		expandedDetailId = null;
+		expandedBlocks = {};
 
 		void (async () => {
 			try {
@@ -212,6 +228,23 @@
 
 	function setScope(value: string): void {
 		scope = value === SCOPE_ALL ? null : value;
+	}
+
+	/** Toggle one operation row's detail card; at most the clicked row is open. */
+	function toggleDetailRow(id: string): void {
+		expandedDetailId = expandedDetailId === id ? null : id;
+	}
+
+	/** Enter/Space toggle a focused row, mirroring a button's activation. */
+	function onRowKeydown(event: KeyboardEvent, id: string): void {
+		if (event.key !== 'Enter' && event.key !== ' ') return;
+		event.preventDefault();
+		toggleDetailRow(id);
+	}
+
+	/** Expand/collapse one input/output blob inside the revealed detail card. */
+	function toggleDetailBlock(key: string): void {
+		expandedBlocks[key] = !expandedBlocks[key];
 	}
 
 	$effect(() => {
@@ -356,7 +389,15 @@
 							</thead>
 							<tbody>
 								{#each rows as row (row.id)}
-									<tr>
+									<tr
+										class="tool-errors__row"
+										class:open={expandedDetailId === row.id}
+										role="button"
+										tabindex="0"
+										aria-expanded={expandedDetailId === row.id}
+										onclick={() => toggleDetailRow(row.id)}
+										onkeydown={(event) => onRowKeydown(event, row.id)}
+									>
 										<td class="tool-errors__time">{formatDateTime(row.at, clock.tz)}</td>
 										<td>{row.agent}</td>
 										{#if isAll}
@@ -365,16 +406,32 @@
 											</td>
 										{/if}
 										<td class="tool-errors__error">{row.error === '' ? '—' : row.error}</td>
-										<td>
-											<a
-												class="tool-errors__session"
-												href={`/sessions/${encodeURIComponent(row.sessionId)}`}
-												title={row.sessionId}
-											>
-												{row.sessionId}
-											</a>
-										</td>
+										<td class="tool-errors__session" title={row.sessionId}>{row.sessionId}</td>
 									</tr>
+									{#if expandedDetailId === row.id}
+										<tr class="tool-errors__detail">
+											<td colspan={isAll ? 5 : 4}>
+												<div class="tool-errors__detail-cell">
+													<ToolCallDetail
+														call={{
+															id: row.id,
+															name: row.tool,
+															status: row.status,
+															error: row.error === '' ? null : row.error,
+															startedAt: row.at,
+															endedAt: row.endedAt,
+															input: row.input,
+															output: row.output,
+															isMcp: row.isMcp,
+															isDelegation: row.isDelegation
+														}}
+														expanded={expandedBlocks}
+														onToggleExpanded={toggleDetailBlock}
+													/>
+												</div>
+											</td>
+										</tr>
+									{/if}
 								{/each}
 							</tbody>
 						</table>
@@ -513,6 +570,16 @@
 		color: var(--text-weak);
 	}
 
+	/* Each operation row toggles its detail row; the open row stays tinted. */
+	.tool-errors__row {
+		cursor: pointer;
+	}
+
+	.tool-errors__row:hover,
+	.tool-errors__row.open {
+		background: var(--surface-raised-base-hover);
+	}
+
 	.tool-errors__error {
 		overflow-wrap: anywhere;
 		white-space: pre-wrap;
@@ -520,7 +587,18 @@
 
 	.tool-errors__session {
 		font-family: var(--font-family-mono);
-		color: var(--text-interactive-base);
+		overflow-wrap: anywhere;
+	}
+
+	/* The revealed call card: one full-width cell spanning every column. */
+	.tool-errors__detail > td {
+		padding: 0;
+		background: var(--background-strong);
+		border-bottom: 1px solid var(--border-weaker-base);
+	}
+
+	.tool-errors__detail-cell {
+		padding: var(--space-2) var(--space-2) var(--space-3);
 	}
 
 	.tool-errors__more {

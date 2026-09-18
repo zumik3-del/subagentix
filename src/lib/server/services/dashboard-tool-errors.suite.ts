@@ -316,3 +316,66 @@ describe('read-only guarantee', () => {
 		expect(result).toEqual({ query_only: 1 });
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* New fields from #538: input, output, endedAt, isMcp, isDelegation   */
+/* ------------------------------------------------------------------ */
+
+describe('getToolErrors — extended ToolErrorEntry fields (#538)', () => {
+	test('rows carry input/output/endedAt fields (nullable)', () => {
+		const page = getToolErrors({ period: 'all', scope: null }, {}, T);
+		for (const row of page.rows) {
+			expect(row).toHaveProperty('input');
+			expect(row).toHaveProperty('output');
+			expect(row).toHaveProperty('endedAt');
+			expect(row.input === null || typeof row.input === 'string').toBe(true);
+			expect(row.output === null || typeof row.output === 'string').toBe(true);
+			expect(row.endedAt === null || typeof row.endedAt === 'number').toBe(true);
+		}
+	});
+
+	test('rows carry isMcp and isDelegation boolean fields', () => {
+		const page = getToolErrors({ period: 'all', scope: null }, {}, T);
+		for (const row of page.rows) {
+			expect(typeof row.isMcp).toBe('boolean');
+			expect(typeof row.isDelegation).toBe('boolean');
+		}
+	});
+
+	test('status=all mode returns rows with the new fields populated', () => {
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		expect(allPage.rows.length).toBeGreaterThan(0);
+		for (const row of allPage.rows) {
+			expect(row.input === null || typeof row.input === 'string').toBe(true);
+			expect(row.output === null || typeof row.output === 'string').toBe(true);
+			expect(row.endedAt === null || typeof row.endedAt === 'number').toBe(true);
+			expect(typeof row.isMcp).toBe('boolean');
+			expect(typeof row.isDelegation).toBe('boolean');
+		}
+	});
+
+	test('errors/all totals are unaffected by the new field mappings', () => {
+		const errorsPage = getToolErrors({ period: 'all', scope: null }, { status: 'errors' }, T);
+		const allPage = getToolErrors({ period: 'all', scope: null }, { status: 'all' }, T);
+		// The new fields should not change counts.
+		expect(errorsPage.total).toBeGreaterThan(0);
+		expect(allPage.total).toBeGreaterThan(errorsPage.total);
+	});
+
+	test('paging is unaffected by the new field mappings', () => {
+		const full = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 100, offset: 0 }, T);
+		const paged1 = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 1, offset: 0 }, T);
+		const paged2 = getToolErrors({ period: 'all', scope: null }, { status: 'all', limit: 1, offset: 1 }, T);
+		expect(paged1.rows).toHaveLength(1);
+		expect(paged2.rows).toHaveLength(1);
+		expect(paged1.rows[0].id).not.toBe(paged2.rows[0].id);
+		expect(paged1.total).toBe(full.total);
+		expect(paged2.total).toBe(full.total);
+	});
+
+	test('agent list is unaffected by the new field mappings', () => {
+		const page = getToolErrors({ period: 'all', scope: null }, {}, T);
+		expect(Array.isArray(page.agents)).toBe(true);
+		expect(page.agents.length).toBeGreaterThan(0);
+	});
+});

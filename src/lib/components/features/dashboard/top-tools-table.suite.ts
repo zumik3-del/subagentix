@@ -383,4 +383,93 @@ describe('TopToolsTable SSR', () => {
 		// The source should contain the all-mode empty text string.
 		expect(source).toContain('No tool calls for these filters.');
 	});
+
+	// --- Expandable rows + ToolCallDetail delegation (#538) --------------------
+
+	test('Session cell is plain monospace text, not a /sessions/ anchor', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// The session cell must render raw text with a title attribute, not an <a>.
+		expect(source).toContain('class="tool-errors__session"');
+		expect(source).toContain('title={row.sessionId}');
+		// No href or /sessions/ link should appear in the session cell.
+		const sessionCellMatch = source.match(/<td[^>]*class="[^"]*tool-errors__session[^"]*"[^>]*>[\s\S]*?<\/td>/);
+		expect(sessionCellMatch).not.toBeNull();
+		const cellContent = sessionCellMatch![0];
+		expect(cellContent).not.toContain('href=');
+		expect(cellContent).not.toContain('/sessions/');
+	});
+
+	test('operation row carries role="button", tabindex="0" and aria-expanded', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		expect(source).toContain('role="button"');
+		expect(source).toContain('tabindex="0"');
+		expect(source).toContain('aria-expanded={expandedDetailId === row.id}');
+	});
+
+	test('toggling a row expands/collapses via toggleDetailRow', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// The row onclick calls toggleDetailRow which flips expandedDetailId.
+		expect(source).toContain('onclick={() => toggleDetailRow(row.id)}');
+		expect(source).toContain('function toggleDetailRow(id: string)');
+		// Toggling the same id closes it (XOR semantics).
+		expect(source).toContain('expandedDetailId === id ? null : id');
+	});
+
+	test('enter/space keydown on a row triggers toggleDetailRow', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		expect(source).toContain('onkeydown={(event) => onRowKeydown(event, row.id)}');
+		expect(source).toContain('function onRowKeydown');
+		// The handler checks both Enter and Space, returning early if neither matches.
+		expect(source).toContain("event.key !== 'Enter'");
+		expect(source).toContain("event.key !== ' '");
+	});
+
+	test('detail row renders ToolCallDetail with the full call view model', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		expect(source).toContain('<ToolCallDetail');
+		expect(source).toContain('call={{');
+		expect(source).toContain('id: row.id');
+		expect(source).toContain('name: row.tool');
+		expect(source).toContain('startedAt: row.at');
+		expect(source).toContain('endedAt: row.endedAt');
+		expect(source).toContain('input: row.input');
+		expect(source).toContain('output: row.output');
+		expect(source).toContain('isMcp: row.isMcp');
+		expect(source).toContain('isDelegation: row.isDelegation');
+		expect(source).toContain('onToggleExpanded={toggleDetailBlock}');
+	});
+
+	test('detail row spans all columns with colspan matching the mode', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// errors mode: 4 columns; all mode: 5 columns.
+		expect(source).toContain('colspan={isAll ? 5 : 4}');
+	});
+
+	test('at most one row is expanded at a time (XOR toggle)', () => {
+		const source = readFileSync(
+			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
+			'utf8'
+		);
+		// toggleDetailRow implements XOR: if the clicked id is already open, close it;
+		// otherwise open it (and implicitly close any other).
+		expect(source).toContain('expandedDetailId === id ? null : id');
+	});
 });

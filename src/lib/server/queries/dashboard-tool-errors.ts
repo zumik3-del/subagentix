@@ -16,9 +16,14 @@
  * the global top `offset + limit` rows can only come from the per-chunk top
  * `offset + limit` — without a second full scan. Counts and the distinct-agent
  * list are separate chunked aggregates.
+ *
+ * Since #538 a row also reads `part.data.state.input`/`output`, the
+ * `state.time.end` bound and derives the MCP/delegation flags from the tool
+ * name, so a row can feed the shared `ToolCallDetail` card.
  */
 import { getDb } from '../db';
 import { jsonEquals, jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import { isMcpTool } from '../../model/tool-kind';
 import {
 	DEFAULT_TOOL_CALL_STATUS,
 	type ToolCallStatus,
@@ -28,6 +33,7 @@ import {
 import {
 	chunk,
 	IN_CHUNK_SIZE,
+	isBound,
 	toCount,
 	toText,
 	UNKNOWN_LABEL
@@ -47,6 +53,12 @@ const TOOL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
 const ERROR_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.error)}, '')`;
 /** Raw status: `part.data.state.status`, or an empty string when absent. */
 const STATUS_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.status)}, '')`;
+/** Raw tool input (`part.data.state.input`); `null` when absent. */
+const INPUT_EXPR = jsonExtract('part.data', JSON_PATH.part.stateInput);
+/** Raw tool output (`part.data.state.output`); `null` when absent. */
+const OUTPUT_EXPR = jsonExtract('part.data', JSON_PATH.part.stateOutput);
+/** Tool end time (`part.data.state.time.end`); `null` when absent. */
+const ENDED_EXPR = jsonExtract('part.data', JSON_PATH.part.stateEnd);
 
 /**
  * The constant `part` predicate every read in this module shares, for the
@@ -110,15 +122,27 @@ function bindIds(
 	return bound;
 }
 
+/** `part.data.state.input`/`output`: `null` for a NULL/blank value. */
+function toNullableText(value: unknown): string | null {
+	const text = toText(value);
+	return text === '' ? null : text;
+}
+
 function mapRow(row: Row): ToolErrorEntry {
+	const tool = toText(row.tool);
 	return {
 		id: toText(row.id),
 		sessionId: toText(row.session_id),
 		at: toCount(row.at),
 		agent: toText(row.agent),
-		tool: toText(row.tool),
+		tool,
 		status: toText(row.status),
-		error: toText(row.error)
+		error: toText(row.error),
+		input: toNullableText(row.input),
+		output: toNullableText(row.output),
+		endedAt: isBound(row.ended_at) ? row.ended_at : null,
+		isMcp: isMcpTool(tool),
+		isDelegation: tool === 'task'
 	};
 }
 
@@ -148,7 +172,10 @@ export function listToolErrors(
 				${AGENT_EXPR} AS agent,
 				${TOOL_EXPR} AS tool,
 				${STATUS_EXPR} AS status,
-				${ERROR_EXPR} AS error
+				${ERROR_EXPR} AS error,
+				${INPUT_EXPR} AS input,
+				${OUTPUT_EXPR} AS output,
+				${ENDED_EXPR} AS ended_at
 			FROM part
 			JOIN session ON session.id = part.session_id
 			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}

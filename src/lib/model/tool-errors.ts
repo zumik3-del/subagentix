@@ -41,11 +41,17 @@ export interface ToolCallDetail {
 	mode: ToolCallStatus;
 }
 
-/** One tool call, flattened for the detail table. */
+/**
+ * One tool call, flattened for the detail table.
+ *
+ * Since #538 a row also carries the fields the shared `ToolCallDetail` card
+ * needs (`input`/`output`/`endedAt` plus the two name-derived flags), so a row
+ * can be expanded into the same record the Gantt node inspector shows.
+ */
 export interface ToolErrorEntry {
 	/** `part.id`; stable row key. */
 	id: string;
-	/** Owning session id; the UI links to `/sessions/{sessionId}`. */
+	/** Owning session id. */
 	sessionId: string;
 	/** `part.time_created` (epoch-ms). */
 	at: number;
@@ -57,6 +63,16 @@ export interface ToolErrorEntry {
 	status: string;
 	/** `part.data.state.error`; empty string when the part carries no error text. */
 	error: string;
+	/** `part.data.state.input` (raw); `null` when absent. */
+	input: string | null;
+	/** `part.data.state.output` (raw); `null` when absent. */
+	output: string | null;
+	/** `part.data.state.time.end`; `null` => still running / no end recorded. */
+	endedAt: number | null;
+	/** True when `tool` is outside the built-in allowlist (MCP). */
+	isMcp: boolean;
+	/** True for the `task` delegation tool. */
+	isDelegation: boolean;
 }
 
 /**

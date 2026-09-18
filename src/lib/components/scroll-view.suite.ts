@@ -206,6 +206,7 @@ describe('ScrollView adoption — every native scroll region is wrapped (task #2
 	const nodeActionsTable = source('./features/node-detail/NodeActionsTable.svelte');
 	const ioBlock = source('./composites/IoBlock.svelte');
 	const toolCallCard = source('./features/node-detail/ToolCallCard.svelte');
+	const toolCallDetail = source('./composites/ToolCallDetail.svelte');
 	const actionCard = source('./features/node-detail/ActionCard.svelte');
 	const rawJson = source('./features/node-detail/RawJsonBlock.svelte');
 
@@ -246,10 +247,12 @@ describe('ScrollView adoption — every native scroll region is wrapped (task #2
 			tableScroll.indexOf('<table>')
 		);
 		// The three IO blocks (input/output/content) are IoBlock instances owned by
-		// the extracted Details cards (ADR 2.4); the vertical ScrollView for each
-		// value lives inside IoBlock. The panel root no longer hosts any IoBlock.
+		// the extracted Details cards (ADR 2.4); the shared ToolCallDetail owns the
+		// tool card's two blocks since #538. The vertical ScrollView for each value
+		// lives inside IoBlock. The panel root no longer hosts any IoBlock.
 		expect(panel.split('<IoBlock').length - 1).toBe(0);
-		expect(toolCallCard.split('<IoBlock').length - 1).toBe(2);
+		expect(toolCallCard.split('<IoBlock').length - 1).toBe(0);
+		expect(toolCallDetail.split('<IoBlock').length - 1).toBe(2);
 		expect(actionCard.split('<IoBlock').length - 1).toBe(1);
 		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
 		// The raw-JSON ScrollView moved into RawJsonBlock with its section (ADR 2.5).

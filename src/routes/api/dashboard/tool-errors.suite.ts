@@ -398,3 +398,132 @@ describe('GET /api/dashboard/tool-errors — ?status=all', () => {
 		expect(body.error.length).toBeGreaterThan(0);
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* Extended payload: new fields from #538                               */
+/* ------------------------------------------------------------------ */
+
+describe('GET /api/dashboard/tool-errors — extended payload (#538)', () => {
+	test('each row carries input, output, endedAt, isMcp, isDelegation', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as {
+			rows: Array<{
+				input: unknown;
+				output: unknown;
+				endedAt: unknown;
+				isMcp: unknown;
+				isDelegation: unknown;
+			}>;
+		};
+		for (const row of body.rows) {
+			expect(row).toHaveProperty('input');
+			expect(row).toHaveProperty('output');
+			expect(row).toHaveProperty('endedAt');
+			expect(row).toHaveProperty('isMcp');
+			expect(row).toHaveProperty('isDelegation');
+		}
+	});
+
+	test('input/output are null or string; endedAt is null or number', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as {
+			rows: Array<{
+				input: unknown;
+				output: unknown;
+				endedAt: unknown;
+			}>;
+		};
+		for (const row of body.rows) {
+			expect(row.input === null || typeof row.input === 'string').toBe(true);
+			expect(row.output === null || typeof row.output === 'string').toBe(true);
+			expect(row.endedAt === null || typeof row.endedAt === 'number').toBe(true);
+		}
+	});
+
+	test('isMcp and isDelegation are booleans', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as {
+			rows: Array<{ isMcp: unknown; isDelegation: unknown }>;
+		};
+		for (const row of body.rows) {
+			expect(typeof row.isMcp).toBe('boolean');
+			expect(typeof row.isDelegation).toBe('boolean');
+		}
+	});
+
+	test('old contract fields are still present (id, sessionId, at, agent, tool, status, error)', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as {
+			rows: Array<{
+				id: unknown;
+				sessionId: unknown;
+				at: unknown;
+				agent: unknown;
+				tool: unknown;
+				status: unknown;
+				error: unknown;
+			}>;
+		};
+		for (const row of body.rows) {
+			expect(typeof row.id).toBe('string');
+			expect(typeof row.sessionId).toBe('string');
+			expect(typeof row.at).toBe('number');
+			expect(typeof row.agent).toBe('string');
+			expect(typeof row.tool).toBe('string');
+			expect(typeof row.status).toBe('string');
+			expect(typeof row.error).toBe('string');
+		}
+	});
+
+	test('total, agents, capped are intact alongside new fields', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=all')
+		});
+		const body = (await response.json()) as {
+			total: number;
+			agents: string[];
+			capped: boolean;
+			rows: unknown[];
+		};
+		expect(typeof body.total).toBe('number');
+		expect(Array.isArray(body.agents)).toBe(true);
+		expect(typeof body.capped).toBe('boolean');
+		expect(Array.isArray(body.rows)).toBe(true);
+	});
+
+	test('errors mode rows also carry the new fields', async () => {
+		const response = await GET({
+			params: {},
+			url: new URL('http://localhost/api/dashboard/tool-errors?period=all&status=errors')
+		});
+		const body = (await response.json()) as {
+			rows: Array<{
+				input: unknown;
+				output: unknown;
+				endedAt: unknown;
+				isMcp: boolean;
+				isDelegation: boolean;
+			}>;
+		};
+		for (const row of body.rows) {
+			expect(row.isMcp).toBeTypeOf('boolean');
+			expect(row.isDelegation).toBeTypeOf('boolean');
+			expect(row.input === null || typeof row.input === 'string').toBe(true);
+			expect(row.output === null || typeof row.output === 'string').toBe(true);
+			expect(row.endedAt === null || typeof row.endedAt === 'number').toBe(true);
+		}
+	});
+});

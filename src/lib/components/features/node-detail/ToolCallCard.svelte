@@ -2,18 +2,17 @@
 	/**
 	 * One tool/MCP call card (extracted from `NodeDetailPanel`, ADR 2.4).
 	 *
-	 * The tool `<li>` of the Details list: the copy button, the head row
-	 * (status dot, name, badges, duration) and the input/output `IoBlock`s.
-	 * Pure presentation — the panel root owns the `expanded` /
-	 * `copiedCallId` / `flashId` state and the `copyCall` / `toggleExpanded`
-	 * handlers and passes them down. The stable jump id `tool-call-<id>` is
-	 * produced here so the panel's scroll targets keep resolving.
+	 * The tool `<li>` of the Details list: the copy button, the stable jump id
+	 * and the flash state. The card interior (head row, error, input/output
+	 * blocks) is delegated to the shared `ToolCallDetail`, which the dashboard
+	 * call detail reuses (task #538). Pure presentation — the panel root owns
+	 * the `expanded` / `copiedCallId` / `flashId` state and the `copyCall` /
+	 * `toggleExpanded` handlers and passes them down; `nodeStartedAt` resolves
+	 * the duration fallback for a call with no timestamp.
 	 */
 	import type { ToolCall } from '$lib/model/types';
-	import { formatDuration } from '$lib/model/format';
-	import { truncateText } from '$lib/model/node';
 	import Icon from '$lib/components/primitives/Icon.svelte';
-	import IoBlock from '$lib/components/composites/IoBlock.svelte';
+	import ToolCallDetail from '$lib/components/composites/ToolCallDetail.svelte';
 
 	interface Props {
 		call: ToolCall;
@@ -33,12 +32,6 @@
 
 	let { call, expanded, copied, flashId, nodeStartedAt, onCopy, onToggleExpanded }: Props = $props();
 
-	/** Character budget for a tool input/output snippet (mirrors the panel root). */
-	const SNIPPET_LIMIT = 600;
-
-	const input = $derived(truncateText(call.input, SNIPPET_LIMIT));
-	const output = $derived(truncateText(call.output, SNIPPET_LIMIT));
-
 	/** Stable DOM id for a tool-call row, used as the jump target. */
 	function callDomId(id: string): string {
 		return `tool-call-${id}`;
@@ -47,24 +40,6 @@
 	/** Duration start: the call's own timestamp, else the node's start. */
 	function startOf(value: number | null): number {
 		return value ?? nodeStartedAt;
-	}
-
-	/** Status → dot tone (mirrors the panel's table mapping). */
-	function statusTone(status: string): string {
-		switch (status.toLowerCase()) {
-			case 'completed':
-			case 'complete':
-			case 'success':
-				return 'ok';
-			case 'error':
-			case 'failed':
-				return 'err';
-			case 'running':
-			case 'pending':
-				return 'run';
-			default:
-				return 'other';
-		}
 	}
 </script>
 
@@ -82,44 +57,16 @@
 			<Icon name="copy" size={14} />
 		{/if}
 	</button>
-	<div class="call-head">
-		<span class={`dot dot-${statusTone(call.status)}`}></span>
-		<span class="name mono">{call.name}</span>
-		<span class="ui-badge">{call.status}</span>
-		{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
-		{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
-		<span class="muted">{formatDuration(startOf(call.startedAt), call.endedAt)}</span>
-	</div>
-	{#if call.error}
-		<p class="error">{call.error}</p>
-	{/if}
-	{#if call.input !== null && call.input !== ''}
-		<IoBlock
-			label="input"
-			expanded={expanded[`${call.id}:input`]}
-			truncated={input.truncated}
-			originalLength={input.originalLength}
-			onToggle={() => onToggleExpanded(`${call.id}:input`)}
-		>
-			{expanded[`${call.id}:input`] ? call.input : input.text}
-		</IoBlock>
-	{/if}
-	{#if call.output !== null && call.output !== ''}
-		<IoBlock
-			label="output"
-			expanded={expanded[`${call.id}:output`]}
-			truncated={output.truncated}
-			originalLength={output.originalLength}
-			onToggle={() => onToggleExpanded(`${call.id}:output`)}
-		>
-			{expanded[`${call.id}:output`] ? call.output : output.text}
-		</IoBlock>
-	{/if}
+	<ToolCallDetail
+		call={{ ...call, startedAt: startOf(call.startedAt) }}
+		{expanded}
+		{onToggleExpanded}
+	/>
 </li>
 
 <style>
-	/* `.call` / `.call-head` are mirrored from the panel's Details CSS; the
-	   list wrapper (`ul.calls`) lives in `NodeDetailsList`. */
+	/* `.call` is mirrored from the panel's Details CSS; the list wrapper
+	   (`ul.calls`) lives in `NodeDetailsList`. */
 	.call {
 		position: relative;
 		border: 1px solid var(--border-weak-base);
@@ -134,60 +81,9 @@
 		background: var(--surface-raised-base-hover);
 	}
 
-	.call-head {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-small);
-		padding-right: var(--space-8);
-	}
-
 	.copy {
 		position: absolute;
 		top: var(--space-1);
 		right: var(--space-1);
-	}
-
-	.dot {
-		display: inline-block;
-		width: 0.55rem;
-		height: 0.55rem;
-		border-radius: var(--radius-full);
-		flex: 0 0 auto;
-		vertical-align: middle;
-	}
-
-	/* Muted fills mirroring the Details badge palette (the -strong tone)
-	   instead of the bright -base accents. */
-	.dot-ok {
-		background: var(--color-success-strong);
-	}
-	.dot-err {
-		background: var(--color-danger-strong);
-	}
-	.dot-run {
-		background: var(--color-warning-strong);
-	}
-	.dot-other {
-		background: var(--icon-base);
-	}
-
-	.name {
-		font-weight: var(--font-weight-medium);
-		color: var(--text-strong);
-	}
-
-	.mono {
-		font-family: var(--font-family-mono);
-		font-size: var(--font-size-sm);
-	}
-
-	.error {
-		color: var(--color-danger-strong);
-		font-size: var(--font-size-sm);
-		margin: var(--space-1) 0 0;
-		white-space: pre-wrap;
-		word-break: break-word;
 	}
 </style>

@@ -752,20 +752,21 @@ describe('client source wiring — keyboard, selection and raw-HTML hygiene', ()
 	test('the IO blocks render the full value when active and the raw-JSON toggle lives in RawJsonBlock', () => {
 		// The label + ScrollView + expand-toggle chrome moved into IoBlock; the
 		// value decision (`? full : truncated`) and the toggle wiring moved into
-		// ToolCallCard with the tool-call card (ADR 2.4), because `children`
-		// carries the already-decided text. The raw-JSON section + its collapsed
-		// toggle moved into RawJsonBlock (ADR 2.5).
+		// the shared ToolCallDetail with the tool-call card (#538), because
+		// `children` carries the already-decided text. The raw-JSON section + its
+		// collapsed toggle moved into RawJsonBlock (ADR 2.5).
 		const ioBlock = componentSource('../lib/components/composites/IoBlock.svelte');
+		const toolCallDetail = componentSource('../lib/components/composites/ToolCallDetail.svelte');
 		const rawJson = componentSource('../lib/components/features/node-detail/RawJsonBlock.svelte');
 		expect(ioBlock).toContain('<span class="io-label">{label}</span>');
 		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
 		expect(ioBlock).toContain('aria-expanded={expanded}');
 		expect(ioBlock).toContain('onclick={onToggle}');
 		expect(ioBlock).toContain("name={expanded ? 'collapse' : 'expand'}");
-		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:input`)}');
-		expect(toolCallCard).toContain('onToggle={() => onToggleExpanded(`${call.id}:output`)}');
-		expect(toolCallCard).toContain('? call.input : input.text');
-		expect(toolCallCard).toContain('? call.output : output.text');
+		expect(toolCallDetail).toContain('onToggle={() => onToggleExpanded(`${call.id}:input`)}');
+		expect(toolCallDetail).toContain('onToggle={() => onToggleExpanded(`${call.id}:output`)}');
+		expect(toolCallDetail).toContain('? call.input : input.text');
+		expect(toolCallDetail).toContain('? call.output : output.text');
 		expect(rawJson).toContain('onclick={() => (showRaw = !showRaw)}');
 		expect(rawJson).toContain('{#if showRaw}');
 	});
