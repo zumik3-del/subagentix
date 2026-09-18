@@ -22,6 +22,11 @@
 	 * blobs expand independently. The Session cell is plain monospace text
 	 * (no `/sessions/...` link).
 	 *
+	 * Every operation row is a single line: the table uses a fixed layout with
+	 * per-column widths and ellipsised cells, so a row never wraps and revealing
+	 * a detail row never shifts the columns. The full value stays reachable via
+	 * the cell `title` (and, for the error, the revealed detail card).
+	 *
 	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
 	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
 	 * a Tab trap, initial focus and focus return to the opener, and no markup
@@ -378,13 +383,13 @@
 							<caption class="sr-only">{subtitle}, newest first</caption>
 							<thead>
 								<tr>
-									<th scope="col">Time</th>
-									<th scope="col">Agent</th>
+									<th scope="col" class="tool-errors__col-time">Time</th>
+									<th scope="col" class="tool-errors__col-agent">Agent</th>
 									{#if isAll}
-										<th scope="col">Status</th>
+										<th scope="col" class="tool-errors__col-status">Status</th>
 									{/if}
-									<th scope="col">Error text</th>
-									<th scope="col">Session</th>
+									<th scope="col" class="tool-errors__col-error">Error text</th>
+									<th scope="col" class="tool-errors__col-session">Session</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -399,13 +404,15 @@
 										onkeydown={(event) => onRowKeydown(event, row.id)}
 									>
 										<td class="tool-errors__time">{formatDateTime(row.at, clock.tz)}</td>
-										<td>{row.agent}</td>
+										<td class="tool-errors__agent" title={row.agent}>{row.agent}</td>
 										{#if isAll}
 											<td class="tool-errors__status">
 												{row.status === '' ? '—' : row.status}
 											</td>
 										{/if}
-										<td class="tool-errors__error">{row.error === '' ? '—' : row.error}</td>
+										<td class="tool-errors__error" title={row.error === '' ? undefined : row.error}>
+											{row.error === '' ? '—' : row.error}
+										</td>
 										<td class="tool-errors__session" title={row.sessionId}>{row.sessionId}</td>
 									</tr>
 									{#if expandedDetailId === row.id}
@@ -545,7 +552,23 @@
 	.tool-errors__table {
 		width: 100%;
 		border-collapse: collapse;
+		table-layout: fixed;
 		font-size: var(--font-size-small);
+	}
+
+	/* Fixed column widths: the error text is the only flexible column, so a
+	   row or a revealed detail row can never resize the others. */
+	.tool-errors__col-time {
+		width: 9.5rem;
+	}
+	.tool-errors__col-agent {
+		width: 8rem;
+	}
+	.tool-errors__col-status {
+		width: 7rem;
+	}
+	.tool-errors__col-session {
+		width: 12rem;
 	}
 
 	.tool-errors__table th,
@@ -553,7 +576,7 @@
 		padding: var(--space-2);
 		border-bottom: 1px solid var(--border-weaker-base);
 		text-align: left;
-		vertical-align: top;
+		vertical-align: middle;
 	}
 
 	.tool-errors__table thead th {
@@ -564,10 +587,24 @@
 		font-weight: var(--font-weight-medium);
 	}
 
-	.tool-errors__time {
+	/* Operation cells render on one line: no wrap, ellipsis on overflow. */
+	.tool-errors__time,
+	.tool-errors__agent,
+	.tool-errors__status,
+	.tool-errors__error,
+	.tool-errors__session {
 		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.tool-errors__time {
 		font-variant-numeric: tabular-nums;
 		color: var(--text-weak);
+	}
+
+	.tool-errors__session {
+		font-family: var(--font-family-mono);
 	}
 
 	/* Each operation row toggles its detail row; the open row stays tinted. */
@@ -578,16 +615,6 @@
 	.tool-errors__row:hover,
 	.tool-errors__row.open {
 		background: var(--surface-raised-base-hover);
-	}
-
-	.tool-errors__error {
-		overflow-wrap: anywhere;
-		white-space: pre-wrap;
-	}
-
-	.tool-errors__session {
-		font-family: var(--font-family-mono);
-		overflow-wrap: anywhere;
 	}
 
 	/* The revealed call card: one full-width cell spanning every column. */

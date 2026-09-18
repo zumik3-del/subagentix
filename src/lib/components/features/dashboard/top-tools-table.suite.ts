@@ -291,14 +291,14 @@ describe('TopToolsTable SSR', () => {
 			'utf8'
 		);
 		// Errors-mode thead: Time, Agent, (no Tool), (no Status), Error text, Session.
-		expect(source).toContain('<th scope="col">Time</th>');
-		expect(source).toContain('<th scope="col">Agent</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-time">Time</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-agent">Agent</th>');
 		expect(source).not.toContain('<th scope="col">Tool</th>');
 		// Status is gated behind `#if isAll`, never unconditional.
 		expect(source).toContain('{#if isAll}');
-		expect(source).toContain('<th scope="col">Status</th>');
-		expect(source).toContain('<th scope="col">Error text</th>');
-		expect(source).toContain('<th scope="col">Session</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-status">Status</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-error">Error text</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-session">Session</th>');
 	});
 
 	test('all mode column set: Time, Agent, Status, Error text, Session (no Tool)', () => {
@@ -306,12 +306,12 @@ describe('TopToolsTable SSR', () => {
 			join(process.cwd(), 'src/lib/components/features/dashboard/ToolErrorsModal.svelte'),
 			'utf8'
 		);
-		expect(source).toContain('<th scope="col">Time</th>');
-		expect(source).toContain('<th scope="col">Agent</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-time">Time</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-agent">Agent</th>');
 		expect(source).not.toContain('<th scope="col">Tool</th>');
-		expect(source).toContain('<th scope="col">Status</th>');
-		expect(source).toContain('<th scope="col">Error text</th>');
-		expect(source).toContain('<th scope="col">Session</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-status">Status</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-error">Error text</th>');
+		expect(source).toContain('<th scope="col" class="tool-errors__col-session">Session</th>');
 	});
 
 	test('renders the total line with failed call count text in errors mode', () => {
