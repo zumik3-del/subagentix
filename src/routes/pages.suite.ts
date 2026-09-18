@@ -406,9 +406,9 @@ function buildLongTurnDb(path: string): void {
 
 /**
  * U1 shell fixture: 35 root sessions, each with one trigger/reply pair, so the
- * sidebar's first page (30) renders while `total > 30` shows `Load more`, and
- * any session in the seeded window can be the URL-active one. Newest-first is
- * `shell34`..`shell00`.
+ * sidebar's first page (30) renders while `total > 30` shows the
+ * infinite-scroll sentinel, and any session in the seeded window can be the
+ * URL-active one. Newest-first is `shell34`..`shell00`.
  */
 function buildShellDb(path: string): void {
 	const db = new Database(path);
@@ -1186,7 +1186,7 @@ const LEGACY_PALETTE = [
 ];
 
 describe('U1 shell — SSR sidebar (search, seeded list, lazy turns, active URL)', () => {
-	test('renders the search input, seeded list, expand affordance and Load more', async () => {
+	test('renders the search input, seeded list, expand affordance and infinite scroll', async () => {
 		const dir = tempDir('subagentix-u1-sidebar-');
 		const dbPath = join(dir, 'fixture.db');
 		buildShellDb(dbPath);
@@ -1222,8 +1222,10 @@ describe('U1 shell — SSR sidebar (search, seeded list, lazy turns, active URL)
 			// Per-session expand affordance (collapsed in SSR).
 			expect(page.body).toContain('aria-expanded="false"');
 
-			// Load more because total (35) > page size (30).
-			expect(page.body).toContain('Load more');
+			// Infinite-scroll sentinel (not a "Load more" button) because total
+			// (35) > page size (30): the sidebar pages on scroll (task #544).
+			expect(page.body).toContain('infinite-scroll__sentinel');
+			expect(page.body).not.toContain('Load more');
 
 			// The shell toggle and the brand link are rendered.
 			expect(page.body).toContain('aria-controls="session-sidebar"');

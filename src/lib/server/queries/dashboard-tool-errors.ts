@@ -1,28 +1,31 @@
 /**
  * Tier-P read for the top-tools call detail (task #481; all-calls mode #484).
  *
- * Reads tool parts (`part.data.type = 'tool'`) joined to `session` for the
- * agent, restricted to the session ids resolved by Tier-S ({@link listSessionIds}).
- * The base predicate depends on the requested `status`: the default `errors`
- * keeps the unified failure definition `part.data.state.status IN ('error',
- * 'failed')` (the same definition the top-tools aggregate uses), while `all`
- * drops the status constraint and returns every call. The id list is queried in
- * chunks under SQLite's variable limit and the per-chunk partials are merged in
- * JS, so a `period=all` read stays bounded (the caller caps the id set; see
- * `MAX_TOOL_SESSIONS`). `event` stays untouched.
+ * Reads tool parts (`part.data.type = 'tool'`) restricted to the session ids
+ * resolved by Tier-S ({@link listSessionIds}). The base predicate depends on the
+ * requested `status`: the default `errors` keeps the unified failure definition
+ * `part.data.state.status IN ('error', 'failed')` (the same definition the
+ * top-tools aggregate uses), while `all` drops the status constraint and returns
+ * every call. The id list is queried in chunks under SQLite's variable limit and
+ * the per-chunk partials are merged in JS, so a `period=all` read stays bounded
+ * (the caller caps the id set; see `MAX_TOOL_SESSIONS`). `event` stays untouched.
+ *
+ * The `session` join is deliberately absent: `agent` is a per-session value, so
+ * it is read once into a `session.id -> label` map ({@link agentBySession})
+ * instead of joining it into every `part` scan. That keeps the query shape
+ * simple and the session filter the driving predicate.
  *
  * Paging across chunks: each chunk is asked for its newest `offset + limit`
  * rows, the union is sorted newest-first and sliced globally. That is exact —
  * the global top `offset + limit` rows can only come from the per-chunk top
- * `offset + limit` — without a second full scan. Counts and the distinct-agent
- * list are separate chunked aggregates.
+ * `offset + limit` — without a second full scan.
  *
  * Since #538 a row also reads `part.data.state.input`/`output`, the
  * `state.time.end` bound and derives the MCP/delegation flags from the tool
  * name, so a row can feed the shared `ToolCallDetail` card.
  */
 import { getDb } from '../db';
-import { jsonEquals, jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import { jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
 import { isMcpTool } from '../../model/tool-kind';
 import {
 	DEFAULT_TOOL_CALL_STATUS,
@@ -42,8 +45,6 @@ import {
 /** `part.data.state.status` values that mark a failed tool call. */
 const ERROR_STATUSES = ['error', 'failed'] as const;
 
-/** Agent label: `session.agent`, or `unknown` for a NULL/blank value. */
-const AGENT_EXPR = `COALESCE(NULLIF(trim(session.agent), ''), '${UNKNOWN_LABEL}')`;
 /** Tool label: `part.data.tool`, or `unknown` for a NULL/blank value. */
 const TOOL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
 	'part.data',
@@ -65,7 +66,7 @@ const ENDED_EXPR = jsonExtract('part.data', JSON_PATH.part.stateEnd);
  * requested mode: tool parts only, plus the failed pair unless `all` was asked.
  */
 function baseWhere(status: ToolCallStatus): string {
-	const typePredicate = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
+	const typePredicate = `${jsonExtract('part.data', JSON_PATH.part.type)} = '${PART_TYPE.tool}'`;
 	if (status === 'all') return typePredicate;
 	return `${typePredicate} AND ${jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES)}`;
 }
@@ -76,10 +77,12 @@ function escapeLike(value: string): string {
 }
 
 /**
- * Bound `AND` predicates for the optional filters. Tool/agent compare the
- * displayed label expression, so filtering by `unknown` matches blank/absent
+ * Bound `AND` predicates for the SQL-resolvable filters. The tool filter
+ * compares the displayed label expression, so `unknown` matches blank/absent
  * values; the search is a case-insensitive substring over the error text with
- * caller-supplied `%`/`_`/`\` escaped first.
+ * caller-supplied `%`/`_`/`\` escaped first. The agent filter is deliberately
+ * NOT here: `agent` is a per-session value resolved from the session map, so it
+ * is applied in JS by the caller.
  */
 function buildFilters(filter: ToolErrorsFilter): {
 	clause: string;
@@ -92,17 +95,18 @@ function buildFilters(filter: ToolErrorsFilter): {
 		clauses.push(`${TOOL_EXPR} = :tool`);
 		params[':tool'] = tool;
 	}
-	const agent = filter.agent?.trim() ?? '';
-	if (agent !== '') {
-		clauses.push(`${AGENT_EXPR} = :agent`);
-		params[':agent'] = agent;
-	}
 	const search = filter.search?.trim() ?? '';
 	if (search !== '') {
 		clauses.push(`${ERROR_EXPR} LIKE :q ESCAPE '\\'`);
 		params[':q'] = `%${escapeLike(search)}%`;
 	}
 	return { clause: clauses.length > 0 ? ` AND ${clauses.join(' AND ')}` : '', params };
+}
+
+/** The requested agent label, or `null` when no agent filter is active. */
+function agentFilter(filter: ToolErrorsFilter): string | null {
+	const agent = filter.agent?.trim() ?? '';
+	return agent === '' ? null : agent;
 }
 
 /** Named placeholders for one chunk's session ids (`:sid_0, :sid_1, …`). */
@@ -122,19 +126,41 @@ function bindIds(
 	return bound;
 }
 
+/**
+ * `session.id -> agent label` for the requested id set, one query per chunk.
+ * A session with no row maps to `unknown`, matching the removed join's
+ * `COALESCE(NULLIF(trim(session.agent), ''), 'unknown')`.
+ */
+function agentBySession(sessionIds: readonly string[]): Map<string, string> {
+	const map = new Map<string, string>();
+	for (const id of sessionIds) map.set(id, UNKNOWN_LABEL);
+	const db = getDb();
+	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
+		const sql = `SELECT session.id AS id, session.agent AS agent
+			FROM session WHERE session.id IN (${idPlaceholders(ids.length)})`;
+		const rows = db.query(sql).all(bindIds({}, ids)) as Row[];
+		for (const row of rows) {
+			const agent = toText(row.agent).trim();
+			map.set(toText(row.id), agent === '' ? UNKNOWN_LABEL : agent);
+		}
+	}
+	return map;
+}
+
 /** `part.data.state.input`/`output`: `null` for a NULL/blank value. */
 function toNullableText(value: unknown): string | null {
 	const text = toText(value);
 	return text === '' ? null : text;
 }
 
-function mapRow(row: Row): ToolErrorEntry {
+function mapRow(row: Row, agents: ReadonlyMap<string, string>): ToolErrorEntry {
 	const tool = toText(row.tool);
+	const sessionId = toText(row.session_id);
 	return {
 		id: toText(row.id),
-		sessionId: toText(row.session_id),
+		sessionId,
 		at: toCount(row.at),
-		agent: toText(row.agent),
+		agent: agents.get(sessionId) ?? UNKNOWN_LABEL,
 		tool,
 		status: toText(row.status),
 		error: toText(row.error),
@@ -144,6 +170,26 @@ function mapRow(row: Row): ToolErrorEntry {
 		isMcp: isMcpTool(tool),
 		isDelegation: tool === 'task'
 	};
+}
+
+/** Apply the session-membership and agent filters, newest-first. */
+function finalizeRows(
+	rows: readonly Row[],
+	allowed: ReadonlySet<string>,
+	agents: ReadonlyMap<string, string>,
+	filter: ToolErrorsFilter
+): ToolErrorEntry[] {
+	const wantedAgent = agentFilter(filter);
+	const entries: ToolErrorEntry[] = [];
+	for (const row of rows) {
+		const sessionId = toText(row.session_id);
+		if (!allowed.has(sessionId)) continue;
+		const entry = mapRow(row, agents);
+		if (wantedAgent !== null && entry.agent !== wantedAgent) continue;
+		entries.push(entry);
+	}
+	entries.sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+	return entries;
 }
 
 /**
@@ -160,6 +206,9 @@ export function listToolErrors(
 	if (sessionIds.length === 0 || limit <= 0) return [];
 	const { clause, params } = buildFilters(filter);
 	const where = baseWhere(filter.status ?? DEFAULT_TOOL_CALL_STATUS);
+	const allowed = new Set(sessionIds);
+	// The agent map is built once for the whole id set, not per chunk.
+	const agents = agentBySession(sessionIds);
 	// Fetch the per-chunk newest `offset + limit`; their union contains the
 	// global page (a row in the global top N is in its own chunk's top N).
 	const cap = offset + limit;
@@ -169,7 +218,6 @@ export function listToolErrors(
 			SELECT part.id AS id,
 				part.session_id AS session_id,
 				part.time_created AS at,
-				${AGENT_EXPR} AS agent,
 				${TOOL_EXPR} AS tool,
 				${STATUS_EXPR} AS status,
 				${ERROR_EXPR} AS error,
@@ -177,27 +225,35 @@ export function listToolErrors(
 				${OUTPUT_EXPR} AS output,
 				${ENDED_EXPR} AS ended_at
 			FROM part
-			JOIN session ON session.id = part.session_id
 			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}
 			ORDER BY part.time_created DESC, part.id DESC
 			LIMIT :cap`;
 		const rows = getDb()
 			.query(sql)
 			.all(bindIds({ ...params, ':cap': cap }, ids)) as Row[];
-		for (const row of rows) collected.push(mapRow(row));
+		collected.push(...finalizeRows(rows, allowed, agents, filter));
 	}
-	collected.sort(
-		(a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0)
-	);
+	collected.sort((a, b) => b.at - a.at || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
 	return collected.slice(offset, offset + limit);
 }
 
-/** Total tool calls matching every filter across the id set (single aggregate per chunk). */
+/**
+ * Total tool calls matching every filter across the id set (single aggregate
+ * per chunk). The agent filter, being a per-session label, is applied by
+ * narrowing the session set first and then counting the SQL filters only —
+ * no row materialization.
+ */
 export function countToolErrors(
 	sessionIds: readonly string[],
 	filter: ToolErrorsFilter
 ): number {
 	if (sessionIds.length === 0) return 0;
+	const wantedAgent = agentFilter(filter);
+	if (wantedAgent !== null) {
+		const agents = agentBySession(sessionIds);
+		sessionIds = sessionIds.filter((id) => agents.get(id) === wantedAgent);
+		if (sessionIds.length === 0) return 0;
+	}
 	const { clause, params } = buildFilters(filter);
 	const where = baseWhere(filter.status ?? DEFAULT_TOOL_CALL_STATUS);
 	let total = 0;
@@ -205,7 +261,6 @@ export function countToolErrors(
 		const sql = `
 			SELECT count(*) AS count
 			FROM part
-			JOIN session ON session.id = part.session_id
 			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}`;
 		const row = getDb().query(sql).get(bindIds(params, ids)) as Row | null;
 		total += toCount(row?.count);
@@ -226,17 +281,19 @@ export function listToolErrorAgents(
 	if (sessionIds.length === 0) return [];
 	const where = baseWhere(status);
 	const agents = new Set<string>();
+	const allowed = new Set(sessionIds);
+	const matched = new Set<string>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
-			SELECT DISTINCT ${AGENT_EXPR} AS agent
+			SELECT part.session_id AS session_id
 			FROM part
-			JOIN session ON session.id = part.session_id
 			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}`;
 		const rows = getDb().query(sql).all(bindIds({}, ids)) as Row[];
 		for (const row of rows) {
-			const agent = toText(row.agent);
-			if (agent !== '') agents.add(agent);
+			const id = toText(row.session_id);
+			if (allowed.has(id)) matched.add(id);
 		}
 	}
+	for (const [, agent] of agentBySession([...matched])) agents.add(agent);
 	return [...agents].sort();
 }

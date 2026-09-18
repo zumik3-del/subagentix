@@ -125,6 +125,11 @@ const {
 } = (await import(spec('./dashboard-tool-errors.ts'))) as typeof import('../queries/dashboard-tool-errors');
 const { aggregateToolUsage } = (await import(spec('./dashboard.ts'))) as typeof import('../queries/dashboard');
 
+/** Brute-force count of entries for one agent label, for count assertions. */
+function expectedAgentCount(ids: string[], agent: string): number {
+	return listToolErrors(ids, {}, 0, 1000).filter((row) => row.agent === agent).length;
+}
+
 afterAll(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
@@ -345,6 +350,34 @@ describe('paging', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Scoped count respects the session set (#544)                        */
+/* ------------------------------------------------------------------ */
+
+describe('scoped count', () => {
+	// Regression: the errors branch counts the global indexed status set, so
+	// it must still intersect with the resolved session set — otherwise a
+	// directory-scoped count includes out-of-scope sessions.
+	test('countToolErrors(errors) only counts sessions in the id set', () => {
+		const all = listSessionIds({});
+		const scoped = listSessionIds({ directory: '/repo/a' });
+		expect(scoped.length).toBeGreaterThan(0);
+		expect(scoped.length).toBeLessThan(all.length);
+		const scopedTotal = countToolErrors(scoped, {});
+		const expected = listToolErrors(scoped, {}, 0, 100).length;
+		expect(scopedTotal).toBe(expected);
+		expect(scopedTotal).toBeLessThan(countToolErrors(all, {}));
+	});
+
+	test('countToolErrors narrows by agent without materialising rows', () => {
+		const ids = listSessionIds({});
+		// `plan` owns the error part; `build` owns the completed part.
+		expect(countToolErrors(ids, { agent: 'plan' })).toBe(expectedAgentCount(ids, 'plan'));
+		expect(countToolErrors(ids, { agent: 'build' })).toBe(expectedAgentCount(ids, 'build'));
+		expect(countToolErrors(ids, { agent: 'nobody' })).toBe(0);
+	});
+});
+
+/* ------------------------------------------------------------------ */
 /* Agents list                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -544,3 +577,26 @@ describe('ToolErrorEntry — new fields (#538)', () => {
 			expect(content).toContain('isBound(row.ended_at)');
 		});
 	});
+
+/* ------------------------------------------------------------------ */
+/* Index-friendly read (#544)                                          */
+/* ------------------------------------------------------------------ */
+describe('index-friendly read (#544)', () => {
+	test('the part reads never join session (agent comes from the session map)', async () => {
+		const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
+		// `agent` is a per-session value read once via `agentBySession`, so no
+		// `part` query joins `session`.
+		expect(content).toContain('agentBySession');
+		expect(content).not.toMatch(/JOIN session ON session\.id = part\.session_id/);
+	});
+
+	test('every part read is session-scoped, never a global JSON scan', async () => {
+		const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
+		// The module must not depend on functional indexes on the opencode DB
+		// (the app is read-only and never creates them), so the session filter
+		// is always present in the SQL — no global `WHERE <json term>` scans.
+		expect(content).toContain('part.session_id IN (${idPlaceholders(ids.length)})');
+		expect(content).not.toContain('TOOL_TYPE_EXPR');
+		expect(content).not.toContain('SESSION_CHUNK_SIZE');
+	});
+});

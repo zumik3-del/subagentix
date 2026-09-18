@@ -324,14 +324,34 @@ export function summarizeStepTools(calls: ToolCall[]): StepToolSummary {
 }
 
 /**
- * Human-readable, **untruncated** dump of one tool/MCP call for the copy button
+ * Structural input of {@link formatToolCallText}: the fields the text dump
+ * reads. A `ToolCall` satisfies it; so does a text/reasoning action mapped to
+ * the shared call view model, which additionally carries `content` (task #541).
+ */
+export interface ToolCallTextInput {
+	name: string;
+	isMcp: boolean;
+	isDelegation: boolean;
+	status: string;
+	startedAt: number | null;
+	endedAt: number | null;
+	error: string | null;
+	input: string | null;
+	output: string | null;
+	/** Optional rendered body (a text/reasoning action's `summary`). */
+	content?: string | null;
+}
+
+/**
+ * Human-readable, **untruncated** dump of one record for the copy button
  * (task #230). Pure and deterministic: fixed field order, timestamps in the
  * given `tz` (default UTC; {@link formatDateTime}) and the display duration
  * ({@link formatDuration}); the exact same text is produced in tests and at
  * click time. Missing input/output become an empty section; a missing
- * start/end is spelled out.
+ * start/end is spelled out. A non-empty `content` appends one trailing
+ * `content:` section (task #541).
  */
-export function formatToolCallText(call: ToolCall, tz = 'UTC'): string {
+export function formatToolCallText(call: ToolCallTextInput, tz = 'UTC'): string {
 	const lines: string[] = [call.name];
 	const markers: string[] = [];
 	if (call.isMcp) markers.push('MCP');
@@ -348,6 +368,10 @@ export function formatToolCallText(call: ToolCall, tz = 'UTC'): string {
 	lines.push(call.input ?? '');
 	lines.push('output:');
 	lines.push(call.output ?? '');
+	if (call.content !== null && call.content !== undefined && call.content !== '') {
+		lines.push('content:');
+		lines.push(call.content);
+	}
 	return lines.join('\n');
 }
 

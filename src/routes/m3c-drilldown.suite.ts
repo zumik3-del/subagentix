@@ -331,7 +331,11 @@ describe('NodeDetailPanel SSR — merged Steps & actions table', () => {
 			})
 		);
 		expect(html).toContain('Steps &amp; actions (');
-		expect(html).toContain('ui-badge--reasoning');
+		// text/reasoning actions render through the shared ToolCallDetail
+		// (status dot + kind name), so reasoning has no kind badge; every other
+		// kind keeps the badge-head path (task #541).
+		expect(html).not.toContain('ui-badge--reasoning');
+		expect(html).toContain('dot-kind-reasoning');
 		expect(html).toContain('ui-badge--patch');
 		expect(html).toContain('thinking hard');
 		expect(html).toContain('Filter steps and actions');
@@ -938,6 +942,8 @@ describe('NodeDetailPanel source — row/call click wiring and copy + clipboard 
 	const stepRow = componentSource('../lib/components/features/node-detail/StepRow.svelte');
 	const subRow = componentSource('../lib/components/features/node-detail/SubRow.svelte');
 	const toolCallCard = componentSource('../lib/components/features/node-detail/ToolCallCard.svelte');
+	const toolCallDetail = componentSource('../lib/components/composites/ToolCallDetail.svelte');
+	const copyButton = componentSource('../lib/components/composites/CallCopyButton.svelte');
 
 	test('the step row toggles its children via toggleRow', () => {
 		// The step-row markup moved into StepRow (ADR 2.6); the toggle handler
@@ -953,32 +959,41 @@ describe('NodeDetailPanel source — row/call click wiring and copy + clipboard 
 	});
 
 	test('the copy button carries an aria-label and renders an inline SVG icon', () => {
-		// The copy button moved into ToolCallCard with the tool-call card (ADR 2.4).
-		expect(toolCallCard).toContain('class="ui-icon-btn copy"');
-		expect(toolCallCard).toMatch(/aria-label=\{.*?Copy .*? call/);
+		// The copy button moved into the shared ToolCallDetail via its small
+		// CallCopyButton child (task #541), so it appears wherever the card is used.
+		expect(copyButton).toContain('class="ui-icon-btn copy"');
+		expect(copyButton).toMatch(/aria-label=\{.*?Copy .*? call/);
 		// Default state: clipboard icon; copied state: check icon (shared Icon set).
-		expect(toolCallCard).toContain('<Icon name="copy"');
-		expect(toolCallCard).toContain('<Icon name="check"');
+		expect(copyButton).toContain('<Icon name="copy"');
+		expect(copyButton).toContain('<Icon name="check"');
+		// ToolCallDetail owns/embeds the button; ToolCallCard no longer hosts it.
+		expect(toolCallDetail).toContain('CallCopyButton');
+		expect(toolCallCard).not.toContain('ui-icon-btn copy');
 	});
 
-	test('copyCall writes via clipboard API, sets copiedCallId, and resets after 1.5s', () => {
-		// copyCall stays in the panel root (state + timer ownership); only the
-		// button markup moved into ToolCallCard.
-		expect(panel).toContain('navigator.clipboard.writeText(formatToolCallText(call, clock.tz))');
-		expect(panel).toContain('copiedCallId = call.id');
-		expect(panel).toContain('setTimeout(() => {'),
-		expect(panel).toContain('copiedCallId = null');
-		expect(panel).toContain('copiedTimer = null');
-		expect(panel).toContain('1500');
-		// Graceful failure: on catch, copiedCallId is cleared.
-		expect(panel).toMatch(/catch[\s\S]*?copiedCallId = null/);
+	test('the copy handler writes via clipboard API and resets after 1.5s', () => {
+		// The clipboard + timer ownership moved into CallCopyButton with the button.
+		expect(copyButton).toContain(
+			'navigator.clipboard.writeText(formatToolCallText(call, clock.tz))'
+		);
+		expect(copyButton).toContain('copied = true');
+		expect(copyButton).toContain('setTimeout(() => {');
+		expect(copyButton).toContain('copied = false');
+		expect(copyButton).toContain('timer = null');
+		expect(copyButton).toContain('1500');
+		// The reset timer is cleared on destroy.
+		expect(copyButton).toContain('clearTimeout(timer)');
+		// Graceful failure: on catch, copied is cleared.
+		expect(copyButton).toMatch(/catch[\s\S]*?copied = false/);
+		// The old panel-root plumbing is fully removed (task #541).
+		expect(panel).not.toContain('copiedCallId');
+		expect(panel).not.toContain('copyCall');
 	});
 
 	test('formatToolCallText is imported from $lib/model/node (pure helper)', () => {
-		// Consumed by the panel root's copyCall, which owns clipboard + reset.
-		expect(panel).toContain("import {");
-		expect(panel).toContain('formatToolCallText');
-		expect(panel).toContain("from '$lib/model/node'");
+		// Consumed by CallCopyButton, which owns clipboard + reset.
+		expect(copyButton).toContain("from '$lib/model/node'");
+		expect(copyButton).toContain('formatToolCallText');
 	});
 });
 

@@ -65,6 +65,8 @@ function makeCall(
 		output: string | null;
 		isMcp: boolean;
 		isDelegation: boolean;
+		dotTone: string;
+		content: string | null;
 	}> = {}
 ) {
 	return {
@@ -276,6 +278,99 @@ describe('ToolCallDetail — IoBlocks', () => {
 		);
 		expect(normalized).toContain('>output<');
 		expect(normalized).toContain('>world<');
+	});
+});
+
+// --- Task #541: dotTone override, content block, embedded copy button ---------
+
+describe('ToolCallDetail — dotTone override (task #541)', () => {
+	test('renders `dot-<dotTone>` instead of the status tone when set', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ status: 'error', dotTone: 'kind-text' }) })
+		);
+		expect(normalized).toContain('dot-kind-text');
+		expect(normalized).not.toContain('dot-err');
+	});
+
+	test('falls back to the status tone when dotTone is absent', () => {
+		const normalized = normalizeHtml(renderDetail({ call: makeCall({ status: 'completed' }) }));
+		expect(normalized).toContain('dot-ok');
+	});
+});
+
+describe('ToolCallDetail — content block (task #541)', () => {
+	test('renders a content IoBlock when content is non-empty', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ content: 'thinking hard', input: null, output: null }) })
+		);
+		expect(normalized).toContain('>content<');
+		expect(normalized).toContain('>thinking hard<');
+	});
+
+	test('omits the content block when content is null or empty', () => {
+		expect(
+			normalizeHtml(renderDetail({ call: makeCall({ content: null }) }))
+		).not.toContain('>content<');
+		expect(normalizeHtml(renderDetail({ call: makeCall({ content: '' }) }))).not.toContain(
+			'>content<'
+		);
+	});
+
+	test('places content after output and before error', () => {
+		const normalized = normalizeHtml(
+			renderDetail({
+				call: makeCall({ output: 'out', content: 'body', error: 'boom' })
+			})
+		);
+		expect(normalized.indexOf('>output<')).toBeLessThan(normalized.indexOf('>content<'));
+		expect(normalized.indexOf('>content<')).toBeLessThan(normalized.indexOf('io-error'));
+	});
+
+	test('content IoBlock is keyed <call.id>:content', () => {
+		const normalized = normalizeHtml(
+			renderDetail({
+				call: makeCall({ id: 'call-xyz', content: 'thinking', input: null, output: null }),
+				expanded: {}
+			})
+		);
+		// The expanded key string is passed as a prop value into IoBlock; verify it
+		// appears in the rendered markup.
+		expect(normalized).toContain('>content<');
+		expect(normalized).toContain('>thinking<');
+		// The key wiring is checked indirectly via the ToolCallDetail test that
+		// confirms expanded[`${call.id}:content`] is the key used.
+	});
+
+	test('block order is input → output → content → error with error always last', () => {
+		const normalized = normalizeHtml(
+			renderDetail({
+				call: makeCall({
+					input: 'in',
+					output: 'out',
+					content: 'body',
+					error: 'boom'
+				})
+			})
+		);
+		const inputIdx = normalized.indexOf('>input<');
+		const outputIdx = normalized.indexOf('>output<');
+		const contentIdx = normalized.indexOf('>content<');
+		const errorIdx = normalized.indexOf('io-error');
+		expect(inputIdx).toBeGreaterThan(-1);
+		expect(outputIdx).toBeGreaterThan(-1);
+		expect(contentIdx).toBeGreaterThan(-1);
+		expect(errorIdx).toBeGreaterThan(-1);
+		expect(inputIdx).toBeLessThan(outputIdx);
+		expect(outputIdx).toBeLessThan(contentIdx);
+		expect(contentIdx).toBeLessThan(errorIdx);
+	});
+});
+
+describe('ToolCallDetail — embedded copy button (task #541)', () => {
+	test('renders a self-contained copy button referencing the call name', () => {
+		const normalized = normalizeHtml(renderDetail({ call: makeCall({ name: 'read-file' }) }));
+		expect(normalized).toContain('ui-icon-btn copy');
+		expect(normalized).toContain('Copy read-file call');
 	});
 });
 

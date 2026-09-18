@@ -15,13 +15,11 @@
 	 * No raw HTML injection: every dynamic value is escaped by Svelte.
 	 */
 	import { onDestroy, tick } from 'svelte';
-	import type { NodeDetail, ToolCall } from '$lib/model/types';
-	import { clock } from '$lib/model/clock.svelte';
+	import type { NodeDetail } from '$lib/model/types';
 	import {
 		buildDetailEntries,
 		buildNodeRows,
 		collectTrackerRefs,
-		formatToolCallText,
 		groupToolRetries
 	} from '$lib/model/node';
 	import type { NodeRow } from '$lib/model/node';
@@ -71,9 +69,6 @@
 
 	/** Expanded rows/blobs, keyed by step row key or `<callId>:<field>`. */
 	let expanded = $state<Record<string, boolean>>({});
-	/** Tool-call id whose copy just succeeded (drives the brief check-icon feedback). */
-	let copiedCallId = $state<string | null>(null);
-	let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 	/** Details block just jumped to; drives the temporary grey flash. */
 	let flashId = $state<string | null>(null);
@@ -230,22 +225,7 @@
 		await tick();
 		scrollToAction(id);
 	}
-	/** Copy a call's full text dump; show a brief "copied" state or fail silently. */
-	async function copyCall(call: ToolCall) {
-		try {
-			await navigator.clipboard.writeText(formatToolCallText(call, clock.tz));
-			copiedCallId = call.id;
-			if (copiedTimer) clearTimeout(copiedTimer);
-			copiedTimer = setTimeout(() => {
-				copiedCallId = null;
-				copiedTimer = null;
-			}, 1500);
-		} catch {
-			copiedCallId = null;
-		}
-	}
 	onDestroy(() => {
-		if (copiedTimer) clearTimeout(copiedTimer);
 		if (flashTimer) clearTimeout(flashTimer);
 	});
 </script>
@@ -281,10 +261,8 @@
 		<NodeDetailsList
 			{detailEntries}
 			{expanded}
-			{copiedCallId}
 			{flashId}
 			nodeStartedAt={detail.node.startedAt}
-			onCopy={copyCall}
 			onToggleExpanded={toggleExpanded}
 		/>
 

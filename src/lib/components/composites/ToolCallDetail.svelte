@@ -2,28 +2,26 @@
 	/**
 	 * One tool/MCP call detail card (extracted from `ToolCallCard`, task #538).
 	 *
-	 * The shared interior of a tool-call record: the head row (status dot, name,
-	 * badges, duration), then the `input` block, then the `output` block when the
-	 * call produced one, then the `error` block when it failed. All three are
-	 * `IoBlock`s, so a call reads the same everywhere. Used by the Gantt node
-	 * inspector's `ToolCallCard` and by the dashboard `ToolErrorsModal` rows.
+	 * The shared interior of a call record: head row (status dot, name, badges,
+	 * duration) then the `input`/`output`/`content` blocks (each an `IoBlock`)
+	 * and the `error` block last. Used by the Gantt node inspector's
+	 * `ToolCallCard`, the dashboard `ToolErrorsModal` rows and, since task
+	 * #541, `text`/`reasoning` action cards.
 	 *
-	 * Pure presentation — the host owns the wrapper (`<li>` / `<td>`), the copy
-	 * button, the jump DOM id and the `expanded` record, and passes the call's
-	 * view model plus an `onToggleExpanded(key)` callback down. The
-	 * input/output/error blocks key off `<id>:input` / `<id>:output` /
-	 * `<id>:error`, so a host that embeds several cards can still expand the
-	 * blobs independently. The `ToolCall` model and a dashboard
-	 * `ToolErrorEntry` both satisfy the view model structurally; a host resolves
-	 * a missing start time (e.g. `nodeStartedAt`) before passing it.
+	 * The host owns the `<li>`/`<td>` wrapper, the jump DOM id and the
+	 * `expanded` record. The root `.detail` is `position: relative`, so the
+	 * embedded `CallCopyButton` anchors at its top-right; the blocks key off
+	 * `<id>:<field>`. A `ToolCall`/`ToolErrorEntry` satisfies the view model
+	 * structurally; the host resolves a missing start (e.g. `nodeStartedAt`).
 	 */
 	import { formatDuration } from '$lib/model/format';
 	import { truncateText } from '$lib/model/node';
 	import IoBlock from './IoBlock.svelte';
+	import CallCopyButton from './CallCopyButton.svelte';
 
 	/** The structural tool-call view model this card renders. */
 	interface ToolCallView {
-		/** `part.id`; keys the two blob expand entries. */
+		/** `part.id`; keys the blob expand entries. */
 		id: string;
 		name: string;
 		/** Raw status text; an empty string renders no badge. */
@@ -37,6 +35,10 @@
 		output: string | null;
 		isMcp: boolean;
 		isDelegation: boolean;
+		/** Overrides the status-derived dot tone (`dot-<dotTone>`). */
+		dotTone?: string;
+		/** Optional body (a text/reasoning action's `summary`). */
+		content?: string | null;
 	}
 
 	interface Props {
@@ -50,14 +52,13 @@
 
 	let { call, expanded, onToggleExpanded }: Props = $props();
 
-	/** Character budget for a tool input/output snippet (mirrors the host). */
+	// Snippet character budget (mirrors the host).
 	const SNIPPET_LIMIT = 600;
 
 	const input = $derived(truncateText(call.input, SNIPPET_LIMIT));
 	const output = $derived(truncateText(call.output, SNIPPET_LIMIT));
 	const error = $derived(truncateText(call.error, SNIPPET_LIMIT));
-
-	/** Human duration; a host resolves the start fallback before passing it. */
+	const content = $derived(truncateText(call.content ?? null, SNIPPET_LIMIT));
 	const duration = $derived(
 		call.startedAt === null ? '—' : formatDuration(call.startedAt, call.endedAt)
 	);
@@ -81,52 +82,70 @@
 	}
 </script>
 
-<div class="call-head">
-	<span class={`dot dot-${statusTone(call.status)}`}></span>
-	<span class="name mono">{call.name}</span>
-	{#if call.status !== ''}
-		<span class="ui-badge">{call.status}</span>
+<div class="detail">
+	<CallCopyButton {call} />
+	<div class="call-head">
+		<span class={`dot dot-${call.dotTone ?? statusTone(call.status)}`}></span>
+		<span class="name mono">{call.name}</span>
+		{#if call.status !== ''}
+			<span class="ui-badge">{call.status}</span>
+		{/if}
+		{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
+		{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
+		<span class="muted">{duration}</span>
+	</div>
+	{#if call.input !== null && call.input !== ''}
+		<IoBlock
+			label="input"
+			expanded={expanded[`${call.id}:input`]}
+			truncated={input.truncated}
+			originalLength={input.originalLength}
+			onToggle={() => onToggleExpanded(`${call.id}:input`)}
+		>
+			{expanded[`${call.id}:input`] ? call.input : input.text}
+		</IoBlock>
 	{/if}
-	{#if call.isMcp}<span class="ui-badge ui-badge--mcp">MCP</span>{/if}
-	{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
-	<span class="muted">{duration}</span>
+	{#if call.output !== null && call.output !== ''}
+		<IoBlock
+			label="output"
+			expanded={expanded[`${call.id}:output`]}
+			truncated={output.truncated}
+			originalLength={output.originalLength}
+			onToggle={() => onToggleExpanded(`${call.id}:output`)}
+		>
+			{expanded[`${call.id}:output`] ? call.output : output.text}
+		</IoBlock>
+	{/if}
+	{#if call.content !== null && call.content !== undefined && call.content !== ''}
+		<IoBlock
+			label="content"
+			expanded={expanded[`${call.id}:content`]}
+			truncated={content.truncated}
+			originalLength={content.originalLength}
+			onToggle={() => onToggleExpanded(`${call.id}:content`)}
+		>
+			{expanded[`${call.id}:content`] ? call.content : content.text}
+		</IoBlock>
+	{/if}
+	{#if call.error !== null && call.error !== ''}
+		<IoBlock
+			label="error"
+			tone="error"
+			expanded={expanded[`${call.id}:error`]}
+			truncated={error.truncated}
+			originalLength={error.originalLength}
+			onToggle={() => onToggleExpanded(`${call.id}:error`)}
+		>
+			{expanded[`${call.id}:error`] ? call.error : error.text}
+		</IoBlock>
+	{/if}
 </div>
-{#if call.input !== null && call.input !== ''}
-	<IoBlock
-		label="input"
-		expanded={expanded[`${call.id}:input`]}
-		truncated={input.truncated}
-		originalLength={input.originalLength}
-		onToggle={() => onToggleExpanded(`${call.id}:input`)}
-	>
-		{expanded[`${call.id}:input`] ? call.input : input.text}
-	</IoBlock>
-{/if}
-{#if call.output !== null && call.output !== ''}
-	<IoBlock
-		label="output"
-		expanded={expanded[`${call.id}:output`]}
-		truncated={output.truncated}
-		originalLength={output.originalLength}
-		onToggle={() => onToggleExpanded(`${call.id}:output`)}
-	>
-		{expanded[`${call.id}:output`] ? call.output : output.text}
-	</IoBlock>
-{/if}
-{#if call.error !== null && call.error !== ''}
-	<IoBlock
-		label="error"
-		tone="error"
-		expanded={expanded[`${call.id}:error`]}
-		truncated={error.truncated}
-		originalLength={error.originalLength}
-		onToggle={() => onToggleExpanded(`${call.id}:error`)}
-	>
-		{expanded[`${call.id}:error`] ? call.error : error.text}
-	</IoBlock>
-{/if}
 
 <style>
+	.detail {
+		position: relative;
+	}
+
 	.call-head {
 		display: flex;
 		flex-wrap: wrap;
@@ -158,6 +177,14 @@
 	}
 	.dot-other {
 		background: var(--icon-base);
+	}
+
+	/* Action-kind dots, mirroring the Details badge palette (`SubRow.svelte`). */
+	.dot-kind-text {
+		background: var(--color-accent-strong);
+	}
+	.dot-kind-reasoning {
+		background: var(--color-info-strong);
 	}
 
 	.name {

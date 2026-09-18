@@ -7,6 +7,11 @@
  * the query layer, so the widget's errors column and this detail's unfiltered
  * failed total describe the same rows. No caching: the detail is on-demand and
  * behind a user action.
+ *
+ * The client pages this detail with infinite scroll (task #544); every page is
+ * a fresh request, and each read stays scoped to the resolved session set so it
+ * never becomes a global `part` scan (the app never relies on indexes it cannot
+ * create on the read-only opencode DB).
  */
 import {
 	MAX_TOOL_SESSIONS,

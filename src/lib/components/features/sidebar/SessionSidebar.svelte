@@ -20,6 +20,7 @@
 	import TreeIcon from '$lib/components/primitives/TreeIcon.svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import InfiniteScroll from '$lib/components/primitives/InfiniteScroll.svelte';
 
 	interface SidebarSession {
 		id: string;
@@ -347,18 +348,11 @@
 							{@render sessionNode(session)}
 						{/each}
 					</ul>
-					{#if searchHasMore}
-						<div class="more">
-							<button
-								type="button"
-								class="ui-btn ui-btn--block load-more"
-								onclick={() => void loadMoreSearch()}
-								disabled={searchLoading}
-							>
-								{searchLoading ? 'Loading…' : 'Load more'}
-							</button>
-						</div>
-					{/if}
+					<InfiniteScroll
+						hasMore={searchHasMore}
+						busy={searchLoading}
+						onReach={() => void loadMoreSearch()}
+					/>
 				{/if}
 			{:else if directories.length === 0}
 				<p class="note">No sessions available.</p>
@@ -400,14 +394,11 @@
 
 									{#if sessions.length > 0 && sessions.length < directory.sessionCount}
 										<li>
-											<button
-												type="button"
-												class="row row-more ui-focus-inset"
-												onclick={() => void loadDirectory(directory.directory, sessions.length)}
-												disabled={isLoading}
-											>
-												{isLoading ? 'Loading…' : 'Load more'}
-											</button>
+											<InfiniteScroll
+												hasMore={true}
+												busy={isLoading}
+												onReach={() => void loadDirectory(directory.directory, sessions.length)}
+											/>
 										</li>
 									{/if}
 								</ul>
@@ -590,11 +581,6 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.row-more {
-		justify-content: center;
-		color: var(--text-weak);
-	}
-
 	.note {
 		margin: var(--space-1) var(--space-3);
 		font-size: var(--font-size-small);
@@ -603,9 +589,5 @@
 
 	.note.error {
 		color: var(--color-danger-strong);
-	}
-
-	.more {
-		padding: var(--space-1) var(--space-3) var(--space-2);
 	}
 </style>
