@@ -29,11 +29,14 @@
 		originalLength: number;
 		/** Toggle the expanded state for this block (state stays in the panel). */
 		onToggle: () => void;
+		/** `error` tints the label and value; the frame stays neutral. */
+		tone?: 'neutral' | 'error';
 		/** The value to display: full when expanded, truncated otherwise. */
 		children: Snippet;
 	}
 
-	let { label, expanded, truncated, originalLength, onToggle, children }: Props = $props();
+	let { label, expanded, truncated, originalLength, onToggle, tone = 'neutral', children }: Props =
+		$props();
 
 	/** Expand/collapse verb + label word + original length (see header note). */
 	const toggleText = $derived(
@@ -41,7 +44,7 @@
 	);
 </script>
 
-<div class="io">
+<div class="io" class:io-error={tone === 'error'}>
 	<span class="io-label">{label}</span>
 	<div class="io-text">
 		<ScrollView>{@render children()}</ScrollView>
@@ -104,5 +107,11 @@
 		word-break: break-word;
 		max-height: 16rem;
 		overflow: hidden;
+	}
+
+	/* Error tone: same frame/background, red label + value text. */
+	.io-error .io-label,
+	.io-error .io-text {
+		color: var(--color-danger-strong);
 	}
 </style>

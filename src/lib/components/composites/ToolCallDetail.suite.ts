@@ -2,9 +2,9 @@
  * SSR render suite for the shared ToolCallDetail composite (task #538).
  *
  * Pins the rendered structure: name/status dot + badge + duration head row,
- * error text only when present, input/output IoBlock presence, and the
- * onToggleExpanded callback wired with the correct `<id>:<field>` key. No DOM
- * runtime, no DB. Uses Vite's SSR module runner.
+ * input then output then error (error last, shown even when output exists), and
+ * the onToggleExpanded callback wired with the correct `<id>:<field>` key. No
+ * DOM runtime, no DB. Uses Vite's SSR module runner.
  */
 import { beforeAll, afterAll, describe, expect, test } from 'bun:test';
 import { createServer, type ViteDevServer } from 'vite';
@@ -83,7 +83,9 @@ function makeCall(
 }
 
 function renderDetail(props: Record<string, unknown>): string {
-	return render(ToolCallDetail, { props }).body;
+	return render(ToolCallDetail, {
+		props: { expanded: {}, onToggleExpanded: () => {}, ...props }
+	}).body;
 }
 
 // --- Head row: name, status dot, badge, duration ------------------------------
@@ -147,26 +149,54 @@ describe('ToolCallDetail — head row', () => {
 	});
 });
 
-// --- Error text ---------------------------------------------------------------
+// --- Output and error blocks (error always last) ------------------------------
 
-describe('ToolCallDetail — error text', () => {
-	test('renders error paragraph when error is non-null', () => {
-		const normalized = normalizeHtml(renderDetail({ call: makeCall({ error: 'exit code 1' }) }));
-		expect(normalized).toContain('class="error"');
+describe('ToolCallDetail — error block', () => {
+	test('renders an error IoBlock when error is non-null and no output exists', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ error: 'exit code 1', output: null }), expanded: {} })
+		);
+		expect(normalized).toContain('io-error');
 		expect(normalized).toContain('>exit code 1<');
 	});
 
-	test('omits error paragraph when error is null', () => {
-		const normalized = normalizeHtml(renderDetail({ call: makeCall({ error: null }) }));
-		expect(normalized).not.toContain('class="error"');
-		expect(normalized).not.toContain('>exit code 1<');
+	test('omits the error block when error is null', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ error: null }), expanded: {} })
+		);
+		expect(normalized).not.toContain('io-error');
 	});
 
-	test('omits error paragraph when error is empty string', () => {
+	test('omits the error block when error is empty string', () => {
 		// The modal passes `null` for empty error; verify the component guards
 		// against the empty-string edge case too.
-		const normalized = normalizeHtml(renderDetail({ call: makeCall({ error: '' }) }));
-		expect(normalized).not.toContain('class="error"');
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ error: '' }), expanded: {} })
+		);
+		expect(normalized).not.toContain('io-error');
+	});
+
+	test('renders both output and error, with error after output', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ output: 'partial', error: 'boom' }), expanded: {} })
+		);
+		expect(normalized).toContain('>output<');
+		expect(normalized).toContain('io-error');
+		expect(normalized.indexOf('>output<')).toBeLessThan(normalized.indexOf('io-error'));
+	});
+
+	test('orders input before the output block', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ input: 'in', output: 'out', error: null }), expanded: {} })
+		);
+		expect(normalized.indexOf('>input<')).toBeLessThan(normalized.indexOf('>output<'));
+	});
+
+	test('orders input before the error block', () => {
+		const normalized = normalizeHtml(
+			renderDetail({ call: makeCall({ input: 'in', output: null, error: 'bad' }), expanded: {} })
+		);
+		expect(normalized.indexOf('>input<')).toBeLessThan(normalized.indexOf('io-error'));
 	});
 });
 

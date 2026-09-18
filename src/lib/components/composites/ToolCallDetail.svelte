@@ -3,17 +3,19 @@
 	 * One tool/MCP call detail card (extracted from `ToolCallCard`, task #538).
 	 *
 	 * The shared interior of a tool-call record: the head row (status dot, name,
-	 * badges, duration), the error text when present and the input/output
-	 * `IoBlock`s. Used by the Gantt node inspector's `ToolCallCard` and by the
-	 * dashboard `ToolErrorsModal` rows, so a call reads the same everywhere.
+	 * badges, duration), then the `input` block, then the `output` block when the
+	 * call produced one, then the `error` block when it failed. All three are
+	 * `IoBlock`s, so a call reads the same everywhere. Used by the Gantt node
+	 * inspector's `ToolCallCard` and by the dashboard `ToolErrorsModal` rows.
 	 *
 	 * Pure presentation — the host owns the wrapper (`<li>` / `<td>`), the copy
 	 * button, the jump DOM id and the `expanded` record, and passes the call's
-	 * view model plus an `onToggleExpanded(key)` callback down. The input/output
-	 * blocks key off `<id>:input` / `<id>:output`, so a host that embeds several
-	 * cards can still expand the blobs independently. The `ToolCall` model and a
-	 * dashboard `ToolErrorEntry` both satisfy the view model structurally; a host
-	 * resolves a missing start time (e.g. `nodeStartedAt`) before passing it.
+	 * view model plus an `onToggleExpanded(key)` callback down. The
+	 * input/output/error blocks key off `<id>:input` / `<id>:output` /
+	 * `<id>:error`, so a host that embeds several cards can still expand the
+	 * blobs independently. The `ToolCall` model and a dashboard
+	 * `ToolErrorEntry` both satisfy the view model structurally; a host resolves
+	 * a missing start time (e.g. `nodeStartedAt`) before passing it.
 	 */
 	import { formatDuration } from '$lib/model/format';
 	import { truncateText } from '$lib/model/node';
@@ -53,6 +55,7 @@
 
 	const input = $derived(truncateText(call.input, SNIPPET_LIMIT));
 	const output = $derived(truncateText(call.output, SNIPPET_LIMIT));
+	const error = $derived(truncateText(call.error, SNIPPET_LIMIT));
 
 	/** Human duration; a host resolves the start fallback before passing it. */
 	const duration = $derived(
@@ -88,9 +91,6 @@
 	{#if call.isDelegation}<span class="ui-badge ui-badge--deleg">delegation</span>{/if}
 	<span class="muted">{duration}</span>
 </div>
-{#if call.error}
-	<p class="error">{call.error}</p>
-{/if}
 {#if call.input !== null && call.input !== ''}
 	<IoBlock
 		label="input"
@@ -111,6 +111,18 @@
 		onToggle={() => onToggleExpanded(`${call.id}:output`)}
 	>
 		{expanded[`${call.id}:output`] ? call.output : output.text}
+	</IoBlock>
+{/if}
+{#if call.error !== null && call.error !== ''}
+	<IoBlock
+		label="error"
+		tone="error"
+		expanded={expanded[`${call.id}:error`]}
+		truncated={error.truncated}
+		originalLength={error.originalLength}
+		onToggle={() => onToggleExpanded(`${call.id}:error`)}
+	>
+		{expanded[`${call.id}:error`] ? call.error : error.text}
 	</IoBlock>
 {/if}
 
@@ -156,13 +168,5 @@
 	.mono {
 		font-family: var(--font-family-mono);
 		font-size: var(--font-size-sm);
-	}
-
-	.error {
-		color: var(--color-danger-strong);
-		font-size: var(--font-size-sm);
-		margin: var(--space-1) 0 0;
-		white-space: pre-wrap;
-		word-break: break-word;
 	}
 </style>

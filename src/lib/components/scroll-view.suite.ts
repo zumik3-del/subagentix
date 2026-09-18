@@ -252,7 +252,7 @@ describe('ScrollView adoption — every native scroll region is wrapped (task #2
 		// lives inside IoBlock. The panel root no longer hosts any IoBlock.
 		expect(panel.split('<IoBlock').length - 1).toBe(0);
 		expect(toolCallCard.split('<IoBlock').length - 1).toBe(0);
-		expect(toolCallDetail.split('<IoBlock').length - 1).toBe(2);
+		expect(toolCallDetail.split('<IoBlock').length - 1).toBe(3);
 		expect(actionCard.split('<IoBlock').length - 1).toBe(1);
 		expect(ioBlock).toContain('<ScrollView>{@render children()}</ScrollView>');
 		// The raw-JSON ScrollView moved into RawJsonBlock with its section (ADR 2.5).
