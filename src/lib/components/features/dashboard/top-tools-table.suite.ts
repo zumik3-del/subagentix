@@ -320,10 +320,10 @@ describe('TopToolsTable SSR', () => {
 		expect(html).toContain('failed');
 	});
 
-	test('renders the Load more button area structure (client-side only; SSR shows loading placeholder)', () => {
+	test('renders the loading state (paging is infinite scroll; SSR has no rows yet)', () => {
 		const html = render(ToolErrorsModal, { props: baseProps }).body;
-		// At SSR time the modal is in 'loading' state, so the load-more section
-		// is not yet rendered. We verify the loading state is present.
+		// At SSR time the modal is in 'loading' state, so the infinite-scroll
+		// sentinel is not yet rendered. We verify the loading state is present.
 		expect(html).toContain('tool-errors__state');
 		expect(html).toContain('Loading');
 	});

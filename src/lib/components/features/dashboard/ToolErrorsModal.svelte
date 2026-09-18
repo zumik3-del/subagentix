@@ -27,6 +27,12 @@
 	 * a detail row never shifts the columns. The full value stays reachable via
 	 * the cell `title` (and, for the error, the revealed detail card).
 	 *
+	 * Paging is infinite scroll (task #544): the `InfiniteScroll` sentinel below
+	 * the table loads the next page as the reader nears the bottom, replacing
+	 * the older explicit "Load more" button so the whole UI pages the same way.
+	 * A load failure shows inline with a status row and does not drop the rows
+	 * already on screen.
+	 *
 	 * Follows the modal conventions of `TaskModal` / `WidgetSettings`
 	 * (docs/ui-standards.md §9): backdrop button, dialog semantics, Escape close,
 	 * a Tab trap, initial focus and focus return to the opener, and no markup
@@ -41,6 +47,7 @@
 	import { clock } from '$lib/model/clock.svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import InfiniteScroll from '$lib/components/primitives/InfiniteScroll.svelte';
 	import ToolCallDetail from '$lib/components/composites/ToolCallDetail.svelte';
 	import { ALL_SCOPE_OPTION, PERIOD_OPTIONS, SCOPE_ALL, type FilterOption } from './filter';
 	import { appendToolErrorRows, buildToolErrorsUrl, type ToolErrorViewFilters } from './tool-errors';
@@ -443,23 +450,13 @@
 							</tbody>
 						</table>
 
-						{#if hasMore}
-							<div class="tool-errors__more">
-								<button
-									type="button"
-									class="ui-btn"
-									onclick={loadMore}
-									disabled={loadingMore}
-								>
-									{loadingMore ? 'Loading…' : 'Load more'}
-								</button>
-								{#if loadMoreError}
-									<p class="tool-errors__state tool-errors__state--error" role="alert">
-										{loadMoreError}
-									</p>
-								{/if}
-							</div>
-						{/if}
+						<InfiniteScroll
+							hasMore={hasMore}
+							busy={loadingMore}
+							error={loadMoreError}
+							loadingLabel="Loading more calls…"
+							onReach={() => void loadMore()}
+						/>
 					{/if}
 				</div>
 			</ScrollView>
@@ -626,13 +623,5 @@
 
 	.tool-errors__detail-cell {
 		padding: var(--space-2) var(--space-2) var(--space-3);
-	}
-
-	.tool-errors__more {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-4) 0 var(--space-2);
 	}
 </style>
