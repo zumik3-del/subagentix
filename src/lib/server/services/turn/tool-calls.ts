@@ -4,7 +4,7 @@
 import { isMcpTool } from '$lib/model/tool-kind';
 import type { ToolCall } from '../../../model/types';
 import type { PartRecord } from '../../schema';
-import { clampEnd, type SessionData } from './shared';
+import { clampEnd, partsIn, type SessionData } from './shared';
 import { extractTrackerRefs } from './tracker-refs';
 
 function mapToolCall(part: PartRecord, nodeId: string, now: number): ToolCall {
@@ -45,8 +45,7 @@ export function buildToolCalls(
 	now: number
 ): ToolCall[] {
 	const calls: ToolCall[] = [];
-	for (const part of sd.toolParts) {
-		if (restrict && !restrict.has(part.messageId)) continue;
+	for (const part of partsIn(sd.toolParts, restrict)) {
 		calls.push(mapToolCall(part, sd.session.id, now));
 	}
 	return calls;

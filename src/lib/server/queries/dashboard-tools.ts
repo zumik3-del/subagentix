@@ -5,9 +5,9 @@
  * in `dashboard-sessions.ts`), in chunks under SQLite's variable limit, merging
  * the per-chunk partials in JS. `event` stays untouched.
  */
-import { BASIC_TOOL_NAMES } from '../../model/tool-kind';
+import { BASIC_TOOL_NAMES, FAILED_TOOL_STATUSES } from '../../model/tool-kind';
 import { getDb } from '../db';
-import { jsonEquals, jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import { jsonEquals, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
 import {
 	chunk,
 	DEFAULT_TOP_N,
@@ -15,7 +15,7 @@ import {
 	sanitizeLimit,
 	toCount,
 	toText,
-	UNKNOWN_LABEL
+	TOOL_LABEL_EXPR
 } from './dashboard-shared';
 
 /** One grouped tool-count record from the `part` read. */
@@ -27,13 +27,6 @@ export interface ToolUsageRecord {
 	/** Of `count`, parts whose `state.status` is `error` or `failed`. */
 	errors: number;
 }
-
-/**
- * `part.data.state.status` values marking a failed tool call. Deliberately the
- * same pair `model/node.ts:summarizeStepTools` uses, so the widget's errors
- * column and the error-detail total (task #481) count the same rows.
- */
-const ERROR_STATUSES = ['error', 'failed'] as const;
 
 /**
  * Which tool kinds a Tier-P aggregate includes: `basic` = the built-in
@@ -93,17 +86,13 @@ export function aggregateToolUsage(
 	if (sessionIds.length === 0) return [];
 	if (kinds?.basic === false && kinds.mcp === false) return [];
 	const typeFilter = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
-	const errorFilter = jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES);
-	const toolExpr = `COALESCE(NULLIF(trim(${jsonExtract(
-		'part.data',
-		JSON_PATH.part.tool
-	)}), ''), '${UNKNOWN_LABEL}')`;
-	const kindFilter = toolKindClause(kinds, toolExpr);
+	const errorFilter = jsonIn('part.data', JSON_PATH.part.status, FAILED_TOOL_STATUSES);
+	const kindFilter = toolKindClause(kinds, TOOL_LABEL_EXPR);
 
 	const totals = new Map<string, ToolUsageRecord>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
-			SELECT ${toolExpr} AS name,
+			SELECT ${TOOL_LABEL_EXPR} AS name,
 				count(*) AS count,
 				COALESCE(sum(CASE WHEN ${errorFilter} THEN 1 ELSE 0 END), 0) AS errors
 			FROM part

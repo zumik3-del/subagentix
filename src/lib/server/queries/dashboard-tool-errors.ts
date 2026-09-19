@@ -26,7 +26,7 @@
  */
 import { getDb } from '../db';
 import { jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
-import { isMcpTool } from '../../model/tool-kind';
+import { isMcpTool, FAILED_TOOL_STATUSES } from '../../model/tool-kind';
 import {
 	DEFAULT_TOOL_CALL_STATUS,
 	type ToolCallStatus,
@@ -39,17 +39,10 @@ import {
 	isBound,
 	toCount,
 	toText,
+	TOOL_LABEL_EXPR,
 	UNKNOWN_LABEL
 } from './dashboard-shared';
 
-/** `part.data.state.status` values that mark a failed tool call. */
-const ERROR_STATUSES = ['error', 'failed'] as const;
-
-/** Tool label: `part.data.tool`, or `unknown` for a NULL/blank value. */
-const TOOL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
-	'part.data',
-	JSON_PATH.part.tool
-)}), ''), '${UNKNOWN_LABEL}')`;
 /** Error text: `part.data.state.error`, or an empty string when absent. */
 const ERROR_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.error)}, '')`;
 /** Raw status: `part.data.state.status`, or an empty string when absent. */
@@ -64,11 +57,13 @@ const ENDED_EXPR = jsonExtract('part.data', JSON_PATH.part.stateEnd);
 /**
  * The constant `part` predicate every read in this module shares, for the
  * requested mode: tool parts only, plus the failed pair unless `all` was asked.
+ * The failed pair comes from {@link FAILED_TOOL_STATUSES}, the single shared
+ * definition of a failed tool call.
  */
 function baseWhere(status: ToolCallStatus): string {
 	const typePredicate = `${jsonExtract('part.data', JSON_PATH.part.type)} = '${PART_TYPE.tool}'`;
 	if (status === 'all') return typePredicate;
-	return `${typePredicate} AND ${jsonIn('part.data', JSON_PATH.part.status, ERROR_STATUSES)}`;
+	return `${typePredicate} AND ${jsonIn('part.data', JSON_PATH.part.status, FAILED_TOOL_STATUSES)}`;
 }
 
 /** Escape LIKE wildcards so a raw search term matches literally (`ESCAPE '\'`). */
@@ -92,7 +87,7 @@ function buildFilters(filter: ToolErrorsFilter): {
 	const params: Record<string, string> = {};
 	const tool = filter.tool?.trim() ?? '';
 	if (tool !== '') {
-		clauses.push(`${TOOL_EXPR} = :tool`);
+		clauses.push(`${TOOL_LABEL_EXPR} = :tool`);
 		params[':tool'] = tool;
 	}
 	const search = filter.search?.trim() ?? '';
@@ -218,7 +213,7 @@ export function listToolErrors(
 			SELECT part.id AS id,
 				part.session_id AS session_id,
 				part.time_created AS at,
-				${TOOL_EXPR} AS tool,
+				${TOOL_LABEL_EXPR} AS tool,
 				${STATUS_EXPR} AS status,
 				${ERROR_EXPR} AS error,
 				${INPUT_EXPR} AS input,

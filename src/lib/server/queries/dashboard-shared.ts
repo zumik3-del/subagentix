@@ -7,6 +7,7 @@
  * the row coercions/chunker — so none of them is duplicated per tier. The
  * public entry point stays `dashboard.ts`, which re-exports the tier modules.
  */
+import { jsonExtract, JSON_PATH } from '../schema';
 
 /** The window/scope a Tier-S aggregate is computed over. */
 export interface DashboardWindow {
@@ -25,6 +26,15 @@ const MAX_TOP_N = 100;
 
 /** Label used for a NULL/blank group key, matching `SessionSummary.agent`. */
 export const UNKNOWN_LABEL = 'unknown';
+
+/**
+ * `part.data.tool` as a display label, shared by the Tier-P aggregate and the
+ * tool-error detail: the raw tool name, or `unknown` for a NULL/blank value.
+ */
+export const TOOL_LABEL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
+	'part.data',
+	JSON_PATH.part.tool
+)}), ''), '${UNKNOWN_LABEL}')`;
 
 /**
  * Maximum number of ids bound into one `IN (?, …)` clause. SQLite's default

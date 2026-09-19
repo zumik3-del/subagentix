@@ -60,73 +60,80 @@ function savedWidgetSettings(
 	return resolved;
 }
 
+/** The dashboard persistence fields managed via `PUT /api/settings`. */
+type SettingsField = 'dashboardWidgets' | 'dashboardWidgetSettings' | 'dashboardFilter';
+
+/**
+ * Shared `PUT /api/settings` path for the dashboard's persisted UI state:
+ * send one `field`, then normalise the server's echo of that field through
+ * `normalize` (falling back to the sent value on an absent/malformed echo).
+ * Throws an `Error` carrying the server's `error` message (or the HTTP
+ * status) on a non-OK response; callers that must not break the UI swallow it.
+ */
+async function putSettings<T>(
+	field: SettingsField,
+	send: unknown,
+	label: string,
+	normalize: (raw: unknown) => T,
+	fetchImpl: typeof fetch = fetch
+): Promise<T> {
+	const response = await fetchImpl('/api/settings', {
+		method: 'PUT',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ [field]: send })
+	});
+	if (!response.ok) {
+		const data = (await response.json().catch(() => ({}))) as { error?: string };
+		throw new Error(data.error ?? `Could not save ${label} (${response.status}).`);
+	}
+	const data = (await response.json()) as Record<string, unknown>;
+	return normalize(data);
+}
+
 /**
  * Persist the full placement list under `dashboardWidgets` and return the
- * server-normalised placements. Throws an `Error` carrying the server's
- * `error` message (or the HTTP status) on a non-OK response.
+ * server-normalised placements.
  */
 export async function saveDashboardWidgets(
 	placements: readonly WidgetPlacement[],
 	fetchImpl: typeof fetch = fetch
 ): Promise<WidgetPlacement[]> {
-	const response = await fetchImpl('/api/settings', {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ dashboardWidgets: placements })
-	});
-	if (!response.ok) {
-		const data = (await response.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Could not save widgets (${response.status}).`);
-	}
-	const data = (await response.json()) as { dashboardWidgets?: unknown };
-	return savedPlacements(data, placements);
+	return putSettings(
+		'dashboardWidgets',
+		placements,
+		'widgets',
+		(raw) => savedPlacements(raw, placements),
+		fetchImpl
+	);
 }
 
 /**
  * Persist the full per-widget settings map under `dashboardWidgetSettings` and
- * return the server-normalised map (an entry per registered id). Throws an
- * `Error` carrying the server's `error` message (or the HTTP status) on a
- * non-OK response.
+ * return the server-normalised map (an entry per registered id).
  */
 export async function saveDashboardWidgetSettings(
 	all: Record<WidgetId, WidgetSettingValues>,
 	fetchImpl: typeof fetch = fetch
 ): Promise<Record<WidgetId, WidgetSettingValues>> {
-	const response = await fetchImpl('/api/settings', {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ dashboardWidgetSettings: all })
-	});
-	if (!response.ok) {
-		const data = (await response.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Could not save widget settings (${response.status}).`);
-	}
-	const data = (await response.json()) as { dashboardWidgetSettings?: unknown };
-	return savedWidgetSettings(data, all);
+	return putSettings(
+		'dashboardWidgetSettings',
+		all,
+		'widget settings',
+		(raw) => savedWidgetSettings(raw, all),
+		fetchImpl
+	);
 }
 
 /**
  * Persist the global period/scope filter under `dashboardFilter` and return the
- * server-normalised pair. Throws an `Error` carrying the server's `error`
- * message (or the HTTP status) on a non-OK response; the landing page swallows
- * it so a failed preference write never breaks the navigation or the rendered
- * filter.
+ * server-normalised pair. The landing page swallows a rejection so a failed
+ * preference write never breaks the navigation or the rendered filter.
  */
 export async function saveDashboardFilter(
 	filter: DashboardFilter,
 	fetchImpl: typeof fetch = fetch
 ): Promise<DashboardFilter> {
-	const response = await fetchImpl('/api/settings', {
-		method: 'PUT',
-		headers: { 'content-type': 'application/json' },
-		body: JSON.stringify({ dashboardFilter: filter })
-	});
-	if (!response.ok) {
-		const data = (await response.json().catch(() => ({}))) as { error?: string };
-		throw new Error(data.error ?? `Could not save filter (${response.status}).`);
-	}
-	const data = (await response.json()) as { dashboardFilter?: unknown };
-	return savedFilter(data, filter);
+	return putSettings('dashboardFilter', filter, 'filter', (raw) => savedFilter(raw, filter), fetchImpl);
 }
 
 /** A latest-wins save queue: rapid changes collapse into one trailing save. */

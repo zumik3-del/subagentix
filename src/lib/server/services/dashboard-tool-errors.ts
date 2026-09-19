@@ -26,13 +26,12 @@ import {
 	type ToolErrorsPage,
 	type ToolErrorsQuery
 } from '../../model/tool-errors';
-import { listSessionIds } from '../queries/dashboard';
 import {
 	countToolErrors,
 	listToolErrorAgents,
 	listToolErrors
 } from '../queries/dashboard-tool-errors';
-import { toWindow } from './dashboard';
+import { cappedSessionIds, toWindow } from './dashboard';
 
 /** Trim a filter value; blank/absent becomes "no filter" (`null`). */
 function blankToNull(value: string | null | undefined): string | null {
@@ -54,10 +53,7 @@ export function getToolErrors(
 	maxSessions = MAX_TOOL_SESSIONS
 ): ToolErrorsPage {
 	const window = toWindow(filter, now);
-	// Ask for one more than the ceiling to tell an exact fit from a truncation.
-	const ids = listSessionIds(window, maxSessions + 1);
-	const capped = ids.length > maxSessions;
-	const bounded = capped ? ids.slice(0, maxSessions) : ids;
+	const { ids: bounded, capped } = cappedSessionIds(window, maxSessions);
 
 	const status = query.status ?? DEFAULT_TOOL_CALL_STATUS;
 	const normalized: ToolErrorsFilter = {

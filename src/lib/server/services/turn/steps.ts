@@ -5,7 +5,7 @@
 import { addUsage, emptyUsage, usageFromCounts } from '../../../model/token';
 import type { Step, ToolCall } from '../../../model/types';
 import { PART_TYPE, type PartRecord } from '../../schema';
-import { clampEnd, hasCompactionBetween, subtractUsage, type SessionData } from './shared';
+import { clampEnd, hasCompactionBetween, partsIn, subtractUsage, type SessionData } from './shared';
 
 /** Pair `step-start`/`step-finish` parts into steps (spec §3.1). */
 export function buildSteps(
@@ -16,8 +16,7 @@ export function buildSteps(
 ): Step[] {
 	const messagesById = new Map(sd.messages.map((message) => [message.id, message]));
 	const grouped = new Map<string, PartRecord[]>();
-	for (const part of sd.stepParts) {
-		if (restrict && !restrict.has(part.messageId)) continue;
+	for (const part of partsIn(sd.stepParts, restrict)) {
 		const list = grouped.get(part.messageId);
 		if (list) list.push(part);
 		else grouped.set(part.messageId, [part]);

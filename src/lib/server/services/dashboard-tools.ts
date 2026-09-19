@@ -17,13 +17,8 @@ import {
 	type ToolUsageEntry
 } from '../../model/dashboard';
 import type { WidgetSettingValues } from '../../widgets/registry';
-import {
-	aggregateToolUsage,
-	DEFAULT_TOP_N,
-	listSessionIds,
-	type ToolKindSelection
-} from '../queries/dashboard';
-import { toWindow } from './dashboard';
+import { DEFAULT_TOP_N, aggregateToolUsage, type ToolKindSelection } from '../queries/dashboard';
+import { cappedSessionIds, toWindow } from './dashboard';
 
 /**
  * Map the `top-tools` setting map to the query's kind selection: the `basic`
@@ -58,14 +53,8 @@ export function getTopTools(
 	// Both kinds off: no `part` scan (or Tier-S session resolve) at all.
 	if (!kinds.basic && !kinds.mcp) return { tools: [], capped: false };
 	const window = toWindow(filter, now);
-	// Ask for one more than the ceiling to tell an exact fit from a truncation.
-	const ids = listSessionIds(window, maxSessions + 1);
-	const capped = ids.length > maxSessions;
-	const tools: ToolUsageEntry[] = aggregateToolUsage(
-		capped ? ids.slice(0, maxSessions) : ids,
-		limit,
-		kinds
-	).map((row) => ({
+	const { ids, capped } = cappedSessionIds(window, maxSessions);
+	const tools: ToolUsageEntry[] = aggregateToolUsage(ids, limit, kinds).map((row) => ({
 		name: row.name,
 		count: row.count,
 		errors: row.errors,

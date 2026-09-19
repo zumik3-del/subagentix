@@ -3,8 +3,8 @@
  * compaction) to timeline {@link Action} DTOs.
  */
 import type { Action, ActionKind } from '../../../model/types';
-import type { PartRecord } from '../../schema';
-import type { SessionData } from './shared';
+import { PART_TYPE, type PartRecord } from '../../schema';
+import { partsIn, type SessionData } from './shared';
 
 /** Parse a `patch.files` JSON array into a comma-joined summary (tolerant). */
 function patchFilesSummary(files: string | null): string {
@@ -90,8 +90,7 @@ function mapAction(
 export function buildActions(sd: SessionData, restrict: Set<string> | null): Action[] {
 	const actions: Action[] = [];
 	const roleByMessage = new Map(sd.messages.map((message) => [message.id, message.role]));
-	for (const part of sd.actionParts) {
-		if (restrict && !restrict.has(part.messageId)) continue;
+	for (const part of partsIn(sd.actionParts, restrict)) {
 		const kind = part.type as ActionKind;
 		if (kind === 'text' || kind === 'reasoning' || kind === 'patch' || kind === 'file' || kind === 'agent') {
 			actions.push(mapAction(part, kind, sd.session.id, roleByMessage.get(part.messageId) ?? null));

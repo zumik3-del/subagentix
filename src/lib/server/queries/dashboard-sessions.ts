@@ -112,19 +112,32 @@ export function countSessionsByUtcDay(window: DashboardWindow): DayCountRecord[]
 		.filter((row) => row.day !== '');
 }
 
-/** Sessions grouped by `session.agent`, count desc then name asc, top-N capped. */
-export function countSessionsByAgent(
+/**
+ * One named-count group query: sessions grouped by `nameExpr`, count desc then
+ * name asc, top-N capped. The three distributions differ only in the grouping
+ * expression (agent / model / provider), so the SQL lives here once.
+ */
+function countSessionsBy(
 	window: DashboardWindow,
+	nameExpr: string,
 	limit = DEFAULT_TOP_N
 ): NamedCountRecord[] {
 	const filter = buildWhere(window);
 	const sql = `
-		SELECT ${AGENT_EXPR} AS name, count(*) AS count
+		SELECT ${nameExpr} AS name, count(*) AS count
 		FROM session${filter.clause}
 		GROUP BY name
 		ORDER BY count DESC, name ASC
 		LIMIT :limit`;
 	return toNamedCounts(sql, filter.params, limit);
+}
+
+/** Sessions grouped by `session.agent`, count desc then name asc, top-N capped. */
+export function countSessionsByAgent(
+	window: DashboardWindow,
+	limit = DEFAULT_TOP_N
+): NamedCountRecord[] {
+	return countSessionsBy(window, AGENT_EXPR, limit);
 }
 
 /** Sessions grouped by `session.model.id`, count desc then name asc, top-N capped. */
@@ -132,14 +145,7 @@ export function countSessionsByModel(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
 ): NamedCountRecord[] {
-	const filter = buildWhere(window);
-	const sql = `
-		SELECT ${MODEL_EXPR} AS name, count(*) AS count
-		FROM session${filter.clause}
-		GROUP BY name
-		ORDER BY count DESC, name ASC
-		LIMIT :limit`;
-	return toNamedCounts(sql, filter.params, limit);
+	return countSessionsBy(window, MODEL_EXPR, limit);
 }
 
 /** Sessions grouped by `session.model.providerID`, count desc then name asc, top-N capped. */
@@ -147,14 +153,7 @@ export function countSessionsByProvider(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
 ): NamedCountRecord[] {
-	const filter = buildWhere(window);
-	const sql = `
-		SELECT ${PROVIDER_EXPR} AS name, count(*) AS count
-		FROM session${filter.clause}
-		GROUP BY name
-		ORDER BY count DESC, name ASC
-		LIMIT :limit`;
-	return toNamedCounts(sql, filter.params, limit);
+	return countSessionsBy(window, PROVIDER_EXPR, limit);
 }
 
 /**
