@@ -6,7 +6,7 @@ import type { Marker, Node, NodeFlag, NodeStatus, TimeFlag } from '../../../mode
 import { buildActions } from './actions';
 import { buildSteps, linkTools } from './steps';
 import { buildToolCalls } from './tool-calls';
-import { clampEnd, sumUsage, type BuiltNode, type SessionData } from './shared';
+import { clampEnd, partsIn, sumUsage, type BuiltNode, type SessionData } from './shared';
 
 export function buildSessionNode(
 	sd: SessionData,
@@ -18,8 +18,8 @@ export function buildSessionNode(
 ): BuiltNode {
 	const session = sd.session;
 	const messages = restrict ? sd.messages.filter((m) => restrict.has(m.id)) : sd.messages;
-	const stepParts = restrict ? sd.stepParts.filter((p) => restrict.has(p.messageId)) : sd.stepParts;
-	const toolParts = restrict ? sd.toolParts.filter((p) => restrict.has(p.messageId)) : sd.toolParts;
+	const stepParts = partsIn(sd.stepParts, restrict);
+	const toolParts = partsIn(sd.toolParts, restrict);
 
 	const startCandidates = [
 		...(restrict ? [] : [session.createdAt]),

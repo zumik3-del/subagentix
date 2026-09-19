@@ -6,6 +6,7 @@
  * Everything here is deterministic and side-effect free.
  */
 import { formatDateTime, formatDuration } from './format';
+import { isFailedToolStatus } from './tool-kind';
 import type { Action, ActionKind, GanttModel, NodeDetail, Step, ToolCall } from './types';
 
 /**
@@ -278,7 +279,7 @@ export function groupToolRetries(toolCalls: ToolCall[]): ToolRetryGroup[] {
 			name,
 			calls,
 			retryCount: calls.length - 1,
-			hasError: calls.some((call) => call.status.toLowerCase() === 'error')
+			hasError: calls.some((call) => isFailedToolStatus(call.status))
 		});
 	}
 	groups.sort((a, b) => callSortTime(a.calls[0]) - callSortTime(b.calls[0]));

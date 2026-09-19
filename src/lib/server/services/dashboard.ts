@@ -25,6 +25,7 @@ import {
 	countSessionsByProvider,
 	countSessionsByUtcDay,
 	DEFAULT_TOP_N,
+	listSessionIds,
 	type DashboardWindow,
 	type NamedCountRecord
 } from '../queries/dashboard';
@@ -40,17 +41,46 @@ function toDistribution(rows: NamedCountRecord[]): DistributionEntry[] {
 }
 
 /**
+ * Dense UTC-day series for rows keyed by `day` (missing days filled with 0).
+ * `valueOf` selects the mapped value per row; `window` bounds the bucket range,
+ * so a bounded period always renders the same span as the other widgets (spec
+ * D9). Shared by the Tier-S and Tier-M day loaders.
+ */
+export function daySeries<T extends { day: string }>(
+	records: readonly T[],
+	valueOf: (record: T) => number,
+	window: DashboardWindow
+): DayBucket[] {
+	const points = records.map((row) => ({
+		at: Date.parse(`${row.day}T00:00:00.000Z`),
+		value: valueOf(row)
+	}));
+	return bucketByUtcDay(points, window.from ?? undefined, window.to ?? undefined);
+}
+
+/**
+ * The most recent in-window sessions under a hard ceiling, plus whether the
+ * ceiling cut them. Asks for one more than `maxSessions` to tell an exact fit
+ * from a truncation, so `capped` is false exactly when every in-range session
+ * survived. Shared by the Tier-P aggregate and the tool-error detail, which
+ * must describe the same bounded session set.
+ */
+export function cappedSessionIds(
+	window: DashboardWindow,
+	maxSessions: number
+): { ids: string[]; capped: boolean } {
+	const ids = listSessionIds(window, maxSessions + 1);
+	const capped = ids.length > maxSessions;
+	return { ids: capped ? ids.slice(0, maxSessions) : ids, capped };
+}
+
+/**
  * Dense, ascending UTC-day session counts for the window, missing days filled
  * with 0. `now` is injectable so callers/tests pin the window deterministically.
  */
 export function getSessionsPerDay(filter: DashboardFilter, now = Date.now()): DayBucket[] {
 	const window = toWindow(filter, now);
-	const rows = countSessionsByUtcDay(window);
-	const points = rows.map((row) => ({
-		at: Date.parse(`${row.day}T00:00:00.000Z`),
-		value: row.count
-	}));
-	return bucketByUtcDay(points, window.from ?? undefined, window.to ?? undefined);
+	return daySeries(countSessionsByUtcDay(window), (row) => row.count, window);
 }
 
 /** Agent distribution (session count per `session.agent`), count desc, top-N. */

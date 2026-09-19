@@ -4,15 +4,16 @@
  * The `message`-derived half of the dashboard service: cost/day, tokens/day
  * and windowed KPI totals, all bucketed by the same UTC day rule as the Tier-S
  * series (`model/chart.ts`). Split out of `services/dashboard.ts` to stay under
- * the service 150-line target; it reuses that module's {@link toWindow} so the
- * window/scope resolution is defined once.
+ * the service 150-line target; it reuses that module's {@link toWindow} (window
+ * and scope resolution) and {@link daySeries} (the shared day-bucket mapping),
+ * so both rules are defined once.
  *
  * Each call resolves the in-window session ids (Tier S) and hands them to the
  * query layer, which chunks the `IN (session_ids)` list below SQLite's
  * variable limit. No caching here: the memoized dashboard cache wraps these
  * loaders.
  */
-import { bucketByUtcDay, type DayBucket } from '../../model/chart';
+import type { DayBucket } from '../../model/chart';
 import type { DashboardFilter, MessageUsageTotals } from '../../model/dashboard';
 import { total, type TokenCounts } from '../../model/token';
 import {
@@ -21,7 +22,7 @@ import {
 	type DashboardWindow,
 	type MessageDayRecord
 } from '../queries/dashboard';
-import { toWindow } from './dashboard';
+import { daySeries, toWindow } from './dashboard';
 
 /**
  * Raw Tier-M day records for one resolved window: resolve the in-window session
@@ -42,11 +43,7 @@ function messageDays(window: DashboardWindow): MessageDayRecord[] {
 /** Dense UTC-day gross cost from `message` timestamps, gaps filled with 0. */
 export function getCostPerDay(filter: DashboardFilter, now = Date.now()): DayBucket[] {
 	const window = toWindow(filter, now);
-	const points = messageDays(window).map((row) => ({
-		at: Date.parse(`${row.day}T00:00:00.000Z`),
-		value: row.cost
-	}));
-	return bucketByUtcDay(points, window.from ?? undefined, window.to ?? undefined);
+	return daySeries(messageDays(window), (row) => row.cost, window);
 }
 
 /**
@@ -55,11 +52,7 @@ export function getCostPerDay(filter: DashboardFilter, now = Date.now()): DayBuc
  */
 export function getTokensPerDay(filter: DashboardFilter, now = Date.now()): DayBucket[] {
 	const window = toWindow(filter, now);
-	const points = messageDays(window).map((row) => ({
-		at: Date.parse(`${row.day}T00:00:00.000Z`),
-		value: total(row.tokens)
-	}));
-	return bucketByUtcDay(points, window.from ?? undefined, window.to ?? undefined);
+	return daySeries(messageDays(window), (row) => total(row.tokens), window);
 }
 
 /**

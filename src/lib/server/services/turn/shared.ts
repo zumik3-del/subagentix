@@ -91,3 +91,14 @@ export function turnIndexOf(time: number, triggers: MessageRecord[]): number {
 	}
 	return index;
 }
+
+/**
+ * Keep only the parts attached to a restricted message set, or return them
+ * unchanged when no restriction applies. Every turn builder filters its part
+ * lists this way, so the "restrict to these message ids" rule has one
+ * definition. (Messages themselves are filtered on `m.id` by the assembler,
+ * not through this helper.)
+ */
+export function partsIn(parts: PartRecord[], restrict: ReadonlySet<string> | null): PartRecord[] {
+	return restrict ? parts.filter((part) => restrict.has(part.messageId)) : parts;
+}
