@@ -367,6 +367,26 @@ describe('Row states — FileRow.svelte source contract', () => {
 		expect(source).toMatch(/id=\{contentId\}[^>]*class="files-row__content"/);
 		expect(source).toContain('{#if open}');
 	});
+
+	test('renders the meta line as key: value joined by · when meta is present', () => {
+		// metaText is derived from file.meta; each field renders as `label: value`,
+		// joined by the bullet separator.
+		expect(source).toContain("file.meta.map((field) => `${field.label}: ${field.value}`).join(' · ')");
+		expect(source).toContain('files-row__meta');
+		expect(source).toContain('{#if metaText !== null}');
+	});
+
+	test('falls back to file.name when displayName is absent', () => {
+		// The name span uses displayName ?? name so skills show their dir name.
+		expect(source).toContain('file.displayName ?? file.name');
+	});
+
+	test('omits the meta span when the file carries no meta', () => {
+		// metaText is null when file.meta is undefined or empty; the span is
+		// conditionally rendered so no empty metadata line appears.
+		expect(source).toContain('file.meta === undefined || file.meta.length === 0');
+		expect(source).toContain('? null');
+	});
 });
 
 /* ------------------------------------------------------------------ */

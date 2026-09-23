@@ -6,6 +6,8 @@
  * allowlist, group order, block-id grammar and binary detection have one home.
  */
 
+import type { AgentFrontmatter } from './agent';
+
 export type FileGroupKind =
 	| 'agent'
 	| 'subagents'
@@ -16,6 +18,12 @@ export type FileGroupKind =
 
 export type FileBlockScope = 'global' | 'project';
 
+/** One inline `label: value` metadata pair shown next to a file name. */
+export interface FileMetaField {
+	label: string;
+	value: string;
+}
+
 /** One allowlisted file, relative to its block root (POSIX, no leading `./`). */
 export interface FileRef {
 	path: string;
@@ -23,6 +31,10 @@ export interface FileRef {
 	group: FileGroupKind;
 	size: number;
 	mtimeMs: number;
+	/** Display label overriding `name` (e.g. a skill's directory name). */
+	displayName?: string;
+	/** Inline frontmatter metadata, already in display order (subagent files). */
+	meta?: FileMetaField[];
 }
 
 export interface FileGroup {
@@ -97,6 +109,23 @@ export function parseBlockId(id: string): ParsedBlockId | null {
 		if (projectId !== '') return { scope: 'project', projectId };
 	}
 	return null;
+}
+
+/** Inline metadata keys shown for a subagent file, in display order. */
+const SUBAGENT_META_ORDER = ['mode', 'temperature', 'steps', 'color', 'model'] as const;
+
+/**
+ * Inline metadata for a subagent file: the present frontmatter fields from
+ * `mode, temperature, steps, color, model`, in that order, with raw values.
+ * Absent (or blank) keys are omitted.
+ */
+export function subagentMetaFields(frontmatter: AgentFrontmatter): FileMetaField[] {
+	const fields: FileMetaField[] = [];
+	for (const key of SUBAGENT_META_ORDER) {
+		const value = frontmatter[key];
+		if (value !== null && value !== '') fields.push({ label: key, value });
+	}
+	return fields;
 }
 
 function isGlobalRel(rel: string): boolean {

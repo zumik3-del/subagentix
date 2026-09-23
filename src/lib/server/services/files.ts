@@ -21,7 +21,8 @@ import {
 	isDirectory,
 	mdFilesInDir,
 	projectEntries,
-	subdirsInDir
+	subdirsInDir,
+	withSubagentMeta
 } from './files-discovery';
 
 export { readFileContent, type FileReadResult } from './files-content';
@@ -52,10 +53,10 @@ function configGroup(root: string, candidates: readonly string[]): FileGroup {
 function subagentGroup(root: string, prefix: string, legacyPrefix: string): FileGroup {
 	const byName = new Map<string, FileRef>();
 	for (const ref of mdFilesInDir(join(root, prefix), prefix, 'subagents')) {
-		byName.set(ref.name, ref);
+		byName.set(ref.name, withSubagentMeta(join(root, ref.path), ref));
 	}
 	for (const ref of mdFilesInDir(join(root, legacyPrefix), legacyPrefix, 'subagents')) {
-		if (!byName.has(ref.name)) byName.set(ref.name, ref);
+		if (!byName.has(ref.name)) byName.set(ref.name, withSubagentMeta(join(root, ref.path), ref));
 	}
 	const files = [...byName.values()].sort((a, b) => compareNames(a.name, b.name));
 	return { kind: 'subagents', label: GROUP_LABELS.subagents, files };
@@ -68,7 +69,7 @@ function skillGroup(root: string, prefix: string, legacyPrefix: string): FileGro
 		for (const dir of subdirsInDir(join(root, base))) {
 			const rel = `${base}/${dir}/SKILL.md`;
 			const ref = fileRef(join(root, rel), rel, 'skills');
-			if (ref !== null && !byDir.has(dir)) byDir.set(dir, ref);
+			if (ref !== null && !byDir.has(dir)) byDir.set(dir, { ...ref, displayName: dir });
 		}
 	};
 	add(prefix);

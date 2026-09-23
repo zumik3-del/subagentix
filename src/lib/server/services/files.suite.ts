@@ -76,7 +76,10 @@ function buildGlobalFixture(dir: string): string {
 	writeFileSync(join(root, 'AGENTS.md'), '# Global AGENTS\n');
 	// subagents — both current and legacy, with overlapping basenames
 	mkdirSync(join(root, 'agents'), { recursive: true });
-	writeFileSync(join(root, 'agents', 'developer.md'), 'developer\n');
+	writeFileSync(
+		join(root, 'agents', 'developer.md'),
+		'---\nmode: subagent\ntemperature: 0.2\nsteps: 100\ncolor: accent\nmodel: claude-sonnet-4-20250514\n---\ndeveloper\n'
+	);
 	writeFileSync(join(root, 'agents', 'tester.md'), 'tester\n');
 	mkdirSync(join(root, 'agent'), { recursive: true });
 	writeFileSync(join(root, 'agent', 'developer.md'), 'legacy developer\n'); // same basename -> deduped
@@ -410,6 +413,122 @@ describe('AC-4: ordering and dedupe', () => {
 		const cfg = globalBlock.groups.find((g: { kind: string }) => g.kind === 'config')!;
 
 		expect(cfg.files.map((f: { path: string }) => f.path)).toEqual(['opencode.json', 'opencode.jsonc']);
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* AC-sub: subagent meta + skill displayName                          */
+/* ------------------------------------------------------------------ */
+
+describe('subagent inline meta + skill displayName', () => {
+	test('subagent ref carries meta in mode·temperature·steps·color·model order', async () => {
+		const dir = tempDir('meta-sub-');
+		const root = buildGlobalFixture(dir);
+
+		process.env.OPENCODE_CONFIG_DIR = root;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+		delete process.env.OPENCODE_DB;
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const globalBlock = result.blocks.find((b: { id: string }) => b.id === 'global')!;
+		const subGroup = globalBlock.groups.find((g: { kind: string }) => g.kind === 'subagents')!;
+		const developer = subGroup.files.find((f: { name: string }) => f.name === 'developer.md')!;
+
+		expect(developer.meta).toBeDefined();
+		expect(developer.meta).toHaveLength(5);
+		expect(developer.meta!.map((f: { label: string; value: string }) => f.label)).toEqual([
+			'mode',
+			'temperature',
+			'steps',
+			'color',
+			'model'
+		]);
+		expect(developer.meta!.map((f: { label: string; value: string }) => f.value)).toEqual([
+			'subagent',
+			'0.2',
+			'100',
+			'accent',
+			'claude-sonnet-4-20250514'
+		]);
+	});
+
+	test('subagent without frontmatter carries no meta', async () => {
+		const dir = tempDir('meta-no-fm-');
+		const root = buildGlobalFixture(dir);
+
+		process.env.OPENCODE_CONFIG_DIR = root;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+		delete process.env.OPENCODE_DB;
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const globalBlock = result.blocks.find((b: { id: string }) => b.id === 'global')!;
+		const subGroup = globalBlock.groups.find((g: { kind: string }) => g.kind === 'subagents')!;
+		const tester = subGroup.files.find((f: { name: string }) => f.name === 'tester.md')!;
+
+		expect(tester.meta).toBeUndefined();
+	});
+
+	test('skill ref carries displayName = directory name, name/path unchanged', async () => {
+		const dir = tempDir('skill-dn-');
+		const root = buildGlobalFixture(dir);
+
+		process.env.OPENCODE_CONFIG_DIR = root;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+		delete process.env.OPENCODE_DB;
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const globalBlock = result.blocks.find((b: { id: string }) => b.id === 'global')!;
+		const skillGroup = globalBlock.groups.find((g: { kind: string }) => g.kind === 'skills')!;
+
+		const codeReview = skillGroup.files.find((f: { name: string }) => f.name === 'SKILL.md')!;
+		expect(codeReview.displayName).toBe('code-review');
+		expect(codeReview.name).toBe('SKILL.md');
+		expect(codeReview.path).toBe('skills/code-review/SKILL.md');
+
+		const legacyTool = skillGroup.files.find((f: { name: string; path: string }) => f.name === 'SKILL.md' && f.path.includes('legacy'))!;
+		expect(legacyTool.displayName).toBe('legacy-tool');
+		expect(legacyTool.name).toBe('SKILL.md');
+		expect(legacyTool.path).toBe('skill/legacy-tool/SKILL.md');
+	});
+
+	test('subagent meta omits absent keys (only present fields emitted)', async () => {
+		const dir = tempDir('meta-sparse-');
+		const root = join(dir, 'global-config');
+		mkdirSync(root, { recursive: true });
+		mkdirSync(join(root, 'agents'), { recursive: true });
+		// Only mode + steps — no temperature/color/model.
+		writeFileSync(
+			join(root, 'agents', 'lite.md'),
+			'---\nmode: subagent\nsteps: 10\n---\nlite\n'
+		);
+		// Also write a skill so we can test displayName alongside.
+		mkdirSync(join(root, 'skills', 'formatter'), { recursive: true });
+		writeFileSync(join(root, 'skills', 'formatter', 'SKILL.md'), 'fmt\n');
+
+		process.env.OPENCODE_CONFIG_DIR = root;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+		delete process.env.OPENCODE_DB;
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const globalBlock = result.blocks.find((b: { id: string }) => b.id === 'global')!;
+		const subGroup = globalBlock.groups.find((g: { kind: string }) => g.kind === 'subagents')!;
+		const lite = subGroup.files.find((f: { name: string }) => f.name === 'lite.md')!;
+
+		expect(lite.meta).toBeDefined();
+		expect(lite.meta).toHaveLength(2);
+		expect(lite.meta!.map((f: { label: string }) => f.label)).toEqual(['mode', 'steps']);
+
+		const skillGroup = globalBlock.groups.find((g: { kind: string }) => g.kind === 'skills')!;
+		const fmt = skillGroup.files[0];
+		expect(fmt.displayName).toBe('formatter');
 	});
 });
 

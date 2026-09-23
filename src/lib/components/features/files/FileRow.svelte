@@ -36,6 +36,13 @@
 
 	let contentId = $derived(`files-content-${idSafe(blockId)}-${idSafe(file.path)}`);
 
+	// `key: value` pairs joined by ` · `; `null` when the file carries no meta.
+	let metaText = $derived(
+		file.meta === undefined || file.meta.length === 0
+			? null
+			: file.meta.map((field) => `${field.label}: ${field.value}`).join(' · ')
+	);
+
 	async function toggle(): Promise<void> {
 		if (open) {
 			open = false;
@@ -58,7 +65,7 @@
 	}
 </script>
 
-<li class="files-row">
+<li class="files-row" title={file.path}>
 	<button
 		type="button"
 		class="files-row__toggle"
@@ -69,7 +76,10 @@
 		}}
 	>
 		<TreeIcon name="chevron" expanded={open} size={14} />
-		<span class="files-row__name">{file.name}</span>
+		<span class="files-row__name">{file.displayName ?? file.name}</span>
+		{#if metaText !== null}
+			<span class="files-row__meta">{metaText}</span>
+		{/if}
 		<span class="files-row__size">{formatBytes(file.size)}</span>
 	</button>
 
@@ -126,6 +136,17 @@
 		text-overflow: ellipsis;
 		white-space: nowrap;
 		font-family: var(--font-family-mono);
+	}
+
+	.files-row__meta {
+		min-width: 0;
+		flex: 0 1 auto;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+		color: var(--text-weak);
 	}
 
 	.files-row__size {

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { parseAgentFrontmatter, type AgentFrontmatter } from './agent';
 import {
 	detectBinary,
 	FILE_GROUP_ORDER,
@@ -11,6 +12,7 @@ import {
 	isAllowedRelPath,
 	orderGroups,
 	parseBlockId,
+	subagentMetaFields,
 	type FileBlock,
 	type FileBlockScope,
 	type FileGroup,
@@ -278,5 +280,132 @@ describe('detectBinary', () => {
 	test('valid multi-byte UTF-8 is not binary', () => {
 		const bytes = new TextEncoder().encode('✅🎉🚀');
 		expect(detectBinary(bytes)).toBe(false);
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* parseAgentFrontmatter — steps + existing keys                      */
+/* ------------------------------------------------------------------ */
+
+describe('parseAgentFrontmatter', () => {
+	test('parses mode, temperature, steps, color, model from YAML frontmatter', () => {
+		const md = `---
+mode: subagent
+temperature: 0.2
+steps: 100
+color: accent
+model: claude-sonnet-4-20250514
+---
+Body text`;
+		const fm = parseAgentFrontmatter(md);
+		expect(fm).toEqual({
+			name: null,
+			description: null,
+			model: 'claude-sonnet-4-20250514',
+			mode: 'subagent',
+			color: 'accent',
+			temperature: '0.2',
+			steps: '100'
+		});
+	});
+
+	test('steps is parsed as a string, not coerced to number', () => {
+		const md = '---\nsteps: 42\n---\nbody';
+		expect(parseAgentFrontmatter(md).steps).toBe('42');
+	});
+
+	test('existing keys (name, description) are also parsed', () => {
+		const md = '---\nname: tester\ndescription: runs tests\n---\nbody';
+		const fm = parseAgentFrontmatter(md);
+		expect(fm.name).toBe('tester');
+		expect(fm.description).toBe('runs tests');
+	});
+
+	test('returns all-null frontmatter when there is no YAML block', () => {
+		expect(parseAgentFrontmatter('just body text')).toEqual({
+			name: null,
+			description: null,
+			model: null,
+			mode: null,
+			color: null,
+			temperature: null,
+			steps: null
+		});
+	});
+
+	test('ignores unknown keys', () => {
+		const md = '---\nfoo: bar\nmode: subagent\nbaz: qux\n---\nbody';
+		const fm = parseAgentFrontmatter(md);
+		expect(fm.mode).toBe('subagent');
+		// Unknown keys stay null (they are not in the shape).
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* subagentMetaFields — order + omit                                  */
+/* ------------------------------------------------------------------ */
+
+describe('subagentMetaFields', () => {
+	function fm(
+		overrides: Partial<AgentFrontmatter> = {}
+	): AgentFrontmatter {
+		return {
+			name: null,
+			description: null,
+			model: null,
+			mode: null,
+			color: null,
+			temperature: null,
+			steps: null,
+			...overrides
+		} as AgentFrontmatter;
+	}
+
+	test('emits fields in order mode, temperature, steps, color, model', () => {
+		const fields = subagentMetaFields(fm({
+			mode: 'subagent',
+			temperature: '0.2',
+			steps: '100',
+			color: 'accent',
+			model: 'claude-sonnet'
+		}));
+		expect(fields.map((f) => f.label)).toEqual([
+			'mode',
+			'temperature',
+			'steps',
+			'color',
+			'model'
+		]);
+		expect(fields.map((f) => f.value)).toEqual([
+			'subagent',
+			'0.2',
+			'100',
+			'accent',
+			'claude-sonnet'
+		]);
+	});
+
+	test('omits absent (null) keys', () => {
+		const fields = subagentMetaFields(fm({ mode: 'subagent', steps: '10' }));
+		expect(fields).toEqual([
+			{ label: 'mode', value: 'subagent' },
+			{ label: 'steps', value: '10' }
+		]);
+	});
+
+	test('omits blank (empty string) keys', () => {
+		const fields = subagentMetaFields(fm({ mode: '', steps: '5' }));
+		expect(fields).toEqual([
+			{ label: 'steps', value: '5' }
+		]);
+	});
+
+	test('empty frontmatter yields an empty array', () => {
+		expect(subagentMetaFields(fm())).toEqual([]);
+	});
+
+	test('only model present', () => {
+		const fields = subagentMetaFields(fm({ model: 'gpt-4o' }));
+		expect(fields).toEqual([{ label: 'model', value: 'gpt-4o' }]);
 	});
 });

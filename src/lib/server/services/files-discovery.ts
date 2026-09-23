@@ -6,10 +6,16 @@
  * allowlisted opencode config/project directory — never opencode runtime state
  * (`~/.local/share/opencode`), so credentials and the DB itself are unreachable.
  */
-import { readdirSync, statSync } from 'node:fs';
+import { closeSync, openSync, readdirSync, readSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
-import { MAX_ENTRIES_PER_GROUP, type FileGroupKind, type FileRef } from '$lib/model/files';
+import { parseAgentFrontmatter } from '$lib/model/agent';
+import {
+	MAX_ENTRIES_PER_GROUP,
+	subagentMetaFields,
+	type FileGroupKind,
+	type FileRef
+} from '$lib/model/files';
 import { findProjectRow, listProjectRows } from '../queries/projects';
 
 /** Canonical opencode config root (mirrors `agents.ts:configDir`). */
@@ -56,6 +62,46 @@ export function fileRef(abs: string, rel: string, group: FileGroupKind): FileRef
 	const stat = statFile(abs);
 	if (stat === null) return null;
 	return { path: rel, name: basename(rel), group, size: stat.size, mtimeMs: stat.mtimeMs };
+}
+
+/** Frontmatter lives at the file head; never read more than this many bytes. */
+const MAX_FRONTMATTER_BYTES = 64 * 1024;
+
+/**
+ * Bounded read of a file head (enough for its frontmatter). Never throws:
+ * an unreadable file yields `null`. The read is capped at MAX_FRONTMATTER_BYTES
+ * and a truncated trailing multibyte sequence cannot affect frontmatter parsing.
+ */
+function readHead(abs: string, limit = MAX_FRONTMATTER_BYTES): string | null {
+	let fd: number | undefined;
+	try {
+		fd = openSync(abs, 'r');
+		const buffer = new Uint8Array(limit);
+		const read = readSync(fd, buffer, 0, limit, 0);
+		return new TextDecoder('utf-8').decode(buffer.subarray(0, read));
+	} catch {
+		return null;
+	} finally {
+		if (fd !== undefined) {
+			try {
+				closeSync(fd);
+			} catch {
+				// A failed close must not surface.
+			}
+		}
+	}
+}
+
+/**
+ * Attach a subagent file's inline frontmatter metadata (`mode, temperature,
+ * steps, color, model`) to its ref via a bounded head read. An unreadable file
+ * or absent/blank frontmatter leaves the ref unchanged.
+ */
+export function withSubagentMeta(abs: string, ref: FileRef): FileRef {
+	const head = readHead(abs);
+	if (head === null) return ref;
+	const meta = subagentMetaFields(parseAgentFrontmatter(head));
+	return meta.length > 0 ? { ...ref, meta } : ref;
 }
 
 /**
