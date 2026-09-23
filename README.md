@@ -16,6 +16,11 @@ agent ran, and what tokens/cost it consumed, with per-node drill-down.
 - Session sidebar grouped by working directory, with search and paging.
 - Turn Gantt (SVG) with delegation edges between orchestrator and subagents.
 - Per-node drill-down: steps, tool calls and errors.
+- Files viewer (`/files`), reached from the `Files` link in the dashboard header:
+  a read-only browser of the global opencode config and each opencode project —
+  `AGENTS.md`, subagents, skills and config, plus the global `references` and
+  `templates` directories — with file bodies loaded on demand (512 KiB cap;
+  binary files are flagged, not rendered).
 - Runtime settings (opencode DB path, ziptask URL, subagents dir) in a modal.
 - Optional ziptask integration (task links), gated by a runtime toggle.
 
@@ -35,6 +40,11 @@ whitelists `session`, `message`, `part`, `project` and `todo`, and never returns
 `account` or `credential`. Access is strictly read-only (`readonly:true`,
 `PRAGMA query_only=1`, `busy_timeout`); the app never writes, checkpoints or
 vacuums the database.
+
+The `/files` viewer applies the same read-only rule to the filesystem: it lists
+only allowlisted opencode config and project directories and never touches
+opencode runtime state under `~/.local/share/opencode`, so credentials and the
+DB itself stay unreachable.
 
 ## Requirements
 
@@ -71,6 +81,7 @@ take precedence over the environment.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `OPENCODE_DB` | `~/.local/share/opencode/opencode.db` | Path to the live opencode DB (read-only). |
+| `OPENCODE_CONFIG_DIR` | `~/.config/opencode` | Global opencode config root (agent/skill scans and the `/files` viewer). |
 | `ZIPTASK_BASE_URL` | unset | Base URL used to resolve ziptask task links. |
 | `ZIPTASK_ENABLED` | derived | Feature toggle for the ziptask integration. |
 | `HOST` / `PORT` | `127.0.0.1` / `3010` | Production HTTP bind address. |

@@ -203,6 +203,11 @@
 			>
 				<Icon name="gear" />
 			</button>
+			<!-- Entry point to the read-only files viewer (epic #775, spec §7). -->
+			<a class="ui-btn" href="/files" title="Files" aria-label="Files">
+				<Icon name="files" />
+				Files
+			</a>
 		{/snippet}
 	</DashboardHeader>
 
