@@ -5,15 +5,27 @@
  * first expand of a row issues exactly one `GET /api/files/content`, later
  * expands (including after a block collapse/remount) reuse the cached promise.
  * Only successful reads are cached, so a failed row stays retryable, and
- * `abort()` cancels every in-flight request on unmount.
+ * `abort()` cancels every in-flight request on unmount while `reset()` (a full
+ * reload) also drops the cache. `fetchFileIndex` re-reads the block listing.
  */
-import type { FileContent } from '$lib/model/files';
+import type { FileContent, FileIndex } from '$lib/model/files';
 
 export interface FileContentLoader {
 	/** Resolve one file's content, fetching at most once per `block|path`. */
 	load(block: string, path: string): Promise<FileContent>;
 	/** Abort every in-flight request (page unmount); cached reads are untouched. */
 	abort(): void;
+	/** Abort in-flight requests and drop every cached read (a full reload). */
+	reset(): void;
+}
+
+/** Re-read the block/file index (`GET /api/files`), bypassing the HTTP cache. */
+export async function fetchFileIndex(): Promise<FileIndex> {
+	const response = await fetch('/api/files', { cache: 'no-store' });
+	if (!response.ok) {
+		throw new Error(await errorMessage(response));
+	}
+	return (await response.json()) as FileIndex;
 }
 
 /** One content request; throws an `Error` carrying the server's message. */
@@ -67,5 +79,10 @@ export function createFileContentLoader(): FileContentLoader {
 		controllers.clear();
 	}
 
-	return { load, abort };
+	function reset(): void {
+		abort();
+		cache.clear();
+	}
+
+	return { load, abort, reset };
 }

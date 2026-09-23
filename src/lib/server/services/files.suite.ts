@@ -205,7 +205,9 @@ describe('AC-1: listFileBlocks project source', () => {
 		const ids = result.blocks.map((b: { id: string }) => b.id);
 		expect(ids).not.toContain('project:global');
 		expect(ids).not.toContain('project:/');
-		expect(ids).toContain('project:proj-a');
+		// proj-a has a missing worktree (no fixture built), so it is omitted.
+		expect(ids).not.toContain('project:proj-a');
+		expect(result.projectsAvailable).toBe(true);
 	});
 });
 
@@ -340,9 +342,9 @@ describe('AC-3: project discovery', () => {
 		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
 		const result = mod.listFileBlocks();
 
-		const lost = result.blocks.find((b: { id: string }) => b.id === 'project:proj-lost')!;
-		expect(lost.available).toBe(false);
-		expect(lost.groups).toHaveLength(0);
+		// Missing-worktree project is omitted entirely (empty groups → skip).
+		const lost = result.blocks.find((b: { id: string }) => b.id === 'project:proj-lost');
+		expect(lost).toBeUndefined();
 	});
 });
 
@@ -413,6 +415,83 @@ describe('AC-4: ordering and dedupe', () => {
 		const cfg = globalBlock.groups.find((g: { kind: string }) => g.kind === 'config')!;
 
 		expect(cfg.files.map((f: { path: string }) => f.path)).toEqual(['opencode.json', 'opencode.jsonc']);
+	});
+});
+
+/* ------------------------------------------------------------------ */
+/* Empty-project filtering                                              */
+/* ------------------------------------------------------------------ */
+
+describe('Empty-project filtering', () => {
+	test('project with zero files (empty worktree) is omitted from blocks', async () => {
+		const dir = tempDir('empty-proj-');
+		const globalRoot = buildGlobalFixture(dir);
+		// Build a project with an empty worktree (no allowlisted files).
+		const emptyWorktree = join(dir, 'empty-proj');
+		mkdirSync(emptyWorktree, { recursive: true });
+		const dbPath = buildFixtureDb(dir, [
+			{ id: 'proj-empty', worktree: emptyWorktree, name: 'Empty Proj' }
+		]);
+
+		process.env.OPENCODE_CONFIG_DIR = globalRoot;
+		process.env.OPENCODE_DB = dbPath;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const ids = result.blocks.map((b: { id: string }) => b.id);
+		expect(ids).not.toContain('project:proj-empty');
+		expect(result.blocks).toHaveLength(1); // global only
+		expect(result.projectsAvailable).toBe(true);
+	});
+
+	test('project with files is kept while empty project is omitted', async () => {
+		const dir = tempDir('mixed-empty-');
+		const globalRoot = buildGlobalFixture(dir);
+		const projectRoot = buildProjectFixture(dir);
+		// Second project with an empty worktree.
+		const emptyWorktree = join(dir, 'empty-proj');
+		mkdirSync(emptyWorktree, { recursive: true });
+		const dbPath = buildFixtureDb(dir, [
+			{ id: 'proj-with-files', worktree: projectRoot, name: 'With Files' },
+			{ id: 'proj-empty', worktree: emptyWorktree, name: 'Empty Proj' }
+		]);
+
+		process.env.OPENCODE_CONFIG_DIR = globalRoot;
+		process.env.OPENCODE_DB = dbPath;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		const ids = result.blocks.map((b: { id: string }) => b.id);
+		expect(ids).toContain('global');
+		expect(ids).toContain('project:proj-with-files');
+		expect(ids).not.toContain('project:proj-empty');
+		expect(result.blocks).toHaveLength(2);
+		expect(result.projectsAvailable).toBe(true);
+	});
+
+	test('global block is always present even when all projects are empty', async () => {
+		const dir = tempDir('global-only-');
+		const globalRoot = buildGlobalFixture(dir);
+		const emptyWorktree = join(dir, 'empty-proj');
+		mkdirSync(emptyWorktree, { recursive: true });
+		const dbPath = buildFixtureDb(dir, [
+			{ id: 'proj-empty', worktree: emptyWorktree, name: 'Empty Proj' }
+		]);
+
+		process.env.OPENCODE_CONFIG_DIR = globalRoot;
+		process.env.OPENCODE_DB = dbPath;
+		process.env.SETTINGS_FILE = join(dir, 'settings.json');
+
+		const mod = (await import(absSpec('../../server/services/files.ts'))) as typeof import('../../server/services/files.ts');
+		const result = mod.listFileBlocks();
+
+		expect(result.blocks).toHaveLength(1);
+		expect(result.blocks[0].id).toBe('global');
+		expect(result.projectsAvailable).toBe(true);
 	});
 });
 

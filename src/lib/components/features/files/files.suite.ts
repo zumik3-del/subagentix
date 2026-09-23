@@ -328,6 +328,86 @@ describe('AC-11 — createFileContentLoader fetch stub + cache', () => {
 });
 
 /* ------------------------------------------------------------------ */
+/* AC-reload: fetchFileIndex — reload behavior                          */
+/* ------------------------------------------------------------------ */
+
+	describe('AC-reload: fetchFileIndex', () => {
+	/** Stubs global `fetch` for the duration of the test. */
+	function stubFetch(responses: Map<string, unknown>): () => void {
+		const orig = globalThis.fetch;
+		globalThis.fetch = ((async (input: string | URL | RequestInfo) => {
+			// Normalise to an absolute URL so relative paths like `/api/files` match.
+			const str = new URL(`http://localhost${input.toString()}`).pathname;
+			// Match GET /api/files (no query params needed for the index).
+			if (str === '/api/files') {
+				const body = responses.get(str);
+				return new Response(JSON.stringify(body ?? {}), {
+					status: 200,
+					headers: { 'content-type': 'application/json' }
+				});
+			}
+			return new Response(JSON.stringify({ error: 'not found' }), {
+				status: 404,
+				headers: { 'content-type': 'application/json' }
+			});
+		}) as unknown) as typeof fetch;
+		return () => {
+			globalThis.fetch = orig;
+		};
+	}
+
+	test('success replaces the listing — returns FileIndex shape', async () => {
+		const index = {
+			blocks: [
+				{ id: 'global', scope: 'global' as const, name: 'Global', worktree: '/etc/opencode', available: true, groups: [] },
+				{ id: 'project:x', scope: 'project' as const, name: 'X', worktree: '/repo/x', available: true, groups: [] }
+			],
+			projectsAvailable: true
+		};
+		const unload = stubFetch(new Map([['/api/files', index]]));
+		try {
+			const { fetchFileIndex } = await import('$lib/components/features/files/content');
+			const result = await fetchFileIndex();
+			expect(result).toEqual(index);
+		} finally {
+			unload();
+		}
+	});
+
+	test('non-200 response throws with the error body message', async () => {
+		const orig = globalThis.fetch;
+		globalThis.fetch = ((async () => {
+			return new Response(JSON.stringify({ error: 'DB unreachable' }), {
+				status: 500,
+				headers: { 'content-type': 'application/json' }
+			});
+		}) as unknown) as typeof fetch;
+		try {
+			const { fetchFileIndex } = await import('$lib/components/features/files/content');
+			await expect(fetchFileIndex()).rejects.toThrow('DB unreachable');
+		} finally {
+			globalThis.fetch = orig;
+		}
+	});
+
+	test('non-JSON error body falls back to HTTP status string', async () => {
+		const orig = globalThis.fetch;
+		globalThis.fetch = ((async () => {
+			return new Response('Service unavailable', {
+				status: 503,
+				headers: { 'content-type': 'text/plain' }
+			});
+		}) as unknown) as typeof fetch;
+		try {
+			const { fetchFileIndex } = await import('$lib/components/features/files/content');
+			await expect(fetchFileIndex()).rejects.toThrow();
+		} finally {
+			globalThis.fetch = orig;
+		}
+	});
+});
+
+/* ------------------------------------------------------------------ */
 /* Row states — source assertions on FileRow.svelte                    */
 /* ------------------------------------------------------------------ */
 
@@ -434,5 +514,19 @@ describe('/files page SSR shell', () => {
 		expect(source).toContain('listFileBlocks()');
 		expect(source).toContain('catch');
 		expect(source).toContain('projectsAvailable: false');
+	});
+
+	test('+page.svelte header renders the Reload control', () => {
+		const source = readFileSync(
+			join(repoRoot, 'src/routes/files/+page.svelte'),
+			'utf8'
+		);
+		// The header contains a Reload button wired to the reload() function.
+		expect(source).toContain('files-page__actions');
+		expect(source).toMatch(/<button[^>]*onclick=\{\(\) => void reload\(\)\}/);
+		expect(source).toContain('Reload');
+		// Inline error paragraph is rendered when reloadError is non-null.
+		expect(source).toContain('files-page__error');
+		expect(source).toContain('reloadError');
 	});
 });

@@ -1,25 +1,23 @@
 <script lang="ts">
 	/**
-	 * `/files` browser root (epic #775, spec §7).
+	 * `/files` browser root (epic #775, spec §7; task #786).
 	 *
-	 * Owns the single session content loader (§5.3) shared by every row, aborts
-	 * in-flight requests on unmount, and renders the block list plus the §7
-	 * notice states (DB unavailable, no projects, missing config directory).
+	 * Renders the block list plus the §7 notice states (DB unavailable, no
+	 * projects, missing config directory). The shared session content loader is
+	 * owned by the page (so the header Reload control can reset it) and reaches
+	 * every row through the `load` prop.
 	 */
-	import type { FileBlock } from '$lib/model/files';
-	import { onDestroy } from 'svelte';
+	import type { FileBlock, FileContent } from '$lib/model/files';
 	import FileBlockView from './FileBlock.svelte';
-	import { createFileContentLoader } from './content';
 
 	interface Props {
 		blocks: readonly FileBlock[];
 		projectsAvailable: boolean;
+		/** Shared session loader (one fetch per `block|path`). */
+		load: (block: string, path: string) => Promise<FileContent>;
 	}
 
-	let { blocks, projectsAvailable }: Props = $props();
-
-	const loader = createFileContentLoader();
-	onDestroy(() => loader.abort());
+	let { blocks, projectsAvailable, load }: Props = $props();
 
 	let globalBlock = $derived(blocks.find((block) => block.scope === 'global'));
 	let projectCount = $derived(blocks.filter((block) => block.scope === 'project').length);
@@ -39,7 +37,7 @@
 	{/if}
 
 	{#each blocks as block (block.id)}
-		<FileBlockView {block} load={loader.load} />
+		<FileBlockView {block} {load} />
 	{/each}
 </section>
 

@@ -123,8 +123,10 @@ function makeBlock(
 
 /**
  * The block index: global config first, then one block per opencode project
- * (excluding the `global` pseudo-project). A missing `project` table or an
- * unreachable DB degrades to `projectsAvailable:false` and never throws.
+ * (excluding the `global` pseudo-project). A project with no allowlisted files
+ * (an empty worktree or a missing one) is omitted entirely; the global block is
+ * always kept. A missing `project` table or an unreachable DB degrades to
+ * `projectsAvailable:false` and never throws.
  */
 export function listFileBlocks(): FileIndex {
 	const globalRoot = configDir();
@@ -135,11 +137,17 @@ export function listFileBlocks(): FileIndex {
 	];
 	const { entries, available } = projectEntries();
 	for (const entry of entries) {
-		blocks.push(
-			makeBlock(blockId('project', entry.id), 'project', entry.name, entry.worktree, () =>
-				projectGroups(entry.worktree)
-			)
+		const block = makeBlock(
+			blockId('project', entry.id),
+			'project',
+			entry.name,
+			entry.worktree,
+			() => projectGroups(entry.worktree)
 		);
+		// `groups` is empty when the worktree is missing or holds no
+		// agent/subagent/skill/config file — such a project is noise, skip it.
+		if (block.groups.length === 0) continue;
+		blocks.push(block);
 	}
 	return { blocks, projectsAvailable: available };
 }
