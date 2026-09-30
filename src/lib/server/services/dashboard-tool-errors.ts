@@ -1,5 +1,5 @@
 /**
- * Top-tools call-detail service (task #481; all-calls mode #484).
+ * Top-tools call-detail service (task #481; all-calls mode #484; V2).
  *
  * Resolves the window/scope + capped session set exactly like the Tier-P
  * aggregate (`services/dashboard-tools.ts`) and applies the requested mode
@@ -10,8 +10,10 @@
  *
  * The client pages this detail with infinite scroll (task #544); every page is
  * a fresh request, and each read stays scoped to the resolved session set so it
- * never becomes a global `part` scan (the app never relies on indexes it cannot
- * create on the read-only opencode DB).
+ * never becomes a global content scan — the session-id predicate plus
+ * `type='assistant'` keeps the outer read on
+ * `session_message_session_type_seq_idx` and `json_each` then walks only those
+ * assistant payloads (decision D-3).
  */
 import {
 	MAX_TOOL_SESSIONS,
@@ -43,8 +45,8 @@ function blankToNull(value: string | null | undefined): string | null {
  * One page of tool calls (failures only, or every call per `query.status`) for
  * the selected window/scope, plus the filtered total, the stable agent options
  * and the Tier-P `capped` flag. Only the most recent `maxSessions` in-range
- * sessions contribute (the ceiling that bounds a `period=all` `part` scan; the
- * parameter is exposed for tests).
+ * sessions contribute (the ceiling that bounds a `period=all` `json_each` walk of
+ * `data.content[]`; the parameter is exposed for tests).
  */
 export function getToolErrors(
 	filter: DashboardFilter,

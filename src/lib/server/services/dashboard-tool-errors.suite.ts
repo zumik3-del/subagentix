@@ -11,70 +11,47 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_TOOL_SESSIONS } from '$lib/model/dashboard';
+import {
+	addAssistantMessage,
+	addProject,
+	addSessionV2,
+	applyV2Schema,
+	toolItem,
+	T
+} from '../test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000;
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'anthropic' });
+const MODEL = { id: 'gpt-5', providerID: 'anthropic' };
 
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
-
+/**
+ * Two root sessions, one assistant message each, three tool content items.
+ * `at` is the message `time_created` in V2 (the `part.time_created` is gone), so
+ * both s2 items share `at = T - 50`; the newest-first ordering assertions accept
+ * ties.
+ */
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Proj A')").run();
+	applyV2Schema(db);
+	addProject(db, { id: 'proj-a', name: 'Proj A' });
 
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	addSessionV2(db, { id: 's1', dir: '/repo/a', title: 'S1', agent: 'build', created: T - 100, updated: T, projectId: 'proj-a', model: MODEL });
+	addSessionV2(db, { id: 's2', dir: '/repo/a', title: 'S2', agent: 'plan', created: T - 50, updated: T + 50, projectId: 'proj-a', model: MODEL });
 
-	insSession.run('s1', null, '/repo/a', 'S1', 'build', T - 100, T, null, 0, 0, 0, 0, 0, 0, MODEL, 'proj-a');
-	insSession.run('s2', null, '/repo/a', 'S2', 'plan', T - 50, T + 50, null, 0, 0, 0, 0, 0, 0, MODEL, 'proj-a');
+	addAssistantMessage(db, {
+		id: 'm1', sessionId: 's1', seq: 1, created: T - 100, completed: T,
+		agent: 'build', model: MODEL,
+		content: [
+			toolItem('bash', { id: 'c1', status: 'error', input: { command: 'false' }, error: { type: 'error', message: 'exit 1' }, created: T - 90, ran: T - 90, completed: T - 80 })
+		]
+	});
 
-	insMessage.run('m1', 's1', T - 100, T, '{}');
-	insMessage.run('m2', 's2', T - 50, T + 50, '{}');
-
-	insPart.run('p1', 'm1', 's1', T - 90, T - 80, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c1',
-		state: { status: 'error', error: 'exit 1', time: { start: T - 90, end: T - 80 } }
-	}));
-	insPart.run('p2', 'm2', 's2', T - 40, T - 30, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c2',
-		state: { status: 'completed', time: { start: T - 40, end: T - 30 } }
-	}));
-	insPart.run('p3', 'm2', 's2', T - 20, T - 10, JSON.stringify({
-		type: 'tool', tool: 'read', callID: 'c3',
-		state: { status: 'failed', error: 'permission denied', time: { start: T - 20, end: T - 10 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm2', sessionId: 's2', seq: 1, created: T - 50, completed: T + 50,
+		agent: 'plan', model: MODEL,
+		content: [
+			toolItem('bash', { id: 'c2', status: 'completed', input: { command: 'ls' }, text: 'a\nb', created: T - 40, ran: T - 40, completed: T - 30 }),
+			toolItem('read', { id: 'c3', status: 'failed', input: { path: '/secret' }, error: { type: 'permission_denied', message: 'permission denied' }, created: T - 20, ran: T - 20, completed: T - 10 })
+		]
+	});
 
 	db.close();
 }

@@ -66,6 +66,7 @@ export interface AgentFrontmatter {
 	mode: string | null;
 	color: string | null;
 	temperature: string | null;
+	steps: string | null;
 }
 
 /** Extract the leading YAML frontmatter body, or `null` when absent. */
@@ -93,7 +94,8 @@ export function parseAgentFrontmatter(mdText: string): AgentFrontmatter {
 		model: null,
 		mode: null,
 		color: null,
-		temperature: null
+		temperature: null,
+		steps: null
 	};
 	const block = frontmatterBlock(mdText);
 	if (block === null) return meta;

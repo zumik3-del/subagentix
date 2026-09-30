@@ -53,9 +53,14 @@ export interface NodeRow {
 	call: ToolCall | null;
 	/** Action id for action rows (the detail anchor); `null` otherwise. */
 	actionId: string | null;
-	/** Display label (kind, tool name, filename, …). */
+	/** Display label (kind, tool name, …). */
 	label: string;
 	summary: string;
+	/**
+	 * `true` when the row's `at` is a fallback (an action item with no timestamp
+	 * of its own) so the timeline can mark it. Absent on non-action rows.
+	 */
+	noTime?: boolean;
 	/** Child rows (tool calls + actions) of a step; empty otherwise. */
 	children: NodeRow[];
 }
@@ -113,6 +118,7 @@ function actionRow(action: Action): NodeRow {
 		actionId: action.id,
 		label: action.label,
 		summary: action.summary,
+		noTime: action.noTime ?? false,
 		children: []
 	};
 }

@@ -17,30 +17,9 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from '../test-fixtures/opencode-v2';
 
 const T = 1_700_000_000_000;
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
 
 /**
  * Ten roots with `%`/`_`/`\` in exactly one searchable field, plus decoys that
@@ -49,18 +28,12 @@ const SCHEMA = `
  */
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
+	applyV2Schema(db);
 
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
 	let i = 0;
 	const addRoot = (id: string, directory: string, title: string): void => {
 		const created = T + i++;
-		insSession.run(id, null, directory, title, 'build', created, created + 10, null, 0, 0, 0, 0, 0, 0, null);
+		addSessionV2(db, { id, dir: directory, title, agent: 'build', created, updated: created + 10 });
 	};
 	addRoot('plain', '/repo/plain', 'Plain root');
 	addRoot('pct', '/repo/pct', '100% done');
@@ -73,23 +46,7 @@ function buildFixture(path: string): void {
 	addRoot('wdir', '/repo/we%ird', 'Weird dir');
 	addRoot('inj', '/repo/inject', "' OR 1=1 --");
 	// A non-root with a matching title must never appear in root search.
-	insSession.run(
-		'pctchild',
-		'pct',
-		'/repo/pct',
-		'100% child',
-		'developer',
-		T + 900,
-		T + 900,
-		null,
-		0,
-		0,
-		0,
-		0,
-		0,
-		0,
-		null
-	);
+	addSessionV2(db, { id: 'pctchild', parentId: 'pct', dir: '/repo/pct', title: '100% child', agent: 'developer', created: T + 900, updated: T + 900 });
 
 	db.close();
 }
@@ -212,20 +169,20 @@ describe('search filter — bound parameters and literal wildcard escaping', () 
 	test('the search performs no writes and keeps query_only', () => {
 		const db = getDb();
 		const snapshot = {
-			session: (db.query('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n,
-			message: (db.query('SELECT COUNT(*) AS n FROM message').get() as { n: number }).n,
-			part: (db.query('SELECT COUNT(*) AS n FROM part').get() as { n: number }).n,
-			event: (db.query('SELECT COUNT(*) AS n FROM event').get() as { n: number }).n
+			session: (db.query('SELECT COUNT(*) AS n FROM session_v2').get() as { n: number }).n,
+			message: (db.query('SELECT COUNT(*) AS n FROM session_message').get() as { n: number }).n,
+			part: 0,
+			event: 0
 		};
 		for (const q of ['a%b', '_', '\\', '%', "' OR 1=1 --", '']) {
 			listRecentRootSessions(50, undefined, 0, q);
 			countRecentRootSessions(undefined, q);
 		}
 		expect({
-			session: (db.query('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n,
-			message: (db.query('SELECT COUNT(*) AS n FROM message').get() as { n: number }).n,
-			part: (db.query('SELECT COUNT(*) AS n FROM part').get() as { n: number }).n,
-			event: (db.query('SELECT COUNT(*) AS n FROM event').get() as { n: number }).n
+			session: (db.query('SELECT COUNT(*) AS n FROM session_v2').get() as { n: number }).n,
+			message: (db.query('SELECT COUNT(*) AS n FROM session_message').get() as { n: number }).n,
+			part: 0,
+			event: 0
 		}).toEqual(snapshot);
 		expect(db.query('PRAGMA query_only').get()).toEqual({ query_only: 1 });
 	});

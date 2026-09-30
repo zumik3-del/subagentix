@@ -112,13 +112,18 @@
 		class="ui-modal__dialog task-dialog"
 		role="dialog"
 		aria-modal="true"
-		aria-label={`Task #${id} details`}
+		aria-label={detail?.task.isEpic ? `Epic #${id} details` : `Task #${id} details`}
 		tabindex="-1"
 		bind:this={dialog}
 		onkeydown={onDialogKeydown}
 	>
 		<header class="ui-modal__head">
-			<h3 class="ui-modal__title">Task #{id}</h3>
+			<h3 class="ui-modal__title">
+				Task #{id}
+				{#if detail?.task.isEpic}
+					<span class="epic-badge ui-badge ui-badge--warning">epic</span>
+				{/if}
+			</h3>
 			<button
 				type="button"
 				class="ui-icon-btn"
@@ -152,6 +157,12 @@
 
 	.task-dialog {
 		width: min(34rem, calc(100vw - 2rem));
+	}
+
+	/* Marks the title as an epic; tone comes from `.ui-badge--warning`. */
+	.epic-badge {
+		margin-left: var(--space-2);
+		vertical-align: middle;
 	}
 
 	.state {

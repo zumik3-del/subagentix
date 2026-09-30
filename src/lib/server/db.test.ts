@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from './test-fixtures/opencode-v2';
 
 /**
  * M1 data-access tests (task #182, ADR §4.1).
@@ -60,13 +61,12 @@ function tempDir(): string {
 	return dir;
 }
 
-/** Create a rollback-journal fixture with a `session` table holding N rows. */
+/** Create a rollback-journal fixture with a `session_v2` table holding N rows. */
 function createFixtureDb(sessions = 3): string {
 	const path = join(tempDir(), 'fixture.db');
 	const db = new Database(path);
-	db.exec('CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);');
-	const insert = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < sessions; i++) insert.run(`session-${i}`);
+	applyV2Schema(db);
+	for (let i = 0; i < sessions; i++) addSessionV2(db, { id: `session-${i}`, dir: '/repo', created: 0, updated: 0 });
 	db.close();
 	return path;
 }
@@ -76,9 +76,8 @@ function createWalFixture(sessions = 2): { path: string; writer: Database } {
 	const path = join(tempDir(), 'wal-fixture.db');
 	const writer = new Database(path);
 	writer.exec('PRAGMA journal_mode = WAL;');
-	writer.exec('CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);');
-	const insert = writer.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < sessions; i++) insert.run(`session-${i}`);
+	applyV2Schema(writer);
+	for (let i = 0; i < sessions; i++) addSessionV2(writer, { id: `session-${i}`, dir: '/repo', created: 0, updated: 0 });
 	return { path, writer };
 }
 
@@ -123,9 +122,9 @@ test('DDL and DML are rejected on the read-only connection', async () => {
 
 	const writes = [
 		'CREATE TABLE extra (id INTEGER)',
-		"INSERT INTO session (id) VALUES ('new-row')",
-		"UPDATE session SET id = 'renamed' WHERE id = 'session-0'",
-		"DELETE FROM session WHERE id = 'session-0'"
+		"INSERT INTO session_v2 (id, project_id, slug, directory, version, time_created, time_updated) VALUES ('new-row', 'proj', 'x', '/', '2.0.20', 0, 0)",
+		"UPDATE session_v2 SET id = 'renamed' WHERE id = 'session-0'",
+		"DELETE FROM session_v2 WHERE id = 'session-0'"
 	];
 	for (const sql of writes) {
 		expect(() => db.exec(sql)).toThrow(/readonly/i);
@@ -163,7 +162,7 @@ test('reads from a live WAL fixture see committed rows without checkpointing', a
 		// A read-only connection must not write or checkpoint the fixture.
 		expect(readFileSync(path).equals(mainBefore)).toBe(true);
 		expect(readFileSync(`${path}-wal`).equals(walBefore)).toBe(true);
-		expect(() => mod.getDb().exec("INSERT INTO session (id) VALUES ('nope')")).toThrow(/readonly/i);
+		expect(() => mod.getDb().exec("INSERT INTO session_v2 (id) VALUES ('nope')")).toThrow(/readonly/i);
 	} finally {
 		writer.close();
 	}
@@ -213,9 +212,9 @@ test('getDb opens the dbPath seeded in SETTINGS_FILE', async () => {
 	const dir = tempDir();
 	const dbPath = join(dir, 'seeded.db');
 	const db = new Database(dbPath);
-	db.exec('CREATE TABLE session (id TEXT PRIMARY KEY);');
-	const ins = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < 4; i++) ins.run(`seed-${i}`);
+	applyV2Schema(db);
+	const ins = db.prepare('INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, version, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+	for (let i = 0; i < 4; i++) ins.run(`seed-${i}`, 'proj', null, `seed-${i}`, '/repo', '2.0.20', 0, 0);
 	db.close();
 
 	// Seed the settings file directly (bypassing the typed API).
@@ -240,7 +239,7 @@ test('after updateStoredSettings the next getDb/healthCheck uses the new path an
 
 	for (const p of [firstPath, secondPath]) {
 		const db = new Database(p);
-		db.exec('CREATE TABLE session (id TEXT PRIMARY KEY);');
+		applyV2Schema(db);
 		db.close();
 	}
 

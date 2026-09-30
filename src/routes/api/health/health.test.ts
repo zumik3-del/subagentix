@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from '../../../lib/server/test-fixtures/opencode-v2';
 
 /**
  * `/api/health` contract (task #182, ADR §12 step 2): 200 with
@@ -73,11 +74,10 @@ afterAll(() => {
 
 test('GET /api/health returns 200 with { ok, dbPath, sessions }', async () => {
 	const dbPath = join(tempDir(), 'fixture.db');
-	const writer = new Database(dbPath);
-	writer.exec('CREATE TABLE session (id TEXT PRIMARY KEY);');
-	const insert = writer.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < 4; i++) insert.run(`session-${i}`);
-	writer.close();
+	const db = new Database(dbPath);
+	applyV2Schema(db);
+	for (let i = 0; i < 4; i++) addSessionV2(db, { id: `session-${i}`, dir: '/repo', created: 0 });
+	db.close();
 
 	const { GET } = await loadRouteWithDbPath(dbPath);
 	const response = await GET({});

@@ -321,11 +321,11 @@ describe('NodeDetailPanel SSR — merged Steps & actions table', () => {
 					{
 						id: 'a2',
 						nodeId: 'root1',
-						kind: 'patch',
+						kind: 'compaction',
 						at: 1_700_000_000_200,
 						endedAt: null,
-						label: 'patch',
-						summary: '/x.ts'
+						label: 'compaction',
+						summary: 'summarised'
 					}
 				]
 			})
@@ -336,7 +336,7 @@ describe('NodeDetailPanel SSR — merged Steps & actions table', () => {
 		// kind keeps the badge-head path (task #541).
 		expect(html).not.toContain('ui-badge--reasoning');
 		expect(html).toContain('dot-kind-reasoning');
-		expect(html).toContain('ui-badge--patch');
+		expect(html).toContain('ui-badge--compaction');
 		expect(html).toContain('thinking hard');
 		expect(html).toContain('Filter steps and actions');
 		// Action rows carry a clickable simple name and a detail anchor.

@@ -67,7 +67,7 @@ export interface Node {
 
 export type EdgeFlag = TimeFlag | 'noChild';
 
-/** One delegation = one `tool='task'` part. */
+/** One delegation = one `subagent` tool content item. */
 export interface Edge {
 	id: string;
 	/** Parent node (caller) session id. */
@@ -89,15 +89,16 @@ export interface Edge {
 
 export type StepFlag = TimeFlag;
 
-/** One LLM provider call = one `step-start` … `step-finish` pair. */
+/** One LLM provider call = one `assistant` message (decision D-1). */
 export interface Step {
 	id: string;
 	nodeId: string;
 	messageId: string;
-	/** Order within the message, 0-based. */
+	/** Always 0: a message owns exactly one step (decision D-1). */
 	index: number;
+	/** `data.time.created`, epoch-ms. */
 	startedAt: number;
-	/** `null` => open step (no `step-finish` yet). */
+	/** `data.time.completed`; `null` => open step (the message has not completed). */
 	endedAt: number | null;
 	open: boolean;
 	flags: StepFlag[];
@@ -134,14 +135,16 @@ export interface ToolCall {
 /**
  * Every non-tool action a node produced, surfaced in the drill-down Actions
  * timeline. Tool calls and LLM steps keep their own DTOs; this union covers the
- * remaining `part.data.type` values the panel used to hide.
+ * `data.content[]` item types (`text`, `reasoning`) plus compaction messages.
+ * V2 dropped the `patch`/`file`/`agent` item types (spec §3.4/G-4).
  */
-export type ActionKind = 'text' | 'reasoning' | 'patch' | 'file' | 'agent' | 'compaction';
+export type ActionKind = 'text' | 'reasoning' | 'compaction';
 
 /**
- * One non-tool action of a node. `at` is the part start (or row creation) in
- * epoch-ms; `endedAt` is only set for parts that carry `time.end`
- * (text/reasoning). `summary` is the display excerpt — the UI truncates.
+ * One non-tool action of a node. `at` is the item start (or the owning message's
+ * time when the item carries none) in epoch-ms; `endedAt` is only set for items
+ * that carry `time.completed` (reasoning; `text` items have no time). `summary`
+ * is the display excerpt — the UI truncates.
  */
 export interface Action {
 	id: string;
@@ -149,15 +152,21 @@ export interface Action {
 	kind: ActionKind;
 	at: number;
 	endedAt: number | null;
-	/** Short label: `patch`, a filename, an agent mention, or the kind itself. */
+	/** Short label: the kind (or `prompt` for a synthesised user message). */
 	label: string;
-	/** Excerpt / file list / mime / source, depending on `kind`. */
+	/** Excerpt of the item body (a `user` prompt or an assistant text/reasoning). */
 	summary: string;
 	/**
 	 * Role of the owning message (`user`/`assistant`) when known, so the UI can
 	 * mark a user message's `text` as the prompt. Optional for partial DTOs.
 	 */
 	role?: string | null;
+	/**
+	 * `true` when the item carried no timestamp of its own and `at` falls back to
+	 * the owning message's time (V2 `text` items have no `time`, spec §3.9/G-9).
+	 * Optional so partial DTO literals stay valid; `false`/absent otherwise.
+	 */
+	noTime?: boolean;
 }
 
 export type MarkerType = 'compaction' | 'removed';
@@ -204,9 +213,8 @@ export interface GanttOutline {
 	 */
 	triggerMessageId?: string;
 	/**
-	 * Non-tool actions (text, reasoning, patches, files, agent mentions,
-	 * compaction) for the unified drill-down timeline. Populated by
-	 * `buildTurnModel`; omitted from the streamed outline.
+	 * Non-tool actions (text, reasoning, compaction) for the unified drill-down
+	 * timeline. Populated by `buildTurnModel`; omitted from the streamed outline.
 	 */
 	actions?: Action[];
 	/** LLM steps of the turn; omitted from the streamed outline (Phase 4). */
@@ -223,9 +231,9 @@ export interface GanttModel extends GanttOutline {
 	toolCalls: ToolCall[];
 	markers: Marker[];
 	/**
-	 * Non-tool actions (text, reasoning, patches, files, agent mentions,
-	 * compaction) for the unified drill-down timeline. Populated by
-	 * `buildTurnModel`; optional so partial DTO literals stay valid.
+	 * Non-tool actions (text, reasoning, compaction) for the unified drill-down
+	 * timeline. Populated by `buildTurnModel`; optional so partial DTO literals
+	 * stay valid.
 	 */
 	actions?: Action[];
 }

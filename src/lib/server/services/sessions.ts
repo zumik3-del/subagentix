@@ -7,7 +7,7 @@
  */
 import { usageFromCounts } from '../../model/token';
 import type { ChildSession, SessionDetail, TurnSummary } from '../../model/types';
-import { getTurnSummaries } from '../queries/parts';
+import { getTurnSummaries } from '../queries/messages';
 import { loadSessionGraph } from '../queries/session-graph';
 import { sessionExists, toSessionSummary } from '../queries/sessions';
 import type { DelegationRecord, SessionRecord } from '../schema';

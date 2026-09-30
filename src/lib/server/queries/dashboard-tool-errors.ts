@@ -1,31 +1,44 @@
 /**
- * Tier-P read for the top-tools call detail (task #481; all-calls mode #484).
+ * Tier-P read for the top-tools call detail (task #481; all-calls mode #484; V2).
  *
- * Reads tool parts (`part.data.type = 'tool'`) restricted to the session ids
- * resolved by Tier-S ({@link listSessionIds}). The base predicate depends on the
- * requested `status`: the default `errors` keeps the unified failure definition
- * `part.data.state.status IN ('error', 'failed')` (the same definition the
+ * Walks the tool `data.content[]` items of `session_message`
+ * (`json_each(m.data, '$.content')`, `$.type = 'tool'`) restricted to the session
+ * ids resolved by Tier-S ({@link listSessionIds}). The base predicate depends on
+ * the requested `status`: the default `errors` keeps the unified failure
+ * definition `$.state.status IN ('error', 'failed')` (the same definition the
  * top-tools aggregate uses), while `all` drops the status constraint and returns
  * every call. The id list is queried in chunks under SQLite's variable limit and
  * the per-chunk partials are merged in JS, so a `period=all` read stays bounded
  * (the caller caps the id set; see `MAX_TOOL_SESSIONS`). `event` stays untouched.
  *
- * The `session` join is deliberately absent: `agent` is a per-session value, so
- * it is read once into a `session.id -> label` map ({@link agentBySession})
- * instead of joining it into every `part` scan. That keeps the query shape
- * simple and the session filter the driving predicate.
+ * The `session_v2` join is deliberately absent: `agent` is a per-session value,
+ * so it is read once into a `session.id -> label` map ({@link agentBySession})
+ * instead of joining it into every content scan. That keeps the query shape
+ * simple and the session filter the driving predicate (the session-id predicate
+ * plus `type='assistant'` keeps the outer read on
+ * `session_message_session_type_seq_idx`; decision D-3).
  *
  * Paging across chunks: each chunk is asked for its newest `offset + limit`
  * rows, the union is sorted newest-first and sliced globally. That is exact —
  * the global top `offset + limit` rows can only come from the per-chunk top
  * `offset + limit` — without a second full scan.
  *
- * Since #538 a row also reads `part.data.state.input`/`output`, the
- * `state.time.end` bound and derives the MCP/delegation flags from the tool
- * name, so a row can feed the shared `ToolCallDetail` card.
+ * A row carries the content item's `$.id` (the former `callID`), `$.state.input`
+ * and the joined `$.state.content` text output, the item's `time.completed` end
+ * and the MCP/delegation flags derived from the tool name, so a row can feed the
+ * shared `ToolCallDetail` card.
  */
 import { getDb } from '../db';
-import { jsonExtract, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import {
+	jsonEquals,
+	jsonExtract,
+	jsonIn,
+	JSON_PATH,
+	CONTENT_TYPE,
+	MESSAGE_TYPE,
+	toolOutputText,
+	type Row
+} from '../schema';
 import { isMcpTool, FAILED_TOOL_STATUSES } from '../../model/tool-kind';
 import {
 	DEFAULT_TOOL_CALL_STATUS,
@@ -35,6 +48,7 @@ import {
 } from '../../model/tool-errors';
 import {
 	chunk,
+	CONTENT_ITEM_ALIAS,
 	IN_CHUNK_SIZE,
 	isBound,
 	toCount,
@@ -43,27 +57,29 @@ import {
 	UNKNOWN_LABEL
 } from './dashboard-shared';
 
-/** Error text: `part.data.state.error`, or an empty string when absent. */
-const ERROR_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.error)}, '')`;
-/** Raw status: `part.data.state.status`, or an empty string when absent. */
-const STATUS_EXPR = `COALESCE(${jsonExtract('part.data', JSON_PATH.part.status)}, '')`;
-/** Raw tool input (`part.data.state.input`); `null` when absent. */
-const INPUT_EXPR = jsonExtract('part.data', JSON_PATH.part.stateInput);
-/** Raw tool output (`part.data.state.output`); `null` when absent. */
-const OUTPUT_EXPR = jsonExtract('part.data', JSON_PATH.part.stateOutput);
-/** Tool end time (`part.data.state.time.end`); `null` when absent. */
-const ENDED_EXPR = jsonExtract('part.data', JSON_PATH.part.stateEnd);
+/** The `json_each` item alias (`j.value` is the content item). */
+const ITEM = `${CONTENT_ITEM_ALIAS}.value`;
+/** Error text: `$.state.error.message`, or an empty string when absent. */
+const ERROR_EXPR = `COALESCE(${jsonExtract(ITEM, JSON_PATH.content.errorMessage)}, '')`;
+/** Raw status: `$.state.status`, or an empty string when absent. */
+const STATUS_EXPR = `COALESCE(${jsonExtract(ITEM, JSON_PATH.content.status)}, '')`;
+/** Raw tool input (`$.state.input`); `null` when absent. */
+const INPUT_EXPR = jsonExtract(ITEM, JSON_PATH.content.input);
+/** Raw tool output (`$.state.content` JSON array text); `null` when absent. */
+const CONTENT_EXPR = jsonExtract(ITEM, JSON_PATH.content.content);
+/** Tool end time (`$.time.completed`); `null` when absent. */
+const ENDED_EXPR = jsonExtract(ITEM, JSON_PATH.content.timeCompleted);
 
 /**
- * The constant `part` predicate every read in this module shares, for the
- * requested mode: tool parts only, plus the failed pair unless `all` was asked.
+ * The constant content-item predicate every read in this module shares, for the
+ * requested mode: tool items only, plus the failed pair unless `all` was asked.
  * The failed pair comes from {@link FAILED_TOOL_STATUSES}, the single shared
  * definition of a failed tool call.
  */
 function baseWhere(status: ToolCallStatus): string {
-	const typePredicate = `${jsonExtract('part.data', JSON_PATH.part.type)} = '${PART_TYPE.tool}'`;
+	const typePredicate = jsonEquals(ITEM, JSON_PATH.content.itemType, CONTENT_TYPE.tool);
 	if (status === 'all') return typePredicate;
-	return `${typePredicate} AND ${jsonIn('part.data', JSON_PATH.part.status, FAILED_TOOL_STATUSES)}`;
+	return `${typePredicate} AND ${jsonIn(ITEM, JSON_PATH.content.status, FAILED_TOOL_STATUSES)}`;
 }
 
 /** Escape LIKE wildcards so a raw search term matches literally (`ESCAPE '\'`). */
@@ -122,17 +138,17 @@ function bindIds(
 }
 
 /**
- * `session.id -> agent label` for the requested id set, one query per chunk.
+ * `session_v2.id -> agent label` for the requested id set, one query per chunk.
  * A session with no row maps to `unknown`, matching the removed join's
- * `COALESCE(NULLIF(trim(session.agent), ''), 'unknown')`.
+ * `COALESCE(NULLIF(trim(session_v2.agent), ''), 'unknown')`.
  */
 function agentBySession(sessionIds: readonly string[]): Map<string, string> {
 	const map = new Map<string, string>();
 	for (const id of sessionIds) map.set(id, UNKNOWN_LABEL);
 	const db = getDb();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
-		const sql = `SELECT session.id AS id, session.agent AS agent
-			FROM session WHERE session.id IN (${idPlaceholders(ids.length)})`;
+		const sql = `SELECT session_v2.id AS id, session_v2.agent AS agent
+			FROM session_v2 WHERE session_v2.id IN (${idPlaceholders(ids.length)})`;
 		const rows = db.query(sql).all(bindIds({}, ids)) as Row[];
 		for (const row of rows) {
 			const agent = toText(row.agent).trim();
@@ -142,7 +158,7 @@ function agentBySession(sessionIds: readonly string[]): Map<string, string> {
 	return map;
 }
 
-/** `part.data.state.input`/`output`: `null` for a NULL/blank value. */
+/** `$.state.input`/`output`: `null` for a NULL/blank value. */
 function toNullableText(value: unknown): string | null {
 	const text = toText(value);
 	return text === '' ? null : text;
@@ -152,7 +168,7 @@ function mapRow(row: Row, agents: ReadonlyMap<string, string>): ToolErrorEntry {
 	const tool = toText(row.tool);
 	const sessionId = toText(row.session_id);
 	return {
-		id: toText(row.id),
+		id: toText(row.call_id),
 		sessionId,
 		at: toCount(row.at),
 		agent: agents.get(sessionId) ?? UNKNOWN_LABEL,
@@ -160,10 +176,10 @@ function mapRow(row: Row, agents: ReadonlyMap<string, string>): ToolErrorEntry {
 		status: toText(row.status),
 		error: toText(row.error),
 		input: toNullableText(row.input),
-		output: toNullableText(row.output),
+		output: toolOutputText(toText(row.output_raw)),
 		endedAt: isBound(row.ended_at) ? row.ended_at : null,
 		isMcp: isMcpTool(tool),
-		isDelegation: tool === 'task'
+		isDelegation: tool === 'subagent'
 	};
 }
 
@@ -188,9 +204,9 @@ function finalizeRows(
 }
 
 /**
- * One global page of tool calls, newest first (`part.time_created` desc, then
- * `part.id` desc). Returns `[]` for an empty id set; `offset`/`limit` are
- * assumed already clamped by the caller.
+ * One global page of tool calls, newest first (`session_message.time_created`
+ * desc, then the content item `$.id` desc). Returns `[]` for an empty id set;
+ * `offset`/`limit` are assumed already clamped by the caller.
  */
 export function listToolErrors(
 	sessionIds: readonly string[],
@@ -210,18 +226,19 @@ export function listToolErrors(
 	const collected: ToolErrorEntry[] = [];
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
-			SELECT part.id AS id,
-				part.session_id AS session_id,
-				part.time_created AS at,
+			SELECT ${jsonExtract(ITEM, JSON_PATH.content.callId)} AS call_id,
+				m.session_id AS session_id,
+				m.time_created AS at,
 				${TOOL_LABEL_EXPR} AS tool,
 				${STATUS_EXPR} AS status,
 				${ERROR_EXPR} AS error,
 				${INPUT_EXPR} AS input,
-				${OUTPUT_EXPR} AS output,
+				${CONTENT_EXPR} AS output_raw,
 				${ENDED_EXPR} AS ended_at
-			FROM part
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}
-			ORDER BY part.time_created DESC, part.id DESC
+			FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
+			WHERE m.session_id IN (${idPlaceholders(ids.length)})
+				AND m.type = '${MESSAGE_TYPE.assistant}' AND ${where}${clause}
+			ORDER BY m.time_created DESC, call_id DESC
 			LIMIT :cap`;
 		const rows = getDb()
 			.query(sql)
@@ -255,8 +272,9 @@ export function countToolErrors(
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
 			SELECT count(*) AS count
-			FROM part
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}${clause}`;
+			FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
+			WHERE m.session_id IN (${idPlaceholders(ids.length)})
+				AND m.type = '${MESSAGE_TYPE.assistant}' AND ${where}${clause}`;
 		const row = getDb().query(sql).get(bindIds(params, ids)) as Row | null;
 		total += toCount(row?.count);
 	}
@@ -280,9 +298,10 @@ export function listToolErrorAgents(
 	const matched = new Set<string>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
-			SELECT part.session_id AS session_id
-			FROM part
-			WHERE part.session_id IN (${idPlaceholders(ids.length)}) AND ${where}`;
+			SELECT m.session_id AS session_id
+			FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
+			WHERE m.session_id IN (${idPlaceholders(ids.length)})
+				AND m.type = '${MESSAGE_TYPE.assistant}' AND ${where}`;
 		const rows = getDb().query(sql).all(bindIds({}, ids)) as Row[];
 		for (const row of rows) {
 			const id = toText(row.session_id);

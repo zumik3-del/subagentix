@@ -10,8 +10,9 @@
 	 * opens the failures-only detail. The detail callback now comes from the
 	 * dashboard shell through context (task #492), not through prop threading.
 	 *
-	 * `getTopTools` caps its `part` scan at `MAX_TOOL_SESSIONS` (the Tier-P
-	 * ceiling) and flags `capped`; `period=all` is also the unbounded slow path.
+	 * `getTopTools` walks the capped session set's `data.content[]` items
+	 * (`MAX_TOOL_SESSIONS`, the Tier-P ceiling) and flags `capped`; `period=all`
+	 * is also the unbounded slow path.
 	 * Either case renders the visible note from {@link topToolsNote}, which needs
 	 * the active period the shell forwards as `filter`.
 	 */

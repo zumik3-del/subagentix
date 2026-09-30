@@ -3,10 +3,11 @@
  * calls, markers and actions it owns.
  */
 import type { Marker, Node, NodeFlag, NodeStatus, TimeFlag } from '../../../model/types';
+import { MESSAGE_TYPE } from '../../schema';
 import { buildActions } from './actions';
 import { buildSteps, linkTools } from './steps';
 import { buildToolCalls } from './tool-calls';
-import { clampEnd, partsIn, sumUsage, type BuiltNode, type SessionData } from './shared';
+import { clampEnd, itemsIn, sumUsage, type BuiltNode, type SessionData } from './shared';
 
 export function buildSessionNode(
 	sd: SessionData,
@@ -18,44 +19,56 @@ export function buildSessionNode(
 ): BuiltNode {
 	const session = sd.session;
 	const messages = restrict ? sd.messages.filter((m) => restrict.has(m.id)) : sd.messages;
-	const stepParts = partsIn(sd.stepParts, restrict);
-	const toolParts = partsIn(sd.toolParts, restrict);
+	const toolItems = itemsIn(sd.toolItems, restrict);
+	const actionItems = itemsIn(sd.actionItems, restrict);
 
+	// Start/end candidates come from the messages and the content-item times
+	// (spec §P2): a message's row-level `updatedAt` is the V2 fallback for an
+	// assistant message with no `time.completed`.
+	const messageStarts = messages.map((m) => m.startedAt);
+	const itemStarts = [...toolItems, ...actionItems]
+		.map((item) => item.timeRan ?? item.timeCreated)
+		.filter((time): time is number => time !== null);
 	const startCandidates = [
 		...(restrict ? [] : [session.createdAt]),
-		...messages.map((m) => m.startedAt),
-		...stepParts.map((p) => p.createdAt),
-		...toolParts.map((p) => p.createdAt)
+		...messageStarts,
+		...itemStarts
 	];
 	const startedAt = startOverride ?? (startCandidates.length ? Math.min(...startCandidates) : session.createdAt);
 
+	const messageEnds = messages.map((m) => m.completedAt ?? m.updatedAt);
+	const itemEnds = [...toolItems, ...actionItems]
+		.map((item) => item.timeCompleted)
+		.filter((time): time is number => time !== null);
 	const endCandidates = [
 		...(restrict ? [] : [session.updatedAt]),
-		...messages.map((m) => m.completedAt ?? m.updatedAt),
-		...stepParts.map((p) => p.updatedAt),
-		...toolParts.map((p) => p.updatedAt)
+		...messageEnds,
+		...itemEnds
 	];
 	const rawEnd = endCandidates.length ? Math.max(...endCandidates) : startedAt;
 
 	const running =
-		messages.some((m) => m.role === 'assistant' && m.completedAt === null) ||
-		toolParts.some((p) => p.status === 'running');
+		messages.some((m) => m.role === MESSAGE_TYPE.assistant && m.completedAt === null) ||
+		toolItems.some((item) => item.status === 'running');
 
+	const compactionTimes = sd.compactions
+		.map((item) => item.timeCreated)
+		.filter((time): time is number => time !== null);
 	const compaction = restrict
-		? sd.compaction.filter((p) => p.createdAt >= startedAt && p.createdAt <= rawEnd)
-		: sd.compaction;
-	const compactionTimes = compaction.map((p) => p.createdAt);
+		? sd.compactions.filter(
+				(item) =>
+					item.timeCreated !== null &&
+					item.timeCreated >= startedAt &&
+					item.timeCreated <= rawEnd
+			)
+		: sd.compactions;
 
 	const steps = buildSteps(sd, restrict, compactionTimes, now);
 	const actions = buildActions(sd, restrict);
 	const callMessage = new Map<string, string>();
 	const allCalls = buildToolCalls(sd, restrict, now);
-	for (const part of toolParts) callMessage.set(part.id, part.messageId);
-	linkTools(
-		steps.map((step) => ({ step, messageId: step.messageId })),
-		allCalls,
-		callMessage
-	);
+	for (const item of toolItems) callMessage.set(item.id, item.messageId);
+	linkTools(steps, allCalls, callMessage);
 
 	const usage = sumUsage(steps.map((step) => step.usage));
 	const flags: NodeFlag[] = [];
@@ -91,10 +104,9 @@ export function buildSessionNode(
 		openStep: steps.some((step) => step.open)
 	};
 
-	const markers: Marker[] = [
-		...compaction.map((part): Marker => ({ type: 'compaction', nodeId: session.id, at: part.createdAt })),
-		...sd.removed.map((): Marker => ({ type: 'removed', nodeId: session.id, at: null }))
-	];
+	const markers: Marker[] = compaction.map(
+		(item): Marker => ({ type: 'compaction', nodeId: session.id, at: item.timeCreated })
+	);
 
 	return { node, rawEnd, steps, toolCalls: allCalls, markers, actions };
 }

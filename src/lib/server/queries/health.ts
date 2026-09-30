@@ -4,20 +4,24 @@
  */
 import type { Database } from 'bun:sqlite';
 
-/** Count sessions on an open connection without reading any content. */
+/** Count sessions on an open connection without reading any content (V2). */
 export function countSessions(db: Database): number {
-	const row = db.query('SELECT count(*) AS count FROM session').get() as {
+	const row = db.query('SELECT count(*) AS count FROM session_v2').get() as {
 		count: number;
 	} | null;
 	return row?.count ?? 0;
 }
 
-/** How many of `session`/`message`/`part` exist (opencode signature: 3). */
-export function countOpencodeSignatureTables(db: Database): number {
+/**
+ * Does this DB carry the opencode V2 signature (`session_v2` +
+ * `session_message`)? V1 and non-opencode DBs fail this check (spec decision
+ * D-4): there is no V1 compatibility path.
+ */
+export function isV2Schema(db: Database): boolean {
 	const row = db
 		.query(
-			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('session','message','part')"
+			"SELECT count(*) AS count FROM sqlite_master WHERE type='table' AND name IN ('session_v2','session_message')"
 		)
 		.get() as { count: number } | null;
-	return row?.count ?? 0;
+	return (row?.count ?? 0) === 2;
 }

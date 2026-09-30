@@ -1,115 +1,68 @@
 /**
- * Step assembly: pair `step-start`/`step-finish` parts into {@link Step} DTOs
- * and attribute tool calls to the step that requested them.
+ * Step assembly: one `assistant` message = one {@link Step} (decision D-1,
+ * spec §3.1). Tool calls are attributed to the single step of their owning
+ * message.
  */
-import { addUsage, emptyUsage, usageFromCounts } from '../../../model/token';
+import { usageFromCounts } from '../../../model/token';
 import type { Step, ToolCall } from '../../../model/types';
-import { PART_TYPE, type PartRecord } from '../../schema';
-import { clampEnd, hasCompactionBetween, partsIn, subtractUsage, type SessionData } from './shared';
+import { MESSAGE_TYPE } from '../../schema';
+import { clampEnd, hasCompactionBetween, type SessionData } from './shared';
 
-/** Pair `step-start`/`step-finish` parts into steps (spec §3.1). */
+/**
+ * Build one step per `assistant` message in scope:
+ * `startedAt = data.time.created`, `endedAt = data.time.completed` (`null` =>
+ * open step), `usage = data.tokens` (+ `data.cost`),
+ * `modelId = data.model.id`, `reason = data.finish` (spec §3.1/G-1).
+ */
 export function buildSteps(
 	sd: SessionData,
 	restrict: Set<string> | null,
 	compactionTimes: number[],
 	now: number
 ): Step[] {
-	const messagesById = new Map(sd.messages.map((message) => [message.id, message]));
-	const grouped = new Map<string, PartRecord[]>();
-	for (const part of partsIn(sd.stepParts, restrict)) {
-		const list = grouped.get(part.messageId);
-		if (list) list.push(part);
-		else grouped.set(part.messageId, [part]);
-	}
-
+	const messages = restrict ? sd.messages.filter((message) => restrict.has(message.id)) : sd.messages;
 	const steps: Step[] = [];
-	for (const [messageId, parts] of grouped) {
-		const message = messagesById.get(messageId);
-		let openStart: PartRecord | null = null;
-		let index = 0;
-		let closedUsage = emptyUsage();
-
-		for (const part of parts) {
-			if (part.type === PART_TYPE.stepStart) {
-				openStart = part;
-				continue;
-			}
-			if (part.type !== PART_TYPE.stepFinish) continue;
-
-			const startedAt = openStart?.createdAt ?? part.createdAt;
-			const { endedAt, flags } = clampEnd(startedAt, part.createdAt, now);
-			const step: Step = {
-				id: part.id,
-				nodeId: part.sessionId,
-				messageId,
-				index: index++,
-				startedAt,
-				endedAt,
-				open: false,
-				flags,
-				reason: part.reason,
-				usage: usageFromCounts(part.usage, part.cost),
-				modelId: message?.modelId ?? null,
-				hasCompaction:
-					endedAt !== null && hasCompactionBetween(compactionTimes, startedAt, endedAt),
-				toolCallIds: []
-			};
-			steps.push(step);
-			closedUsage = addUsage(closedUsage, step.usage);
-			openStart = null;
-		}
-
-		if (openStart) {
-			// Open step (no `step-finish`): residual usage = message tokens - closed steps.
-			const messageUsage = message ? usageFromCounts(message.usage, message.cost) : emptyUsage();
-			steps.push({
-				id: openStart.id,
-				nodeId: openStart.sessionId,
-				messageId,
-				index: index++,
-				startedAt: openStart.createdAt,
-				endedAt: null,
-				open: true,
-				flags: [],
-				reason: null,
-				usage: subtractUsage(messageUsage, closedUsage),
-				modelId: message?.modelId ?? sd.session.modelId,
-				hasCompaction: false,
-				toolCallIds: []
-			});
-		}
+	for (const message of messages) {
+		if (message.role !== MESSAGE_TYPE.assistant) continue;
+		const startedAt = message.startedAt;
+		const { endedAt, flags } = clampEnd(startedAt, message.completedAt, now);
+		steps.push({
+			id: message.id,
+			nodeId: message.sessionId,
+			messageId: message.id,
+			index: 0,
+			startedAt,
+			endedAt,
+			open: message.completedAt === null,
+			flags,
+			reason: message.finish,
+			usage: usageFromCounts(message.usage, message.cost),
+			modelId: message.modelId ?? sd.session.modelId,
+			hasCompaction: endedAt !== null && hasCompactionBetween(compactionTimes, startedAt, endedAt),
+			toolCallIds: []
+		});
 	}
 	return steps;
 }
 
 /**
- * Attribute each tool call to the step that requested it: the latest closed
- * step in the same message whose end precedes the call. Falls back to the last
- * step of the message, else leaves `stepId` null.
+ * Attribute every tool call to the single step of its owning message (decision
+ * D-1). `callMessage` maps a call id to its message id; a message owns exactly
+ * one step, so `Step.toolCallIds` ends up holding every tool item of that
+ * message.
  */
 export function linkTools(
-	stepsWithMessage: Array<{ step: Step; messageId: string }>,
+	steps: Step[],
 	calls: ToolCall[],
 	callMessage: Map<string, string>
 ): void {
-	const byMessage = new Map<string, Step[]>();
-	for (const { step, messageId } of stepsWithMessage) {
-		const list = byMessage.get(messageId);
-		if (list) list.push(step);
-		else byMessage.set(messageId, [step]);
-	}
+	const stepByMessage = new Map(steps.map((step) => [step.messageId, step]));
 	for (const call of calls) {
 		const messageId = callMessage.get(call.id);
-		if (!messageId) continue;
-		const candidates = byMessage.get(messageId) ?? [];
-		if (candidates.length === 0) continue;
-		const startedAt = call.startedAt ?? Number.POSITIVE_INFINITY;
-		let best: Step | null = null;
-		for (const candidate of candidates) {
-			if (candidate.endedAt !== null && candidate.endedAt <= startedAt) best = candidate;
-		}
-		best ??= candidates[candidates.length - 1];
-		call.stepId = best.id;
-		best.toolCallIds.push(call.id);
+		if (messageId === undefined) continue;
+		const step = stepByMessage.get(messageId);
+		if (step === undefined) continue;
+		call.stepId = step.id;
+		step.toolCallIds.push(call.id);
 	}
 }

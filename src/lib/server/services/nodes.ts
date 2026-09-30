@@ -6,7 +6,7 @@
  * `buildSessionNode` used by `buildTurnModel`) instead of rebuilding the whole
  * turn model, so a per-node read stays proportional to that node. It reuses the
  * cached session graph (subtree + subtree edges, task #386), the turn-scoped
- * part reads and the shared turn-scope helpers — no separate SQL path.
+ * content-item reads and the shared turn-scope helpers — no separate SQL path.
  *
  * This is the API counterpart of the client's pure `selectNodeDetail`; both
  * return the same shape, so the route and the already-loaded Gantt agree.
@@ -17,12 +17,11 @@ import {
 	getActionParts,
 	getCompactionParts,
 	getMessages,
-	getRemovedMarkers,
-	getStepParts,
 	getToolParts
-} from '../queries/parts';
+} from '../queries/messages';
 import { loadSessionGraph } from '../queries/session-graph';
 import type { SessionSubtreeRecord } from '../queries/sessions';
+import { MESSAGE_TYPE } from '../schema';
 import { buildEdge } from './turn';
 import { buildSessionNode } from './turn/node';
 import { applyScopeFlags, computeTurnOfSession, selectEdgeRecords, selectTurnSessions } from './turn/scope';
@@ -72,7 +71,7 @@ export function buildNodeDetail(
 	if (!rootSession || !nodeSession) return null;
 
 	const rootMessages = getMessages(rootSessionId);
-	const triggers = rootMessages.filter((message) => message.role === 'user');
+	const triggers = rootMessages.filter((message) => message.role === MESSAGE_TYPE.user);
 	if (triggers.length === 0) return null;
 
 	const rootEdges = subtreeEdges.filter((edge) => edge.sessionId === rootSessionId);
@@ -96,21 +95,25 @@ export function buildNodeDetail(
 	const trigger = triggers[triggerIndex];
 	const nextTrigger = triggers[triggerIndex + 1] ?? null;
 	const isRoot = nodeId === rootSessionId;
-	// The root's part reads are scoped to this turn's messages in SQL, so another
-	// turn's parts never reach JS (task #386); subagent turns own the full session.
+	// The root's item reads are scoped to this turn's messages in SQL, so another
+	// turn's items never reach JS (task #386); subagent turns own the full session.
+	// Turn membership is the `seq` window (decision D-2).
 	const turnMessageIds = rootMessages
-		.filter((message) => message.role === 'assistant' && message.parentId === trigger.id)
+		.filter(
+			(message) =>
+				message.role === MESSAGE_TYPE.assistant &&
+				message.seq > trigger.seq &&
+				(nextTrigger === null || message.seq < nextTrigger.seq)
+		)
 		.map((message) => message.id);
 	const scope = isRoot ? turnMessageIds : undefined;
 
 	const sessionData: SessionData = {
 		session: nodeSession,
 		messages: isRoot ? rootMessages : getMessages(nodeSession.id),
-		stepParts: getStepParts(nodeSession.id, scope),
-		toolParts: getToolParts(nodeSession.id, scope),
-		actionParts: getActionParts(nodeSession.id, scope),
-		compaction: getCompactionParts(nodeSession.id),
-		removed: getRemovedMarkers(nodeSession.id)
+		toolItems: getToolParts(nodeSession.id, scope),
+		actionItems: getActionParts(nodeSession.id, scope),
+		compactions: getCompactionParts(nodeSession.id)
 	};
 
 	// Node -> spawn counts / subagent fallback. `buildTurnModel` counts the root

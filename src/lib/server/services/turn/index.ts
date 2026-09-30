@@ -2,10 +2,12 @@
  * Turn assembler: reconstructs one opencode turn into a {@link GanttModel}
  * (ADR §6.4).
  *
- * A turn = one root-session `role='user'` message + the assistant messages that
- * reference it (`data.parentID`) + the subagent sessions it spawned. All
- * timestamps are wall-clock epoch-ms; `end=null` means "still running"; raw
- * ends in the future or before their start are clamped and flagged.
+ * A turn = one root-session `type='user'` message + the `assistant` messages of
+ * the same session with a greater `seq` up to (excluding) the next `user`
+ * message (decision D-2, no `data.parentID`), plus the subagent sessions it
+ * spawned. All timestamps are wall-clock epoch-ms; `end=null` means "still
+ * running"; raw ends in the future or before their start are clamped and
+ * flagged.
  *
  * This module is the public surface of the split domain: it orchestrates the
  * scope, node and edge modules and composes the final DTO.
@@ -16,12 +18,10 @@ import {
 	getActionParts,
 	getCompactionParts,
 	getMessages,
-	getRemovedMarkers,
-	getStepParts,
 	getToolParts
-} from '../../queries/parts';
+} from '../../queries/messages';
 import { loadSessionGraph } from '../../queries/session-graph';
-import type { DelegationRecord } from '../../schema';
+import { MESSAGE_TYPE, type DelegationRecord } from '../../schema';
 import { buildEdge } from './edge';
 import { buildSessionNode } from './node';
 import {
@@ -50,7 +50,7 @@ export function buildTurnModel(
 	if (!rootSession) return null;
 
 	const rootMessages = getMessages(rootSessionId);
-	const triggers = rootMessages.filter((message) => message.role === 'user');
+	const triggers = rootMessages.filter((message) => message.role === MESSAGE_TYPE.user);
 	const triggerIndex = triggers.findIndex((message) => message.id === triggerMessageId);
 	if (triggerIndex === -1) return null;
 	const trigger = triggers[triggerIndex];
@@ -62,15 +62,21 @@ export function buildTurnModel(
 	const turnOfSession = computeTurnOfSession(subtree, rootEdges, triggers);
 	const turnSessions = selectTurnSessions(subtree, turnOfSession, triggerIndex);
 
+	// Turn membership is the `seq` window (decision D-2): assistant messages
+	// after the trigger, up to (excluding) the next trigger.
 	const turnMessageIds = new Set(
 		rootMessages
-			.filter((message) => message.role === 'assistant' && message.parentId === triggerMessageId)
+			.filter(
+				(message) =>
+					message.role === MESSAGE_TYPE.assistant &&
+					message.seq > trigger.seq &&
+					(nextTrigger === null || message.seq < nextTrigger.seq)
+			)
 			.map((message) => message.id)
 	);
-	// The root's part reads are scoped to this turn's messages in SQL, so another
-	// turn's parts never reach JS (task #386). Compaction/removed markers stay
-	// session-scoped: the assembler intentionally mirrors every compaction and
-	// the removed markers are event-sourced, not message-scoped.
+	// The root's item reads are scoped to this turn's messages in SQL, so another
+	// turn's items never reach JS (task #386). Compaction markers stay
+	// session-scoped: the assembler intentionally mirrors every compaction.
 	const turnMessageIdList = [...turnMessageIds];
 
 	// Spawn counts / fallback agent names across every edge in the turn.
@@ -91,11 +97,9 @@ export function buildTurnModel(
 		return {
 			session,
 			messages: isRoot ? rootMessages : getMessages(session.id),
-			stepParts: getStepParts(session.id, scope),
-			toolParts: getToolParts(session.id, scope),
-			actionParts: getActionParts(session.id, scope),
-			compaction: getCompactionParts(session.id),
-			removed: getRemovedMarkers(session.id)
+			toolItems: getToolParts(session.id, scope),
+			actionItems: getActionParts(session.id, scope),
+			compactions: getCompactionParts(session.id)
 		};
 	});
 

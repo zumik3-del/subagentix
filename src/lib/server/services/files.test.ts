@@ -2,16 +2,17 @@ import { expect, test } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 
 /**
- * Wrapper for the projectLink probe invalidation suite (task #359, issue #4).
+ * Wrapper for the files service suite (task #780, epic #775).
  *
- * The suite opens real fixture DBs through `$lib/server/db`, so it runs in an
- * isolated child `bun test` process (same `mock.module` leak rationale as
- * `directories.suite.ts` / `search.suite.ts`).
+ * The suite opens a real fixture DB and sets `OPENCODE_DB` /
+ * `OPENCODE_CONFIG_DIR`, so it runs in an isolated child `bun test` process
+ * to avoid polluting the parent runner's module graph (same rationale as
+ * `directories.suite.ts` / `api.suite.ts`).
  */
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
-const suite = './src/lib/server/queries/project-link-probe.suite.ts';
+const suite = './src/lib/server/services/files.suite.ts';
 
-test('projectLink probe invalidation suite passes in an isolated child process', async () => {
+test('files service suite passes in an isolated child process', async () => {
 	const proc = Bun.spawn(['bun', 'test', suite], {
 		cwd: repoRoot,
 		env: process.env,
@@ -29,4 +30,4 @@ test('projectLink probe invalidation suite passes in an isolated child process',
 	expect(report).toContain('0 fail');
 	expect(report).toMatch(/[1-9]\d* pass/);
 	expect(exitCode).toBe(0);
-});
+}, 30_000);

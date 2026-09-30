@@ -14,7 +14,8 @@
 			| 'expand'
 			| 'collapse'
 			| 'arrow-up'
-			| 'refresh';
+			| 'refresh'
+			| 'files';
 		size?: number;
 	}
 
@@ -150,6 +151,23 @@
 	>
 		<path d="M13.66 10a6 6 0 1 1-1.41-6.24L15.33 6.67" />
 		<polyline points="15.33 2.67 15.33 6.67 11.33 6.67" />
+	</svg>
+{:else if name === 'files'}
+	<svg
+		class="icon"
+		width={size}
+		height={size}
+		viewBox="0 0 16 16"
+		fill="none"
+		stroke="currentColor"
+		stroke-width="1.4"
+		stroke-linecap="round"
+		stroke-linejoin="round"
+		aria-hidden="true"
+		focusable="false"
+	>
+		<path d="M3.5 1.5h5.25L12.5 5.25v9.25a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z" />
+		<path d="M8.75 1.5v3.75h3.75" />
 	</svg>
 {:else}
 	<svg

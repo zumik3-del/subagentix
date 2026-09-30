@@ -19,6 +19,17 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { computeTimeScale, FALLBACK_CHART_W, orderNodes } from '$lib/model/gantt';
 import type { Node } from '$lib/model/types';
+import {
+	addAssistantMessage,
+	addCompactionMessage,
+	addProject,
+	addSessionV2,
+	addUserMessage,
+	applyV2Schema,
+	subagentItem,
+	toolItem,
+	T
+} from '../lib/server/test-fixtures/opencode-v2';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const buildIndex = join(repoRoot, 'build', 'index.js');
@@ -27,30 +38,7 @@ const clientDir = join(repoRoot, 'build', 'client');
 const tempDirs: string[] = [];
 const running: Array<() => Promise<void>> = [];
 
-const T = 1_700_000_000_000;
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'openai' });
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
+const MODEL = { id: 'gpt-5', providerID: 'openai' };
 
 function tempDir(prefix: string): string {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -58,79 +46,38 @@ function tempDir(prefix: string): string {
 	return dir;
 }
 
+/** A valid V2 DB seed: one project, then whatever the caller adds. */
+function openFixture(path: string): Database {
+	const db = new Database(path);
+	applyV2Schema(db);
+	addProject(db, { name: 'Pages' });
+	return db;
+}
+
 /** A valid DB: one root session with one turn, plus a child delegation. */
 function buildPopulatedDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	session.run('root1', null, '/repo/a', 'Root one', 'build', T, T + 900, null, 2, 310, 125, 40, 20, 10, MODEL);
-	session.run('child1', 'root1', '/repo/a', 'Child one', 'developer', T + 500, T + 800, null, 0.5, 50, 20, 10, 0, 0, MODEL);
+	const db = openFixture(path);
+	addSessionV2(db, { id: 'root1', dir: '/repo/a', title: 'Root one', agent: 'build', created: T, updated: T + 900, cost: 2, tokens: { input: 310, output: 125, reasoning: 40, cacheRead: 20, cacheWrite: 10 }, model: MODEL });
+	addSessionV2(db, { id: 'child1', parentId: 'root1', dir: '/repo/a', title: 'Child one', agent: 'developer', created: T + 500, updated: T + 800, cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 }, model: MODEL });
 
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	message.run('u1', 'root1', T + 100, T + 100, JSON.stringify({ role: 'user', time: { created: T + 100 } }));
-	message.run(
-		'a1',
-		'root1',
-		T + 150,
-		T + 900,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'u1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 2,
-			tokens: { input: 300, output: 120, reasoning: 40, cache: { read: 20, write: 10 } },
-			time: { created: T + 150, completed: T + 900 }
-		})
-	);
-
-	const part = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
-	part.run('s1', 'a1', 'root1', T + 150, T + 150, JSON.stringify({ type: 'step-start' }));
-	part.run(
-		'f1',
-		'a1',
-		'root1',
-		T + 900,
-		T + 900,
-		JSON.stringify({ type: 'step-finish', reason: 'stop', tokens: { input: 150, output: 60, reasoning: 20, cache: { read: 10, write: 5 } }, cost: 1 })
-	);
-	part.run(
-		'd1',
-		'a1',
-		'root1',
-		T + 500,
-		T + 500,
-		JSON.stringify({
-			type: 'tool',
-			tool: 'task',
-			callID: 'c1',
-			state: {
-				status: 'completed',
-				time: { start: T + 500, end: T + 800 },
-				metadata: { parentSessionId: 'root1', sessionId: 'child1' },
-				input: { subagent_type: 'developer', description: 'build' },
-				output: 'result'
-			}
-		})
-	);
+	addUserMessage(db, { id: 'u1', sessionId: 'root1', seq: 1, created: T + 100, text: 'go' });
+	// One assistant message = one Step (decision D-1): its own time/cost/tokens
+	// are the step's, and it carries the delegation item.
+	addAssistantMessage(db, {
+		id: 'a1', sessionId: 'root1', seq: 2, created: T + 150, completed: T + 900,
+		agent: 'build', model: MODEL,
+		cost: 2, tokens: { input: 300, output: 120, reasoning: 40, cacheRead: 20, cacheWrite: 10 },
+		finish: 'stop',
+		content: [
+			subagentItem({ id: 'c1', childSessionId: 'child1', agent: 'developer', description: 'build', status: 'completed', text: 'result', created: T + 500, ran: T + 500, completed: T + 800 })
+		]
+	});
 	db.close();
 }
 
 /** A valid, empty DB (schema present, zero sessions) for the empty-state page. */
 function buildEmptyDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.close();
+	openFixture(path).close();
 }
 
 /**
@@ -139,140 +86,98 @@ function buildEmptyDb(path: string): void {
  * (two to `child1` -> multiSpawn, one before the first trigger -> orphanEdge on
  * the root, one childless -> noChild), a running node/open step (`runChild`),
  * a 4-way tool mix, a clamped span, a future end, an overlap past the next
- * trigger, and compaction + removed markers.
+ * trigger, and a compaction message.
+ *
+ * Two V2 shapes are worth noting. Compaction is its own `session_message` row,
+ * not a part (G-5). The removed-content marker is gone entirely: V2 emits no
+ * `message.removed.1` events, so there is nothing to anchor at the data edge
+ * (G-8) — the running-turn fixture below therefore no longer carries one.
  */
 function buildGanttDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const part = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
-	const event = db.prepare(
-		'INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)'
-	);
+	const db = openFixture(path);
 
 	// Anchor the fixture near "now" so the live `Date.now()` clamps stay sane and
 	// the derived chart stays small (a 2023 anchor would inflate the tick count).
 	const G = Date.now() - 60_000;
 	const future = Date.now() + 5_000;
 
-	session.run('root1', null, '/repo/a', 'Gantt root', 'build', G, G + 20_000, null, 3, 310, 125, 40, 20, 10, MODEL);
-	session.run('child1', 'root1', '/repo/a', 'Child', 'developer', G + 2_000, G + 2_600, null, 0.5, 50, 20, 10, 0, 0, MODEL);
-	session.run('clampChild', 'root1', '/repo/a', 'Clamped', 'tester', G + 4_000, G + 3_900, null, 0, 0, 0, 0, 0, 0, null);
-	session.run('futureChild', 'root1', '/repo/a', 'Future', 'reviewer', G + 5_000, future, null, 0, 0, 0, 0, 0, 0, MODEL);
-	session.run('runChild', 'root1', '/repo/a', 'Running', 'developer', G + 6_000, G + 6_100, null, 0, 0, 0, 0, 0, 0, MODEL);
+	addSessionV2(db, { id: 'root1', dir: '/repo/a', title: 'Gantt root', agent: 'build', created: G, updated: G + 20_000, cost: 3, tokens: { input: 310, output: 125, reasoning: 40, cacheRead: 20, cacheWrite: 10 }, model: MODEL });
+	addSessionV2(db, { id: 'child1', parentId: 'root1', dir: '/repo/a', title: 'Child', agent: 'developer', created: G + 2_000, updated: G + 2_600, cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 }, model: MODEL });
+	addSessionV2(db, { id: 'clampChild', parentId: 'root1', dir: '/repo/a', title: 'Clamped', agent: 'tester', created: G + 4_000, updated: G + 3_900, model: null });
+	addSessionV2(db, { id: 'futureChild', parentId: 'root1', dir: '/repo/a', title: 'Future', agent: 'reviewer', created: G + 5_000, updated: future, model: MODEL });
+	addSessionV2(db, { id: 'runChild', parentId: 'root1', dir: '/repo/a', title: 'Running', agent: 'developer', created: G + 6_000, updated: G + 6_100, model: MODEL });
 
 	// Two root turns: u1 is the requested turn, u2 exists so `overlapsNextTurn`
-	// can fire (a1 ends after u2 starts).
-	message.run('u1', 'root1', G + 1_000, G + 1_000, JSON.stringify({ role: 'user', time: { created: G + 1_000 } }));
-	message.run('u2', 'root1', G + 9_000, G + 9_000, JSON.stringify({ role: 'user', time: { created: G + 9_000 } }));
-	message.run(
-		'a1',
-		'root1',
-		G + 1_100,
-		G + 12_000,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'u1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 1,
-			tokens: { input: 300, output: 120, reasoning: 40, cache: { read: 20, write: 10 } },
-			time: { created: G + 1_100, completed: G + 12_000 }
-		})
-	);
+	// can fire (a1 ends after u2 starts). Turn membership is `seq` order, so a1
+	// must be sequenced before u2 even though its end time is later.
+	addUserMessage(db, { id: 'u1', sessionId: 'root1', seq: 1, created: G + 1_000, text: 'first' });
+	addCompactionMessage(db, { id: 'cmp1', sessionId: 'root1', seq: 3, created: G + 8_000 });
+	addUserMessage(db, { id: 'u2', sessionId: 'root1', seq: 4, created: G + 9_000, text: 'second' });
 
-	part.run('s1', 'a1', 'root1', G + 1_100, G + 1_100, JSON.stringify({ type: 'step-start' }));
-	part.run(
-		'f1',
-		'a1',
-		'root1',
-		G + 12_000,
-		G + 12_000,
-		JSON.stringify({ type: 'step-finish', reason: 'stop', tokens: { input: 150, output: 60, reasoning: 20, cache: { read: 10, write: 5 } }, cost: 1 })
-	);
-	part.run(
-		'bash1',
-		'a1',
-		'root1',
-		G + 1_200,
-		G + 1_400,
-		JSON.stringify({ type: 'tool', tool: 'bash', callID: 'c-bash', state: { status: 'completed', time: { start: G + 1_200, end: G + 1_400 }, input: '{}', output: 'ok' } })
-	);
-	part.run(
-		'mcp1',
-		'a1',
-		'root1',
-		G + 1_500,
-		G + 1_500,
-		JSON.stringify({ type: 'tool', tool: 'mcp_x_recall', callID: 'c-mcp', state: { status: 'error', error: 'boom', time: { start: G + 1_500, end: G + 1_450 }, input: '{}', output: '' } })
-	);
-	part.run('cmp1', 'a1', 'root1', G + 8_000, G + 8_000, JSON.stringify({ type: 'compaction', auto: 1 }));
-
-	const task = (
-		id: string,
-		created: number,
-		end: number | null,
-		child: string | null,
-		status: string,
-		error?: string
-	) =>
-		part.run(
-			id,
-			'a1',
-			'root1',
+	// a1 carries a 2-tool mix then six delegation items. Content order fixes the
+	// `messageId#index` ids: a1#0, a1#1, then a1#2..a1#7.
+	const edge = (id: string, child: string | null, status: string, created: number, end: number | null, error?: string) =>
+		subagentItem({
+			id: `c-${id}`,
+			childSessionId: child,
+			agent: 'developer',
+			status,
+			...(error !== undefined ? { error: { type: 'error', message: error } } : {}),
 			created,
-			created,
-			JSON.stringify({
-				type: 'tool',
-				tool: 'task',
-				callID: `c-${id}`,
-				state: {
-					status,
-					...(error ? { error } : {}),
-					time: end === null ? { start: created } : { start: created, end },
-					metadata: child === null ? { parentSessionId: 'root1' } : { parentSessionId: 'root1', sessionId: child },
-					input: { subagent_type: 'developer' },
-					output: ''
-				}
-			})
-		);
+			ran: created,
+			...(end !== null ? { completed: end } : {})
+		});
 
-	// Before the first trigger -> orphanEdge; a second edge to child1 -> multiSpawn.
-	task('d_orphan', G + 500, G + 700, 'child1', 'completed');
-	task('d1', G + 2_000, G + 2_600, 'child1', 'completed');
-	task('d_nochild', G + 3_000, G + 3_100, null, 'error', 'spawn failed');
-	task('d_clamp', G + 4_000, G + 4_100, 'clampChild', 'completed');
-	task('d_future', G + 5_000, G + 5_100, 'futureChild', 'completed');
-	task('d_run', G + 6_000, null, 'runChild', 'running');
+	addAssistantMessage(db, {
+		id: 'a1',
+		sessionId: 'root1',
+		seq: 2,
+		created: G + 1_100,
+		completed: G + 12_000,
+		agent: 'build',
+		model: MODEL,
+		cost: 1,
+		tokens: { input: 300, output: 120, reasoning: 40, cacheRead: 20, cacheWrite: 10 },
+		finish: 'stop',
+		content: [
+			toolItem('bash', { id: 'c-bash', status: 'completed', input: {}, text: 'ok', created: G + 1_200, ran: G + 1_200, completed: G + 1_400 }),
+			toolItem('mcp_x_recall', { id: 'c-mcp', status: 'error', input: {}, error: { type: 'error', message: 'boom' }, created: G + 1_500, ran: G + 1_500, completed: G + 1_450 }),
+			// Before the first trigger -> orphanEdge; a second edge to child1 -> multiSpawn.
+			edge('d_orphan', 'child1', 'completed', G + 500, G + 700),
+			edge('d1', 'child1', 'completed', G + 2_000, G + 2_600),
+			edge('d_nochild', null, 'error', G + 3_000, G + 3_100, 'spawn failed'),
+			edge('d_clamp', 'clampChild', 'completed', G + 4_000, G + 4_100),
+			edge('d_future', 'futureChild', 'completed', G + 5_000, G + 5_100),
+			edge('d_run', 'runChild', 'running', G + 6_000, null)
+		]
+	});
 
 	// child1: a closed step + one non-delegation tool.
-	message.run('cu1', 'child1', G + 2_000, G + 2_000, JSON.stringify({ role: 'user', time: { created: G + 2_000 } }));
-	message.run('ca1', 'child1', G + 2_100, G + 2_600, JSON.stringify({ role: 'assistant', parentID: 'cu1', agent: 'developer', modelID: 'gpt-5', providerID: 'openai', cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 }, time: { created: G + 2_100, completed: G + 2_600 } }));
-	part.run('s1c', 'ca1', 'child1', G + 2_100, G + 2_100, JSON.stringify({ type: 'step-start' }));
-	part.run('f1c', 'ca1', 'child1', G + 2_600, G + 2_600, JSON.stringify({ type: 'step-finish', reason: 'stop', tokens: { input: 50, output: 20, reasoning: 10 }, cost: 0.5 }));
-	part.run('read1', 'ca1', 'child1', G + 2_200, G + 2_300, JSON.stringify({ type: 'tool', tool: 'read', callID: 'c-read', state: { status: 'completed', time: { start: G + 2_200, end: G + 2_300 }, input: '{}', output: 'x' } }));
+	addUserMessage(db, { id: 'cu1', sessionId: 'child1', seq: 1, created: G + 2_000, text: 'child' });
+	addAssistantMessage(db, {
+		id: 'ca1', sessionId: 'child1', seq: 2, created: G + 2_100, completed: G + 2_600,
+		agent: 'developer', model: MODEL,
+		cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 },
+		finish: 'stop',
+		content: [toolItem('read', { id: 'c-read', status: 'completed', input: {}, text: 'x', created: G + 2_200, ran: G + 2_200, completed: G + 2_300 })]
+	});
 
-	// runChild: no completed step -> open step + running node + running tool.
-	message.run('ra1', 'runChild', G + 6_000, G + 6_100, JSON.stringify({ role: 'assistant', agent: 'developer', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 10, output: 5, reasoning: 2 }, time: { created: G + 6_000 } }));
-	part.run('s1r', 'ra1', 'runChild', G + 6_000, G + 6_000, JSON.stringify({ type: 'step-start' }));
-	part.run('bashr', 'ra1', 'runChild', G + 6_050, G + 6_050, JSON.stringify({ type: 'tool', tool: 'bash', callID: 'c-bash-run', state: { status: 'running', time: { start: G + 6_050 }, input: '{}', output: '' } }));
+	// runChild: no completed assistant message -> open step + running node + running tool.
+	addAssistantMessage(db, {
+		id: 'ra1', sessionId: 'runChild', seq: 1, created: G + 6_000,
+		agent: 'developer', model: MODEL,
+		cost: 0, tokens: { input: 10, output: 5, reasoning: 2 },
+		content: [toolItem('bash', { id: 'c-bash-run', status: 'running', input: {}, created: G + 6_050, ran: G + 6_050 })]
+	});
 
 	// futureChild: a completed end in the future -> futureEnd clamp.
-	message.run('fa1', 'futureChild', G + 5_000, future, JSON.stringify({ role: 'assistant', agent: 'reviewer', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, time: { created: G + 5_000, completed: future } }));
-
-	// Removed content marker.
-	event.run('ev1', 'root1', 1, 'message.removed.1', JSON.stringify({ messageID: 'gone' }));
+	addAssistantMessage(db, {
+		id: 'fa1', sessionId: 'futureChild', seq: 1, created: G + 5_000, completed: future,
+		agent: 'reviewer', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		finish: 'stop',
+		content: []
+	});
 
 	db.close();
 }
@@ -285,81 +190,38 @@ function buildGanttDb(path: string): void {
  * at 0.02 * 15_000 = 300 px.
  */
 function buildShortTurnDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-
+	const db = openFixture(path);
 	const S = Date.now() - 300_000;
-	session.run('shortroot', null, '/repo/short', 'Short turn', 'build', S, S + 15_000, null, 0, 0, 0, 0, 0, 0, MODEL);
-	message.run('su1', 'shortroot', S, S, JSON.stringify({ role: 'user', time: { created: S } }));
-	message.run(
-		'sa1',
-		'shortroot',
-		S,
-		S + 15_000,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'su1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 0,
-			tokens: { input: 0, output: 0, reasoning: 0 },
-			time: { created: S, completed: S + 15_000 }
-		})
-	);
+	addSessionV2(db, { id: 'shortroot', dir: '/repo/short', title: 'Short turn', agent: 'build', created: S, updated: S + 15_000, model: MODEL });
+	addUserMessage(db, { id: 'su1', sessionId: 'shortroot', seq: 1, created: S, text: 'short' });
+	addAssistantMessage(db, {
+		id: 'sa1', sessionId: 'shortroot', seq: 2, created: S, completed: S + 15_000,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		finish: 'stop', content: []
+	});
 	db.close();
 }
 
 /**
- * RUNNING turn fixture: the root assistant has no completion time, so the node
- * bar is hatched and stretches to `turnExtent.end` (= now). Carries a `removed`
- * marker (no timestamp) to assert it is anchored to the data edge under the
- * derived scale rather than pinned to a chart edge the data never reaches.
+ * RUNNING turn fixture: the root assistant has no `time.completed`, so the node
+ * bar is hatched and stretches to `turnExtent.end` (= now).
+ *
+ * This fixture used to carry a `removed` marker (which has no timestamp) to
+ * assert it anchors to the data edge under the derived scale. V2 emits no
+ * `message.removed.1` events at all (G-8), so there is no such marker to place.
  */
 function buildRunningTurnDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const event = db.prepare(
-		'INSERT INTO event (id, aggregate_id, seq, type, data) VALUES (?, ?, ?, ?, ?)'
-	);
-
+	const db = openFixture(path);
 	const R = Date.now() - 6_000;
-	session.run('runroot', null, '/repo/run', 'Running turn', 'build', R, R, null, 0, 0, 0, 0, 0, 0, MODEL);
-	message.run('ru1', 'runroot', R, R, JSON.stringify({ role: 'user', time: { created: R } }));
-	message.run(
-		'ra1',
-		'runroot',
-		R,
-		R,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'ru1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 0,
-			tokens: { input: 0, output: 0, reasoning: 0 }
-		})
-	);
-	event.run('rev', 'runroot', 1, 'message.removed.1', JSON.stringify({ messageID: 'gone' }));
+	addSessionV2(db, { id: 'runroot', dir: '/repo/run', title: 'Running turn', agent: 'build', created: R, updated: R, model: MODEL });
+	addUserMessage(db, { id: 'ru1', sessionId: 'runroot', seq: 1, created: R, text: 'run' });
+	addAssistantMessage(db, {
+		id: 'ra1', sessionId: 'runroot', seq: 2, created: R,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		content: []
+	});
 	db.close();
 }
 
@@ -370,37 +232,16 @@ function buildRunningTurnDb(path: string): void {
  * horizontal overflow to scroll.
  */
 function buildLongTurnDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-
+	const db = openFixture(path);
 	const L = Date.now() - 400_000;
-	session.run('longroot', null, '/repo/long', 'Long turn', 'build', L, L + 120_000, null, 0, 0, 0, 0, 0, 0, MODEL);
-	message.run('lu1', 'longroot', L, L, JSON.stringify({ role: 'user', time: { created: L } }));
-	message.run(
-		'la1',
-		'longroot',
-		L,
-		L + 120_000,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'lu1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 0,
-			tokens: { input: 0, output: 0, reasoning: 0 },
-			time: { created: L, completed: L + 120_000 }
-		})
-	);
+	addSessionV2(db, { id: 'longroot', dir: '/repo/long', title: 'Long turn', agent: 'build', created: L, updated: L + 120_000, model: MODEL });
+	addUserMessage(db, { id: 'lu1', sessionId: 'longroot', seq: 1, created: L, text: 'long' });
+	addAssistantMessage(db, {
+		id: 'la1', sessionId: 'longroot', seq: 2, created: L, completed: L + 120_000,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		finish: 'stop', content: []
+	});
 	db.close();
 }
 
@@ -411,41 +252,22 @@ function buildLongTurnDb(path: string): void {
  * URL-active one. Newest-first is `shell34`..`shell00`.
  */
 function buildShellDb(path: string): void {
-	const db = new Database(path);
-	db.exec(SCHEMA);
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
+	const db = openFixture(path);
 	for (let i = 0; i < 35; i++) {
 		const id = `shell${String(i).padStart(2, '0')}`;
 		const created = T + i * 1_000;
-		session.run(id, null, '/repo/shell', `Shell ${i}`, 'build', created, created + 900, null, 0, 0, 0, 0, 0, 0, MODEL);
-		message.run(`${id}-u`, id, created + 100, created + 100, JSON.stringify({ role: 'user', time: { created: created + 100 } }));
-		message.run(
-			`${id}-a`,
-			id,
-			created + 150,
-			created + 150,
-			JSON.stringify({
-				role: 'assistant',
-				parentID: `${id}-u`,
-				agent: 'build',
-				modelID: 'gpt-5',
-				providerID: 'openai',
-				cost: 0,
-				tokens: { input: 1, output: 1, reasoning: 0 },
-				time: { created: created + 150, completed: created + 800 }
-			})
-		);
+		addSessionV2(db, { id, dir: '/repo/shell', title: `Shell ${i}`, agent: 'build', created, updated: created + 900, model: MODEL });
+		addUserMessage(db, { id: `${id}-u`, sessionId: id, seq: 1, created: created + 100, text: 'shell' });
+		addAssistantMessage(db, {
+			id: `${id}-a`, sessionId: id, seq: 2, created: created + 150, completed: created + 800,
+			agent: 'build', model: MODEL,
+			cost: 0, tokens: { input: 1, output: 1, reasoning: 0 },
+			finish: 'stop', content: []
+		});
 	}
 	db.close();
 }
+
 
 function walkFiles(dir: string): string[] {
 	const out: string[] = [];

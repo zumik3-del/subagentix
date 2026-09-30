@@ -21,7 +21,7 @@
 
 	/** The structural tool-call view model this card renders. */
 	interface ToolCallView {
-		/** `part.id`; keys the blob expand entries. */
+		/** Synthesised content-item id (`<messageId>#<index>`); keys the blob expand entries. */
 		id: string;
 		name: string;
 		/** Raw status text; an empty string renders no badge. */

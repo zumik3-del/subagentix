@@ -10,6 +10,10 @@ import { extractTrackerRefs } from './tracker-refs';
 /**
  * Map one delegation record to the shared `Edge` DTO. Exported so the session
  * detail service and the Gantt agree on the edge shape.
+ *
+ * The edge's parent is the carrying message's session (`record.sessionId`): V2
+ * has no `state.metadata.parentSessionId`, so the item owns the edge while
+ * `session_v2.parent_id` owns the tree (decision D-5/AC3.a).
  */
 export function buildEdge(record: DelegationRecord, now: number): Edge {
 	const startedAt = record.startedAt ?? record.createdAt;
@@ -19,7 +23,7 @@ export function buildEdge(record: DelegationRecord, now: number): Edge {
 	if (record.childSessionId === null) flags.push('noChild');
 	return {
 		id: record.id,
-		parentNodeId: record.parentSessionId ?? record.sessionId,
+		parentNodeId: record.sessionId,
 		childNodeId: record.childSessionId,
 		subagentType: record.subagentType,
 		status: record.status,
@@ -30,7 +34,7 @@ export function buildEdge(record: DelegationRecord, now: number): Edge {
 		flags,
 		resultBytes: record.resultBytes,
 		description: record.description,
-		trackerRefs: extractTrackerRefs('task', {
+		trackerRefs: extractTrackerRefs('subagent', {
 			input: null,
 			output: null,
 			prompt: record.prompt,

@@ -290,16 +290,11 @@
 
 	/* Action-kind dots, mirroring the Details badge palette. */
 	.dot-kind-text,
-	.dot-kind-file,
 	.dot-kind-prompt {
 		background: var(--color-accent-strong);
 	}
-	.dot-kind-reasoning,
-	.dot-kind-agent {
+	.dot-kind-reasoning {
 		background: var(--color-info-strong);
-	}
-	.dot-kind-patch {
-		background: var(--color-success-strong);
 	}
 	.dot-kind-compaction {
 		background: var(--text-weak);

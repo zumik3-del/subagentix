@@ -3,6 +3,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from './test-fixtures/opencode-v2';
 
 /**
  * Unit tests for `discoverOpencodeDbs` and `discoverZiptaskBaseUrls`
@@ -43,18 +44,13 @@ function freshModule(): Promise<DiscoveryModule> {
 	return import(`${url.pathname}?bust=${bustPrefix}-${++bust}`) as Promise<DiscoveryModule>;
 }
 
-/** Build a minimal opencode-shaped fixture under `dir`. */
+/** Build a minimal opencode V2-shaped fixture under `dir`. */
 function buildOpencodeFixture(dir: string, sessions = 3): string {
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, 'opencode.db');
 	const db = new Database(path);
-	db.exec(`
-		CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
-		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
-		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
-	`);
-	const ins = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < sessions; i++) ins.run(`s${i}`);
+	applyV2Schema(db);
+	for (let i = 0; i < sessions; i++) addSessionV2(db, { id: `s${i}`, dir: '/repo', created: 0 });
 	db.close();
 	return path;
 }

@@ -18,47 +18,16 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
-const T = 1_700_000_000_000;
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
+import { addProject, addSessionV2, applyV2Schema, T } from '../test-fixtures/opencode-v2';
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Repo A')").run();
+	applyV2Schema(db);
+	addProject(db, { id: 'proj-a', worktree: '/', name: 'Repo A' });
 
-	const ins = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
 	// Two directories with roots so the cached result is non-trivial.
-	ins.run('r1', null, '/repo/a', 'Root A', 'build', T, T + 100, null, 0, 0, 0, 0, 0, 0, null, 'proj-a');
-	ins.run('r2', null, '/repo/b', 'Root B', 'plan', T, T + 200, null, 0, 0, 0, 0, 0, 0, null, null);
+	addSessionV2(db, { id: 'r1', dir: '/repo/a', created: T, updated: T + 100, projectId: 'proj-a' });
+	addSessionV2(db, { id: 'r2', dir: '/repo/b', created: T, updated: T + 200, projectId: 'proj-a' });
 	db.close();
 }
 
@@ -174,7 +143,7 @@ describe('listDirectoriesCached() — empty-DB path', () => {
 		try {
 			const altDb = join(altDir, 'empty.db');
 			const db = new Database(altDb);
-			db.exec(SCHEMA);
+			applyV2Schema(db);
 			db.close();
 			process.env.OPENCODE_DB = altDb;
 			process.env.SETTINGS_FILE = join(altDir, 'settings.json');

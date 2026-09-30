@@ -363,17 +363,14 @@ a {
  *   .ui-badge--accent     — generic accent tone. unused.
  *   .ui-badge--mcp        — MCP tool-call marker.
  *   .ui-badge--text       — action kind "text".
- *   .ui-badge--file       — action kind "file".
  *   .ui-badge--deleg      — delegation tool-call marker.
  *   .ui-badge--reasoning  — action kind "reasoning".
- *   .ui-badge--agent      — action kind "agent".
- *   .ui-badge--patch      — action kind "patch".
  *   .ui-badge--removed    — removed marker.
  *   .ui-badge--compaction — compaction marker / action kind.
  *   Some tones reach markup only through dynamic composition —
  *   `ui-badge--${flagTone(key)}` → warning|danger,
  *   `ui-badge--${marker.type}` → compaction|removed,
- *   `ui-badge--${action.kind}` → text|reasoning|patch|file|agent|compaction —
+ *   `ui-badge--${action.kind}` → text|reasoning|compaction —
  *   so a literal-token grep reports them unused; they are live.
  *
  * Card
@@ -613,20 +610,14 @@ a {
 }
 .ui-badge--accent,
 .ui-badge--mcp,
-.ui-badge--text,
-.ui-badge--file {
+.ui-badge--text {
 	background: var(--color-accent-surface);
 	color: var(--color-accent-strong);
 }
 .ui-badge--deleg,
-.ui-badge--reasoning,
-.ui-badge--agent {
+.ui-badge--reasoning {
 	background: var(--color-info-surface);
 	color: var(--color-info-strong);
-}
-.ui-badge--patch {
-	background: var(--color-success-surface);
-	color: var(--color-success-strong);
 }
 .ui-badge--removed {
 	background: var(--color-danger-surface);

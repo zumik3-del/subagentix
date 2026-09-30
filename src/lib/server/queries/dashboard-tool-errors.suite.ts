@@ -4,101 +4,61 @@
  * Covers the Tier-P read for failed tool calls: `status IN ('error','failed')`,
  * tool/agent/search filters, LIKE-wildcard escaping, newest-first ordering,
  * limit/offset paging with correct total, and the `capped` flag at
- * MAX_TOOL_SESSIONS. Fixture has mixed error/ok/completed parts across sessions
- * so every filter path is exercised. The live opencode DB is never opened.
+ * MAX_TOOL_SESSIONS. Fixture has mixed error/ok/completed content items across
+ * sessions so every filter path is exercised. The live opencode DB is never
+ * opened.
+ *
+ * V2: tool calls are `session_message.data.content[]` items, so `at` is the
+ * carrying message's `time_created` (there is no per-item creation time in the
+ * ordering) and the id is the item's own `$.id`.
  */
 import { afterAll, describe, expect, test } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addAssistantMessage, addProject, addSessionV2, applyV2Schema, toolItem, T } from '../test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000; // 2023-11-13T22:13:20Z
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'anthropic' });
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
+const MODEL = { id: 'gpt-5', providerID: 'anthropic' };
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Proj A')").run();
-
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	applyV2Schema(db);
+	addProject(db, { id: 'proj-a', name: 'Proj A' });
 
 	// --- Sessions ---------------------------------------------------------------
-	insSession.run('s-ok', null, '/repo/a', 'S-ok', 'build', T, T + 100, null, 0, 0, 0, 0, 0, 0, MODEL, 'proj-a');
-	insSession.run('s-err', null, '/repo/a', 'S-err', 'plan', T + 1_000, T + 1_100, null, 0, 0, 0, 0, 0, 0, MODEL, 'proj-a');
-	insSession.run('s-blank-agent', null, '/repo/b', 'S-blank', '', T + 2_000, T + 2_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-	insSession.run('s-null-agent', null, '/repo/b', 'S-null', null, T + 3_000, T + 3_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
+	// V2 makes `project_id` NOT NULL, so the /repo/b sessions share 'proj-a';
+	// directory scoping (not project scoping) is what splits the fixtures.
+	addSessionV2(db, { id: 's-ok', dir: '/repo/a', title: 'S-ok', agent: 'build', created: T, updated: T + 100, model: MODEL });
+	addSessionV2(db, { id: 's-err', dir: '/repo/a', title: 'S-err', agent: 'plan', created: T + 1_000, updated: T + 1_100, model: MODEL });
+	addSessionV2(db, { id: 's-blank-agent', dir: '/repo/b', title: 'S-blank', agent: '', created: T + 2_000, updated: T + 2_100, model: MODEL });
+	addSessionV2(db, { id: 's-null-agent', dir: '/repo/b', title: 'S-null', agent: null, created: T + 3_000, updated: T + 3_100, model: MODEL });
 
-	// --- Messages ---------------------------------------------------------------
-	insMessage.run('m-ok', 's-ok', T, T + 100, JSON.stringify({ role: 'assistant', time: { created: T } }));
-	insMessage.run('m-err', 's-err', T + 1_000, T + 1_100, JSON.stringify({ role: 'assistant', time: { created: T + 1_000 } }));
-	insMessage.run('m-blank', 's-blank-agent', T + 2_000, T + 2_100, JSON.stringify({ role: 'assistant', time: { created: T + 2_000 } }));
-	insMessage.run('m-null', 's-null-agent', T + 3_000, T + 3_100, JSON.stringify({ role: 'assistant', time: { created: T + 3_000 } }));
-
-	// --- Parts ------------------------------------------------------------------
+	// --- Assistant messages carrying the content[] items ------------------------
 	// s-ok: one completed bash call (no error)
-	insPart.run('p-ok', 'm-ok', 's-ok', T + 10, T + 20, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c-ok',
-		state: { status: 'completed', time: { start: T + 10, end: T + 20 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm-ok', sessionId: 's-ok', seq: 1, created: T, completed: T + 100, agent: 'build', model: MODEL,
+		content: [toolItem('bash', { id: 'c-ok', status: 'completed', created: T + 10, ran: T + 10, completed: T + 20 })]
+	});
 	// s-err: one error, one failed, one completed mcp_recall
-	insPart.run('p-err', 'm-err', 's-err', T + 1_010, T + 1_020, JSON.stringify({
-		type: 'tool', tool: 'mcp_recall', callID: 'c-err',
-		state: { status: 'error', error: 'boom', time: { start: T + 1_010, end: T + 1_020 } }
-	}));
-	insPart.run('p-failed', 'm-err', 's-err', T + 1_030, T + 1_040, JSON.stringify({
-		type: 'tool', tool: 'mcp_recall', callID: 'c-fail',
-		state: { status: 'failed', error: 'timeout', time: { start: T + 1_030, end: T + 1_040 } }
-	}));
-	insPart.run('p-err-ok', 'm-err', 's-err', T + 1_050, T + 1_060, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c-err-ok',
-		state: { status: 'completed', time: { start: T + 1_050, end: T + 1_060 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm-err', sessionId: 's-err', seq: 1, created: T + 1_000, completed: T + 1_100, agent: 'plan', model: MODEL,
+		content: [
+			toolItem('mcp_recall', { id: 'c-err', status: 'error', error: { type: 'error', message: 'boom' }, created: T + 1_010, ran: T + 1_010, completed: T + 1_020 }),
+			toolItem('mcp_recall', { id: 'c-fail', status: 'failed', error: { type: 'timeout', message: 'timeout' }, created: T + 1_030, ran: T + 1_030, completed: T + 1_040 }),
+			toolItem('bash', { id: 'c-err-ok', status: 'completed', created: T + 1_050, ran: T + 1_050, completed: T + 1_060 })
+		]
+	});
 	// s-blank-agent: blank tool name -> 'unknown'
-	insPart.run('p-blank-tool', 'm-blank', 's-blank-agent', T + 2_010, T + 2_020, JSON.stringify({
-		type: 'tool', callID: 'c-blank-tool',
-		state: { status: 'error', error: 'missing tool', time: { start: T + 2_010, end: T + 2_020 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm-blank', sessionId: 's-blank-agent', seq: 1, created: T + 2_000, completed: T + 2_100, agent: '', model: MODEL,
+		content: [toolItem('', { id: 'c-blank-tool', status: 'error', error: { type: 'error', message: 'missing tool' }, created: T + 2_010, ran: T + 2_010, completed: T + 2_020 })]
+	});
 	// s-null-agent: same
-	insPart.run('p-null-tool', 'm-null', 's-null-agent', T + 3_010, T + 3_020, JSON.stringify({
-		type: 'tool', tool: 'read', callID: 'c-null-tool',
-		state: { status: 'error', error: 'file not found', time: { start: T + 3_010, end: T + 3_020 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm-null', sessionId: 's-null-agent', seq: 1, created: T + 3_000, completed: T + 3_100, agent: null, model: MODEL,
+		content: [toolItem('read', { id: 'c-null-tool', status: 'error', error: { type: 'not_found', message: 'file not found' }, created: T + 3_010, ran: T + 3_010, completed: T + 3_020 })]
+	});
 
 	db.close();
 }
@@ -527,52 +487,49 @@ describe('ToolErrorEntry — new fields (#538)', () => {
 		}
 	});
 
-	test('isDelegation is true when tool is "task"', async () => {
-		// The fixture has no 'task' tool parts, so we verify the logic via source.
+	test('isDelegation is true when tool is "subagent"', async () => {
+		// The fixture has no 'subagent' call, so we verify the logic via source.
+		// V2 renamed opencode's delegation tool from `task` to `subagent`.
 		const source = new URL('./dashboard-tool-errors.ts', import.meta.url);
 		const content = await Bun.file(source).text();
-		// isDelegation should be derived from tool === 'task'.
-		expect(content).toContain("tool === 'task'");
+		// isDelegation is derived from tool === 'subagent'.
+		expect(content).toContain("tool === 'subagent'");
 	});
 
-	test('isDelegation is false for non-task tools', () => {
+	test('isDelegation is false for non-delegation tools', () => {
 		const ids = listSessionIds({});
 		const rows = listToolErrors(ids, { status: 'all' }, 0, 100);
-		const nonTaskRows = rows.filter((r) => r.tool !== 'task');
-		for (const row of nonTaskRows) {
+		const nonDelegationRows = rows.filter((r) => r.tool !== 'subagent');
+		for (const row of nonDelegationRows) {
 			expect(row.isDelegation).toBe(false);
 		}
 	});
 });
 
 /* ------------------------------------------------------------------ */
-/* Extended fixture: parts with input/output/endedAt                  */
+/* Extended fixture: items with input/output/endedAt                   */
 /* ------------------------------------------------------------------ */
 
 	describe('ToolErrorEntry — extended fixture with input/output/end', () => {
 		// We verify the mapping logic by reading the source and confirming the
 		// expressions match the expected JSON paths.
-		test('input is extracted from part.data.state.input', async () => {
-			const source = new URL('./dashboard-tool-errors.ts', import.meta.url);
-			const content = await Bun.file(source).text();
-			expect(content).toContain("JSON_PATH.part.stateInput");
+		test('input is extracted from the item $.state.input', async () => {
+			const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
+			expect(content).toContain('JSON_PATH.content.input');
 		});
 
-		test('output is extracted from part.data.state.output', async () => {
-			const source = new URL('./dashboard-tool-errors.ts', import.meta.url);
-			const content = await Bun.file(source).text();
-			expect(content).toContain("JSON_PATH.part.stateOutput");
+		test('output is extracted from the item $.state.content', async () => {
+			const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
+			expect(content).toContain('JSON_PATH.content.content');
 		});
 
-		test('endedAt is extracted from part.data.state.time.end', async () => {
-			const source = new URL('./dashboard-tool-errors.ts', import.meta.url);
-			const content = await Bun.file(source).text();
-			expect(content).toContain("JSON_PATH.part.stateEnd");
+		test('endedAt is extracted from the item $.time.completed', async () => {
+			const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
+			expect(content).toContain('JSON_PATH.content.timeCompleted');
 		});
 
-		test('endedAt is null when state.time.end is absent (isBound check)', async () => {
-			const source = new URL('./dashboard-tool-errors.ts', import.meta.url);
-			const content = await Bun.file(source).text();
+		test('endedAt is null when $.time.completed is absent (isBound check)', async () => {
+			const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
 			// The query uses isBound to check whether ended_at was returned.
 			expect(content).toContain('isBound(row.ended_at)');
 		});
@@ -582,20 +539,20 @@ describe('ToolErrorEntry — new fields (#538)', () => {
 /* Index-friendly read (#544)                                          */
 /* ------------------------------------------------------------------ */
 describe('index-friendly read (#544)', () => {
-	test('the part reads never join session (agent comes from the session map)', async () => {
+	test('the content-item reads never join session_v2 (agent comes from the session map)', async () => {
 		const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
 		// `agent` is a per-session value read once via `agentBySession`, so no
-		// `part` query joins `session`.
+		// content-item query joins `session_v2`.
 		expect(content).toContain('agentBySession');
-		expect(content).not.toMatch(/JOIN session ON session\.id = part\.session_id/);
+		expect(content).not.toMatch(/JOIN session_v2 ON session_v2\.id = m\.session_id/);
 	});
 
-	test('every part read is session-scoped, never a global JSON scan', async () => {
+	test('every content-item read is session-scoped, never a global JSON scan', async () => {
 		const content = await Bun.file(new URL('./dashboard-tool-errors.ts', import.meta.url)).text();
 		// The module must not depend on functional indexes on the opencode DB
 		// (the app is read-only and never creates them), so the session filter
 		// is always present in the SQL — no global `WHERE <json term>` scans.
-		expect(content).toContain('part.session_id IN (${idPlaceholders(ids.length)})');
+		expect(content).toContain('m.session_id IN (${idPlaceholders(ids.length)})');
 		expect(content).not.toContain('TOOL_TYPE_EXPR');
 		expect(content).not.toContain('SESSION_CHUNK_SIZE');
 	});

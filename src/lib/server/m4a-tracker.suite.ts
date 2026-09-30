@@ -11,8 +11,9 @@
  * branch through the real `buildTurnModel` service:
  *   - `ziptask_*` input `task_id` / `id`, output `id`, blank input, no id,
  *     absent/unparseable output;
- *   - `task` prompt / description / both, and the #198 deviation (a non-`task`
- *     call whose text contains `Task #N` is NOT parsed);
+ *   - `subagent` (V2 delegation) prompt / description / both, and the #198
+ *     deviation (a non-`subagent` tool whose text contains `Task #N` is NOT
+ *     parsed);
  *   - dedup across both inference paths and node vs turn aggregation.
  *
  * The live opencode DB is never opened or written.
@@ -22,134 +23,66 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+	applyV2Schema,
+	addSessionV2,
+	addUserMessage,
+	addAssistantMessage,
+	toolItem,
+	subagentItem,
+	T,
+} from './test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000;
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
-
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'openai' });
+const MODEL = { id: 'gpt-5', providerID: 'openai' };
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
+	applyV2Schema(db);
 
-	const session = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	session.run('root1', null, '/repo/a', 'Tracker root', 'build', T + 50, T + 1_900, null, 0, 0, 0, 0, 0, 0, MODEL);
-	session.run('child1', 'root1', '/repo/a', 'Tracker child', 'developer', T + 200, T + 500, null, 0, 0, 0, 0, 0, 0, MODEL);
+	// --- sessions ---------------------------------------------------------
+	addSessionV2(db, { id: 'root1', dir: '/repo/a', title: 'Tracker root', agent: 'build', created: T + 50, updated: T + 1_900, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
+	addSessionV2(db, { id: 'child1', parentId: 'root1', dir: '/repo/a', title: 'Tracker child', agent: 'developer', created: T + 200, updated: T + 500, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
 
-	const message = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	message.run('u1', 'root1', T + 100, T + 100, JSON.stringify({ role: 'user', time: { created: T + 100 } }));
-	message.run(
-		'a1',
-		'root1',
-		T + 110,
-		T + 1_900,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'u1',
-			agent: 'build',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 0,
-			tokens: { input: 0, output: 0, reasoning: 0 },
-			time: { created: T + 110, completed: T + 1_900 }
-		})
-	);
-	message.run('cu1', 'child1', T + 200, T + 200, JSON.stringify({ role: 'user', time: { created: T + 200 } }));
-	message.run(
-		'ca1',
-		'child1',
-		T + 210,
-		T + 500,
-		JSON.stringify({
-			role: 'assistant',
-			parentID: 'cu1',
-			agent: 'developer',
-			modelID: 'gpt-5',
-			providerID: 'openai',
-			cost: 0,
-			tokens: { input: 0, output: 0, reasoning: 0 },
-			time: { created: T + 210, completed: T + 500 }
-		})
-	);
-
-	const part = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
-	/** One `part.data` tool row at `created`; `state` is the opencode tool state. */
-	const tool = (
-		id: string,
-		messageId: string,
-		sessionId: string,
-		created: number,
-		name: string,
-		state: Record<string, unknown>
-	) => part.run(id, messageId, sessionId, created, created, JSON.stringify({ type: 'tool', tool: name, callID: `call-${id}`, state }));
-
-	const done = (start: number, end: number, extra: Record<string, unknown> = {}) => ({
-		status: 'completed',
-		time: { start, end },
-		...extra
+	// --- root1 messages ---------------------------------------------------
+	addUserMessage(db, { id: 'u1', sessionId: 'root1', seq: 1, created: T + 100, text: 'prompt' });
+	addAssistantMessage(db, {
+		id: 'a1', sessionId: 'root1', seq: 2, created: T + 110, completed: T + 1_900,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		finish: 'tool-calls',
+		content: [
+			// ziptask_* input/output resolution (indices 0-6)
+			toolItem('ziptask_claim_task', { id: 'zt_input_task_id', status: 'completed', input: { task_id: 179 }, text: '{"id":179}', created: T + 120, ran: T + 120, completed: T + 130 }),
+			toolItem('ziptask_get_task', { id: 'zt_input_id', status: 'completed', input: { id: 200 }, text: '{"id":999}', created: T + 135, ran: T + 135, completed: T + 145 }),
+			toolItem('ziptask_list_tasks', { id: 'zt_output_only', status: 'completed', input: {}, text: '{"id":201}', created: T + 150, ran: T + 150, completed: T + 160 }),
+			toolItem('ziptask_claim_task', { id: 'zt_blank_input', status: 'completed', input: { task_id: '' }, text: '{"id":202}', created: T + 165, ran: T + 165, completed: T + 175 }),
+			toolItem('ziptask_noop', { id: 'zt_no_id', status: 'completed', input: {}, text: '{"other":1}', created: T + 180, ran: T + 180, completed: T + 190 }),
+			toolItem('ziptask_noop', { id: 'zt_absent_output', status: 'completed', input: {}, created: T + 195, ran: T + 195, completed: T + 205 }),
+			toolItem('ziptask_bad', { id: 'zt_unparseable_output', status: 'completed', input: {}, text: 'not json', created: T + 210, ran: T + 210, completed: T + 220 }),
+			// subagent (V2 delegation) prompt/description inference (indices 7-10)
+			subagentItem({ id: 'task_prompt', childSessionId: 'child1', agent: 'developer', description: 'build', prompt: 'Please do Task #179 now', status: 'completed', text: 'ok', created: T + 225, ran: T + 225, completed: T + 260 }),
+			subagentItem({ id: 'task_desc', childSessionId: null, agent: 'reviewer', description: 'Fixes Task #203', prompt: '', status: 'completed', text: '', created: T + 270, ran: T + 270, completed: T + 300 }),
+			subagentItem({ id: 'task_both', childSessionId: null, agent: 'tester', description: 'Task #204 again', prompt: 'Task #204 and Task #205', status: 'completed', text: 'ok', created: T + 310, ran: T + 310, completed: T + 340 }),
+			subagentItem({ id: 'task_no_ref', childSessionId: null, agent: 'x', description: 'no ref here', prompt: '', status: 'completed', text: 'ok', created: T + 350, ran: T + 350, completed: T + 380 }),
+			// #198 deviation: only `subagent` calls parse Task #N (indices 11-12)
+			toolItem('bash', { id: 'bash_with_task_text', status: 'completed', input: { command: 'echo Task #999' }, text: 'Task #998', created: T + 390, ran: T + 390, completed: T + 400 }),
+			toolItem('ziptask_search', { id: 'zt_search_prompt', status: 'completed', input: { prompt: 'Task #997' }, text: 'not json', created: T + 410, ran: T + 410, completed: T + 420 }),
+			// dedup: ziptask_claim_task with task_id 203 (same as task_desc) (index 13)
+			toolItem('ziptask_claim_task', { id: 'zt_ref_shared', status: 'completed', input: { task_id: 203 }, text: '{"id":203}', created: T + 430, ran: T + 430, completed: T + 440 }),
+		],
 	});
 
-	// --- ziptask_* input/output resolution --------------------------------
-	// input.task_id wins.
-	tool('zt_input_task_id', 'a1', 'root1', T + 120, 'ziptask_claim_task', done(T + 120, T + 130, { input: { task_id: 179 }, output: '{"id":179}' }));
-	// input.id wins over a conflicting output.id.
-	tool('zt_input_id', 'a1', 'root1', T + 135, 'ziptask_get_task', done(T + 135, T + 145, { input: { id: 200 }, output: '{"id":999}' }));
-	// No input id -> output.id.
-	tool('zt_output_only', 'a1', 'root1', T + 150, 'ziptask_list_tasks', done(T + 150, T + 160, { input: {}, output: '{"id":201}' }));
-	// Blank input id falls through to output.id.
-	tool('zt_blank_input', 'a1', 'root1', T + 165, 'ziptask_claim_task', done(T + 165, T + 175, { input: { task_id: '' }, output: '{"id":202}' }));
-	// No id anywhere.
-	tool('zt_no_id', 'a1', 'root1', T + 180, 'ziptask_noop', done(T + 180, T + 190, { input: {}, output: '{"other":1}' }));
-	tool('zt_absent_output', 'a1', 'root1', T + 195, 'ziptask_noop', done(T + 195, T + 205, { input: {} }));
-	tool('zt_unparseable_output', 'a1', 'root1', T + 210, 'ziptask_bad', done(T + 210, T + 220, { input: {}, output: 'not json' }));
-
-	// --- `task` prompt / description inference ----------------------------
-	// prompt only; this is the earliest edge to child1, so it owns the child node.
-	tool('task_prompt', 'a1', 'root1', T + 225, 'task', done(T + 225, T + 260, { metadata: { parentSessionId: 'root1', sessionId: 'child1' }, input: { subagent_type: 'developer', prompt: 'Please do Task #179 now' }, output: 'ok' }));
-	// description only.
-	tool('task_desc', 'a1', 'root1', T + 270, 'task', done(T + 270, T + 300, { metadata: { parentSessionId: 'root1' }, input: { subagent_type: 'reviewer', description: 'Fixes Task #203' }, output: '' }));
-	// both fields, repeated and multiple refs.
-	tool('task_both', 'a1', 'root1', T + 310, 'task', done(T + 310, T + 340, { metadata: { parentSessionId: 'root1' }, input: { subagent_type: 'tester', prompt: 'Task #204 and Task #205', description: 'Task #204 again' }, output: 'ok' }));
-	// a task call with no Task #N text at all.
-	tool('task_no_ref', 'a1', 'root1', T + 350, 'task', done(T + 350, T + 380, { metadata: { parentSessionId: 'root1' }, input: { subagent_type: 'x', description: 'no ref here' }, output: 'ok' }));
-	// #198 deviation: only `task` calls parse Task #N, never other tools.
-	tool('bash_with_task_text', 'a1', 'root1', T + 390, 'bash', done(T + 390, T + 400, { input: { command: 'echo Task #999' }, output: 'Task #998' }));
-	tool('zt_search_prompt', 'a1', 'root1', T + 410, 'ziptask_search', done(T + 410, T + 420, { input: { prompt: 'Task #997' }, output: 'not json' }));
-	// dedup across the ziptask and task paths (#203 already seen in task_desc).
-	tool('zt_ref_shared', 'a1', 'root1', T + 430, 'ziptask_claim_task', done(T + 430, T + 440, { input: { task_id: 203 }, output: '{"id":203}' }));
-
-	// --- child node owns its own ref ---------------------------------------
-	tool('child_zt', 'ca1', 'child1', T + 250, 'ziptask_get_task', done(T + 250, T + 260, { input: { id: 300 }, output: '{"id":300}' }));
+	// --- child1 messages --------------------------------------------------
+	addUserMessage(db, { id: 'cu1', sessionId: 'child1', seq: 1, created: T + 200, text: 'prompt' });
+	addAssistantMessage(db, {
+		id: 'ca1', sessionId: 'child1', seq: 2, created: T + 210, completed: T + 500,
+		agent: 'developer', model: MODEL,
+		cost: 0, tokens: { input: 0, output: 0, reasoning: 0 },
+		finish: 'tool-calls',
+		content: [
+			toolItem('ziptask_get_task', { id: 'child_zt', status: 'completed', input: { id: 300 }, text: '{"id":300}', created: T + 250, ran: T + 250, completed: T + 260 }),
+		],
+	});
 
 	db.close();
 }
@@ -177,74 +110,75 @@ afterAll(() => {
 	rmSync(tempDir, { recursive: true, force: true });
 });
 
+// V2 synthesizes tool call / edge ids as `messageId#index`.
 const model = buildTurnModel('root1', 'u1')!;
 const byCall = new Map(model.toolCalls.map((call) => [call.id, call]));
 const byEdge = new Map(model.edges.map((edge) => [edge.id, edge]));
 
 describe('ziptask_* resolution (input then output)', () => {
 	test('reads state.input.task_id first', () => {
-		expect(byCall.get('zt_input_task_id')?.trackerRefs).toEqual(['179']);
+		expect(byCall.get('a1#0')?.trackerRefs).toEqual(['179']);
 	});
 
 	test('falls back from task_id to state.input.id', () => {
-		expect(byCall.get('zt_input_id')?.trackerRefs).toEqual(['200']);
+		expect(byCall.get('a1#1')?.trackerRefs).toEqual(['200']);
 	});
 
 	test('reads only state.output.id when the input carries no id', () => {
-		expect(byCall.get('zt_output_only')?.trackerRefs).toEqual(['201']);
+		expect(byCall.get('a1#2')?.trackerRefs).toEqual(['201']);
 	});
 
 	test('a blank input id falls through to the output id', () => {
-		expect(byCall.get('zt_blank_input')?.trackerRefs).toEqual(['202']);
+		expect(byCall.get('a1#3')?.trackerRefs).toEqual(['202']);
 	});
 
 	test('no id in input or output yields no ref', () => {
-		expect(byCall.get('zt_no_id')?.trackerRefs).toEqual([]);
-		expect(byCall.get('zt_absent_output')?.trackerRefs).toEqual([]);
+		expect(byCall.get('a1#4')?.trackerRefs).toEqual([]);
+		expect(byCall.get('a1#5')?.trackerRefs).toEqual([]);
 	});
 
 	test('an unparseable output is ignored instead of throwing', () => {
-		expect(byCall.get('zt_unparseable_output')?.trackerRefs).toEqual([]);
+		expect(byCall.get('a1#6')?.trackerRefs).toEqual([]);
 	});
 });
 
-describe('task prompt / description resolution', () => {
+describe('subagent prompt / description resolution', () => {
 	test('parses Task #N from state.input.prompt', () => {
-		expect(byCall.get('task_prompt')?.trackerRefs).toEqual(['179']);
+		expect(byEdge.get('a1#7')?.trackerRefs).toEqual(['179']);
 	});
 
 	test('parses Task #N from state.input.description', () => {
-		expect(byCall.get('task_desc')?.trackerRefs).toEqual(['203']);
+		expect(byEdge.get('a1#8')?.trackerRefs).toEqual(['203']);
 	});
 
 	test('parses both fields, deduplicating and keeping first-seen order', () => {
-		expect(byCall.get('task_both')?.trackerRefs).toEqual(['204', '205']);
+		expect(byEdge.get('a1#9')?.trackerRefs).toEqual(['204', '205']);
 	});
 
-	test('a task call without Task #N text yields no ref', () => {
-		expect(byCall.get('task_no_ref')?.trackerRefs).toEqual([]);
+	test('a subagent call without Task #N text yields no ref', () => {
+		expect(byEdge.get('a1#10')?.trackerRefs).toEqual([]);
 	});
 });
 
-describe('#198 deviation — only `task` calls parse Task #N', () => {
-	test('a non-task tool with Task #N input/output is NOT parsed', () => {
-		expect(byCall.get('bash_with_task_text')?.trackerRefs).toEqual([]);
+describe('#198 deviation — only `subagent` calls parse Task #N', () => {
+	test('a non-subagent tool with Task #N input/output is NOT parsed', () => {
+		expect(byCall.get('a1#11')?.trackerRefs).toEqual([]);
 	});
 
 	test('a ziptask_* call with a Task #N prompt but no id is NOT parsed', () => {
-		expect(byCall.get('zt_search_prompt')?.trackerRefs).toEqual([]);
+		expect(byCall.get('a1#12')?.trackerRefs).toEqual([]);
 	});
 
-	test('delegation edges still parse the task prompt/description', () => {
-		expect(byEdge.get('task_prompt')?.trackerRefs).toEqual(['179']);
-		expect(byEdge.get('task_desc')?.trackerRefs).toEqual(['203']);
-		expect(byEdge.get('task_both')?.trackerRefs).toEqual(['204', '205']);
-		expect(byEdge.get('task_no_ref')?.trackerRefs).toEqual([]);
+	test('delegation edges still parse the subagent prompt/description', () => {
+		expect(byEdge.get('a1#7')?.trackerRefs).toEqual(['179']);
+		expect(byEdge.get('a1#8')?.trackerRefs).toEqual(['203']);
+		expect(byEdge.get('a1#9')?.trackerRefs).toEqual(['204', '205']);
+		expect(byEdge.get('a1#10')?.trackerRefs).toEqual([]);
 	});
 });
 
 describe('node vs turn aggregation (M4a DTO fields)', () => {
-	test('the root node unifies its tool calls and spawned `task` edges', () => {
+	test('the root node unifies its tool calls and spawned `subagent` edges', () => {
 		const root = model.nodes.find((node) => node.sessionId === 'root1');
 		expect(root?.trackerRefs).toEqual(['179', '200', '201', '202', '203', '204', '205']);
 	});
@@ -264,7 +198,7 @@ describe('node vs turn aggregation (M4a DTO fields)', () => {
 
 	test('the turn refs union every path, deduplicated in first-seen order', () => {
 		expect(model.trackerRefs).toEqual(['179', '200', '201', '202', '203', '204', '205', '300']);
-		// `179` is inferred twice (ziptask input + task prompt) but surfaces once.
+		// `179` is inferred twice (ziptask input + subagent prompt) but surfaces once.
 		expect(model.trackerRefs?.filter((ref) => ref === '179')).toEqual(['179']);
 		expect(model.trackerRefs?.filter((ref) => ref === '203')).toEqual(['203']);
 	});

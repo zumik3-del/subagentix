@@ -1,15 +1,20 @@
 /**
- * Tier-P dashboard aggregate: tool frequency.
+ * Tier-P dashboard aggregate: tool frequency (V2).
  *
- * Reads `part` only for the session ids resolved by Tier-S ({@link listSessionIds}
- * in `dashboard-sessions.ts`), in chunks under SQLite's variable limit, merging
- * the per-chunk partials in JS. `event` stays untouched.
+ * Walks the `data.content[]` items of `session_message`
+ * (`json_each(m.data, '$.content')`) for the session ids resolved by Tier-S
+ * ({@link listSessionIds} in `dashboard-sessions.ts`), in chunks under SQLite's
+ * variable limit, merging the per-chunk partials in JS. The session-id
+ * predicate (decision D-3) keeps the outer read on
+ * `session_message_session_type_seq_idx`; `json_each` then only walks the
+ * in-scope assistant payloads. `event` stays untouched.
  */
 import { BASIC_TOOL_NAMES, FAILED_TOOL_STATUSES } from '../../model/tool-kind';
 import { getDb } from '../db';
-import { jsonEquals, jsonIn, JSON_PATH, PART_TYPE, type Row } from '../schema';
+import { jsonEquals, jsonIn, JSON_PATH, CONTENT_TYPE, MESSAGE_TYPE, type Row } from '../schema';
 import {
 	chunk,
+	CONTENT_ITEM_ALIAS,
 	DEFAULT_TOP_N,
 	IN_CHUNK_SIZE,
 	sanitizeLimit,
@@ -18,13 +23,13 @@ import {
 	TOOL_LABEL_EXPR
 } from './dashboard-shared';
 
-/** One grouped tool-count record from the `part` read. */
+/** One grouped tool-count record from the `json_each` read. */
 export interface ToolUsageRecord {
-	/** Tool name; `unknown` for a NULL/blank `part.data.tool`. */
+	/** Tool name (`$.name`); `unknown` for a NULL/blank value. */
 	name: string;
-	/** Matching tool parts in the chunked session set. */
+	/** Matching tool items in the chunked session set. */
 	count: number;
-	/** Of `count`, parts whose `state.status` is `error` or `failed`. */
+	/** Of `count`, items whose `state.status` is `error` or `failed`. */
 	errors: number;
 }
 
@@ -66,17 +71,17 @@ function toolKindClause(kinds: ToolKindSelection | undefined, toolExpr: string):
 }
 
 /**
- * Tool parts grouped by `part.data.tool`, restricted to the given session ids
- * (`part_session_idx`), each group carrying its total `count` and its `errors`
+ * Tool items grouped by `$.name`, restricted to the given session ids, each
+ * group carrying its total `count` and its `errors`
  * (`state.status IN ('error', 'failed')`). The id list is queried in chunks of
  * {@link IN_CHUNK_SIZE} and the per-tool partials are merged in JS, so a
  * `period=all` call stays under SQLite's bound-parameter limit; the caller caps
- * the id set itself (see `MAX_TOOL_SESSIONS`), which is what keeps the `part`
- * scan bounded. `kinds` restricts the group key to the selected tool kinds
- * (applied in SQL before `GROUP BY`, never post-filtered), so an excluded
- * high-count tool cannot consume a top-N slot. There is no `part.time_created`
- * filter: `part` has no time index, and the spec design windows Tier P by
- * session id only. Sorted count desc then name asc and cut to the top-N.
+ * the id set itself (see `MAX_TOOL_SESSIONS`), which is what keeps the
+ * `json_each` walk bounded. `kinds` restricts the group key to the selected tool
+ * kinds (applied in SQL before `GROUP BY`, never post-filtered), so an excluded
+ * high-count tool cannot consume a top-N slot. There is no `time_created`
+ * filter: Tier P is windowed by session id only. Sorted count desc then name asc
+ * and cut to the top-N.
  */
 export function aggregateToolUsage(
 	sessionIds: readonly string[],
@@ -85,8 +90,9 @@ export function aggregateToolUsage(
 ): ToolUsageRecord[] {
 	if (sessionIds.length === 0) return [];
 	if (kinds?.basic === false && kinds.mcp === false) return [];
-	const typeFilter = jsonEquals('part.data', JSON_PATH.part.type, PART_TYPE.tool);
-	const errorFilter = jsonIn('part.data', JSON_PATH.part.status, FAILED_TOOL_STATUSES);
+	const item = `${CONTENT_ITEM_ALIAS}.value`;
+	const typeFilter = jsonEquals(item, JSON_PATH.content.itemType, CONTENT_TYPE.tool);
+	const errorFilter = jsonIn(item, JSON_PATH.content.status, FAILED_TOOL_STATUSES);
 	const kindFilter = toolKindClause(kinds, TOOL_LABEL_EXPR);
 
 	const totals = new Map<string, ToolUsageRecord>();
@@ -95,8 +101,9 @@ export function aggregateToolUsage(
 			SELECT ${TOOL_LABEL_EXPR} AS name,
 				count(*) AS count,
 				COALESCE(sum(CASE WHEN ${errorFilter} THEN 1 ELSE 0 END), 0) AS errors
-			FROM part
-			WHERE part.session_id IN (${ids.map(() => '?').join(', ')}) AND ${typeFilter}${kindFilter}
+			FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
+			WHERE m.session_id IN (${ids.map(() => '?').join(', ')})
+				AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}${kindFilter}
 			GROUP BY name`;
 		const rows = getDb().query(sql).all(...ids) as Row[];
 		for (const row of rows) {

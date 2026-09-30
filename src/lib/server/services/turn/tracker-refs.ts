@@ -3,11 +3,11 @@
  * "ziptask link"). Pure and server-free, so the client can reuse it.
  */
 
-/** The `part` text fields a tracker reference can be inferred from. */
+/** The tool text fields a tracker reference can be inferred from. */
 export interface TrackerTexts {
 	/** `state.input` JSON text. */
 	input: string | null;
-	/** `state.output` JSON text. */
+	/** Joined `state.content[]` text output. */
 	output: string | null;
 	/** `state.input.prompt`. */
 	prompt: string | null;
@@ -37,9 +37,10 @@ function jsonTrackerId(text: string | null, keys: readonly string[]): string | n
 /**
  * Infer tracker references for one tool call (spec §6 "ziptask link"), in a
  * fixed order:
- * 1. `ziptask_*` calls read `state.input.task_id` / `state.input.id`, else parse
- *    `state.output.id`.
- * 2. `task` calls match `Task #(\d+)` in `state.input.prompt` / `description`.
+ * 1. `ziptask_*` calls read `state.input.task_id` / `state.input.id`, else
+ *    JSON-decode the joined output text and read its `id`.
+ * 2. `subagent` calls (V2's delegation tool, formerly `task`) match
+ *    `Task #(\d+)` in `state.input.prompt` / `description`.
  *
  * Deduplicated in first-seen order and always inferred — never authoritative.
  */
@@ -50,7 +51,7 @@ export function extractTrackerRefs(name: string, texts: TrackerTexts): string[] 
 		const outputId = jsonTrackerId(texts.output, ['id']);
 		return outputId === null ? [] : [outputId];
 	}
-	if (name === 'task') {
+	if (name === 'subagent') {
 		const refs = new Set<string>();
 		for (const text of [texts.prompt, texts.description]) {
 			if (!text) continue;
