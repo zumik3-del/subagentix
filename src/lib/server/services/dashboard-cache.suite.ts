@@ -13,6 +13,7 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from '../test-fixtures/opencode-v2';
 
 const tempDir = mkdtempSync(join(tmpdir(), 'subagentix-dashboard-cache-'));
 const DB_PATH = join(tempDir, 'fixture.db');
@@ -20,13 +21,8 @@ const DB_PATH = join(tempDir, 'fixture.db');
 // Build a minimal fixture so dbStateToken() resolves and the module graph loads.
 {
 	const db = new Database(DB_PATH);
-	db.exec(`
-		CREATE TABLE session (id TEXT PRIMARY KEY);
-		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
-		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
-	`);
-	const ins = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < 3; i++) ins.run(`s${i}`);
+	applyV2Schema(db);
+	for (let i = 0; i < 3; i++) addSessionV2(db, { id: `s${i}`, dir: '/repo', created: 0 });
 	db.close();
 }
 process.env.OPENCODE_DB = DB_PATH;

@@ -1,11 +1,11 @@
 /**
  * Dashboard query regression suite (tasks #403, #406, #407).
  *
- * Covers Tier-S (`session`-only), Tier-M (`message` + chunked `IN`), and
- * Tier-P (`part` + chunked `IN`) aggregates against a fixture SQLite DB. The
- * fixture has two sessions in two directories with messages spanning midnight
- * UTC boundaries, tool parts with mixed error/ok status, and enough rows to
- * exercise the >999-id chunking path.
+ * Covers Tier-S (`session_v2`-only), Tier-M (`session_message` + chunked `IN`),
+ * and Tier-P (`content[]` + chunked `IN`) aggregates against a fixture SQLite
+ * DB. The fixture has two sessions in two directories with messages spanning
+ * midnight UTC boundaries, tool content items with mixed error/ok status, and
+ * enough rows to exercise the >999-id chunking path.
  *
  * Runs in an isolated child process (see `dashboard.test.ts`) so the suite
  * owns a clean `$lib/server/db` / `$lib/server/settings` module graph without
@@ -18,163 +18,106 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+	applyV2Schema,
+	addSessionV2,
+	addUserMessage,
+	addAssistantMessage,
+	toolItem,
+	T,
+} from '../test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000; // 2023-11-13T22:13:20Z
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'anthropic' });
+const MODEL = { id: 'gpt-5', providerID: 'anthropic' };
 /** Last millisecond of the UTC day containing T. */
 const DAY_END = T - (T % 86_400_000) + 86_400_000 - 1;
 /** First millisecond of the next UTC day. */
 const DAY_START = DAY_END + 1;
 
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
-
 /** Build a fixture with baseline + boundary data. */
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Proj A')").run();
+	applyV2Schema(db);
 
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
+	// Use a writable handle for the project insert (applyV2Schema already
+	// created the project table, but we need to insert a row).
+	db.prepare("INSERT INTO project (id, name, worktree, time_created, time_updated, time_active, sandboxes) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+		'proj-a', 'Proj A', '/repo/a', T, T, 0, '[]'
 	);
 
 	// --- Baseline sessions ---------------------------------------------------
-	// s1: /repo/a, agent=build, at T
-	insSession.run('s1', null, '/repo/a', 'S1', 'build', T, T + 100, null, 1.5, 100, 200, 10, 50, 100, MODEL, 'proj-a');
-	// s2: /repo/b, agent=plan, at T-DAY (yesterday)
-	insSession.run('s2', null, '/repo/b', 'S2', 'plan', T - 86_400_000, T - 86_300_000, null, 3, 80, 100, 7, 40, 80, MODEL, null);
+	addSessionV2(db, { id: 's1', dir: '/repo/a', title: 'S1', agent: 'build', created: T, updated: T + 100, cost: 1.5, tokens: { input: 100, output: 200, reasoning: 10, cacheRead: 50, cacheWrite: 100 }, model: MODEL, projectId: 'proj-a' });
+	addSessionV2(db, { id: 's2', dir: '/repo/b', title: 'S2', agent: 'plan', created: T - 86_400_000, updated: T - 86_300_000, cost: 3, tokens: { input: 80, output: 100, reasoning: 7, cacheRead: 40, cacheWrite: 80 }, model: MODEL });
 
 	// --- Midnight-boundary session: first ms of day N+1 ----------------------
-	insSession.run('s-midnight-end', null, '/repo/x', 'MidnightEnd', 'build', DAY_END, DAY_END, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-	insSession.run('s-midnight-start', null, '/repo/x', 'MidnightStart', 'build', DAY_START, DAY_START, null, 0, 0, 0, 0, 0, 0, MODEL, null);
+	addSessionV2(db, { id: 's-midnight-end', dir: '/repo/x', title: 'MidnightEnd', agent: 'build', created: DAY_END, updated: DAY_END, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
+	addSessionV2(db, { id: 's-midnight-start', dir: '/repo/x', title: 'MidnightStart', agent: 'build', created: DAY_START, updated: DAY_START, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
 
 	// --- Messages -------------------------------------------------------------
-	insMessage.run('m1', 's1', T + 100, T + 100, JSON.stringify({ role: 'user', time: { created: T + 100 } }));
-	insMessage.run('m2', 's1', T + 200, T + 200, JSON.stringify({
-		role: 'assistant', parentID: 'm1', cost: 1,
-		tokens: { input: 50, output: 100, reasoning: 5, cache: { read: 25, write: 50 } },
-		time: { created: T + 200, completed: T + 300 }
-	}));
-	insMessage.run('m3', 's1', T + 500, T + 500, JSON.stringify({
-		role: 'assistant', cost: 0.5,
-		tokens: { input: 50, output: 100, reasoning: 5, cache: { read: 25, write: 50 } },
-		time: { created: T + 500, completed: T + 600 }
-	}));
-	insMessage.run('m4', 's2', T - 86_400_000 + 100, T - 86_400_000 + 100, JSON.stringify({
-		role: 'user', time: { created: T - 86_400_000 + 100 }
-	}));
-	insMessage.run('m5', 's2', T - 86_400_000 + 200, T - 86_400_000 + 200, JSON.stringify({
-		role: 'assistant', parentID: 'm4', cost: 3,
-		tokens: { input: 80, output: 100, reasoning: 7, cache: { read: 40, write: 80 } },
-		time: { created: T - 86_400_000 + 200, completed: T - 86_400_000 + 300 }
-	}));
+	addUserMessage(db, { id: 'm1', sessionId: 's1', seq: 1, created: T + 100, text: 'prompt' });
+	addAssistantMessage(db, { id: 'm2', sessionId: 's1', seq: 2, created: T + 200, completed: T + 300, agent: 'build', model: MODEL, cost: 1, tokens: { input: 50, output: 100, reasoning: 5, cacheRead: 25, cacheWrite: 50 }, finish: 'tool-calls', content: [
+		toolItem('bash', { id: 'p1', status: 'completed', input: {}, text: 'ok', created: T + 250, ran: T + 250, completed: T + 250 }),
+		toolItem('mcp_recall', { id: 'p2', status: 'error', input: {}, error: { type: 'error', message: 'boom' }, created: T + 280, ran: T + 280, completed: T + 280 }),
+		toolItem('', { id: 'p-blank', status: 'completed', input: {}, created: T + 290, ran: T + 290, completed: T + 290 }),
+	]});
+	addAssistantMessage(db, { id: 'm3', sessionId: 's1', seq: 3, created: T + 500, completed: T + 600, agent: 'build', model: MODEL, cost: 0.5, tokens: { input: 50, output: 100, reasoning: 5, cacheRead: 25, cacheWrite: 50 }, finish: 'stop', content: [] });
+	addUserMessage(db, { id: 'm4', sessionId: 's2', seq: 1, created: T - 86_400_000 + 100, text: 'prompt' });
+	addAssistantMessage(db, { id: 'm5', sessionId: 's2', seq: 2, created: T - 86_400_000 + 200, completed: T - 86_400_000 + 300, agent: 'plan', model: MODEL, cost: 3, tokens: { input: 80, output: 100, reasoning: 7, cacheRead: 40, cacheWrite: 80 }, finish: 'tool-calls', content: [
+		toolItem('bash', { id: 'p3', status: 'completed', input: {}, text: 'ok', created: T - 86_400_000 + 220, ran: T - 86_400_000 + 220, completed: T - 86_400_000 + 220 }),
+	]});
 	// Midnight-boundary messages
-	insMessage.run('m-midnight-end', 's-midnight-end', DAY_END, DAY_END, JSON.stringify({
-		role: 'assistant', cost: 1,
-		tokens: { input: 10, output: 10, reasoning: 1, cache: { read: 1, write: 1 } },
-		time: { created: DAY_END }
-	}));
-	insMessage.run('m-midnight-start', 's-midnight-start', DAY_START, DAY_START, JSON.stringify({
-		role: 'assistant', cost: 2,
-		tokens: { input: 20, output: 20, reasoning: 2, cache: { read: 2, write: 2 } },
-		time: { created: DAY_START }
-	}));
-
-	// --- Tool parts -----------------------------------------------------------
-	insPart.run('p1', 'm2', 's1', T + 250, T + 250, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c1',
-		state: { status: 'completed', time: { start: T + 200, end: T + 250 } }
-	}));
-	insPart.run('p2', 'm2', 's1', T + 280, T + 280, JSON.stringify({
-		type: 'tool', tool: 'mcp_recall', callID: 'c2',
-		state: { status: 'error', error: 'boom', time: { start: T + 250, end: T + 280 } }
-	}));
-	// Blank-tool part (no `tool` key → 'unknown')
-	insPart.run('p-blank', 'm2', 's1', T + 290, T + 290, JSON.stringify({
-		type: 'tool', callID: 'c-blank',
-		state: { status: 'completed', time: { start: T + 280, end: T + 290 } }
-	}));
-	insPart.run('p3', 'm5', 's2', T - 86_400_000 + 220, T - 86_400_000 + 220, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c3',
-		state: { status: 'completed', time: { start: T - 86_400_000 + 200, end: T - 86_400_000 + 220 } }
-	}));
+	addAssistantMessage(db, { id: 'm-midnight-end', sessionId: 's-midnight-end', seq: 1, created: DAY_END, completed: DAY_END, agent: 'build', model: MODEL, cost: 1, tokens: { input: 10, output: 10, reasoning: 1, cacheRead: 1, cacheWrite: 1 }, finish: 'stop', content: [] });
+	addAssistantMessage(db, { id: 'm-midnight-start', sessionId: 's-midnight-start', seq: 1, created: DAY_START, completed: DAY_START, agent: 'build', model: MODEL, cost: 2, tokens: { input: 20, output: 20, reasoning: 2, cacheRead: 2, cacheWrite: 2 }, finish: 'stop', content: [] });
 
 	// --- Kind-filter fixture sessions (E10/E11/E12/E15) -----------------------
-	// s-kf: high-count mcp tool + moderate basic tools to prove filter-before-top-N.
-	insSession.run('s-kf', null, '/repo/kf', 'KF', 'build', T + 1_000, T + 1_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-	insMessage.run('m-kf', 's-kf', T + 1_000, T + 1_100, JSON.stringify({
-		role: 'assistant', cost: 0,
-		tokens: { input: 10, output: 10, reasoning: 0, cache: { read: 0, write: 0 } },
-		time: { created: T + 1_000, completed: T + 1_100 }
-	}));
+	addSessionV2(db, { id: 's-kf', dir: '/repo/kf', title: 'KF', agent: 'build', created: T + 1_000, updated: T + 1_100, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
+	addUserMessage(db, { id: 'm-kf', sessionId: 's-kf', seq: 1, created: T + 1_000, text: 'prompt' });
+	addAssistantMessage(db, { id: 'ma-kf', sessionId: 's-kf', seq: 2, created: T + 1_000, completed: T + 1_100, agent: 'build', model: MODEL, cost: 0, tokens: { input: 10, output: 10, reasoning: 0 }, finish: 'tool-calls', content: [] });
 	// 200 mcp_x calls (MCP, non-allowlist)
+	const w = new Database(path);
+	const insPart = w.prepare('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
 	for (let i = 0; i < 200; i++) {
-		insPart.run(`p-kf-mcp-${i}`, 'm-kf', 's-kf', T + 1_000 + i, T + 1_000 + i, JSON.stringify({
-			type: 'tool', tool: 'mcp_x', callID: `kc-mcp-${i}`,
-			state: { status: 'completed', time: { start: T + 1_000 + i, end: T + 1_000 + i } }
+		insPart.run(`p-kf-mcp-${i}`, 's-kf', 'assistant', 3 + i, T + 1_000 + i, T + 1_000 + i, JSON.stringify({
+			time: { created: T + 1_000 + i },
+			agent: 'build', model: { id: 'gpt-5', providerID: 'anthropic' },
+			content: [toolItem('mcp_x', { id: `kc-mcp-${i}`, status: 'completed', input: {}, created: T + 1_000 + i, ran: T + 1_000 + i, completed: T + 1_000 + i })],
+			finish: 'tool-calls', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }
 		}));
 	}
 	// 50 invalid calls (explicitly basic)
 	for (let i = 0; i < 50; i++) {
-		insPart.run(`p-kf-inv-${i}`, 'm-kf', 's-kf', T + 2_000 + i, T + 2_000 + i, JSON.stringify({
-			type: 'tool', tool: 'invalid', callID: `kc-inv-${i}`,
-			state: { status: 'completed', time: { start: T + 2_000 + i, end: T + 2_000 + i } }
+		insPart.run(`p-kf-inv-${i}`, 's-kf', 'assistant', 203 + i, T + 2_000 + i, T + 2_000 + i, JSON.stringify({
+			time: { created: T + 2_000 + i },
+			agent: 'build', model: { id: 'gpt-5', providerID: 'anthropic' },
+			content: [toolItem('invalid', { id: `kc-inv-${i}`, status: 'completed', input: {}, created: T + 2_000 + i, ran: T + 2_000 + i, completed: T + 2_000 + i })],
+			finish: 'tool-calls', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }
 		}));
 	}
-	// 50 bash calls (basic) — total unfiltered top-2 would be mcp_x(200) + invalid/bash(50 tie-break);
-	// after basic-only filter, invalid(50) and bash(51 inc s1) are the only candidates.
+	// 50 bash calls (basic)
 	for (let i = 0; i < 50; i++) {
-		insPart.run(`p-kf-bash-${i}`, 'm-kf', 's-kf', T + 3_000 + i, T + 3_000 + i, JSON.stringify({
-			type: 'tool', tool: 'bash', callID: `kc-bash-${i}`,
-			state: { status: 'completed', time: { start: T + 3_000 + i, end: T + 3_000 + i } }
+		insPart.run(`p-kf-bash-${i}`, 's-kf', 'assistant', 253 + i, T + 3_000 + i, T + 3_000 + i, JSON.stringify({
+			time: { created: T + 3_000 + i },
+			agent: 'build', model: { id: 'gpt-5', providerID: 'anthropic' },
+			content: [toolItem('bash', { id: `kc-bash-${i}`, status: 'completed', input: {}, created: T + 3_000 + i, ran: T + 3_000 + i, completed: T + 3_000 + i })],
+			finish: 'tool-calls', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }
 		}));
 	}
+	w.close();
 
 	// s-unk: unknown-tool session (E10 — unknown is mcp)
-	insSession.run('s-unk', null, '/repo/unk', 'Unk', 'plan', T + 2_000, T + 2_100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-	insMessage.run('m-unk', 's-unk', T + 2_000, T + 2_100, JSON.stringify({
-		role: 'assistant', cost: 0,
-		tokens: { input: 5, output: 5, reasoning: 0, cache: { read: 0, write: 0 } },
-		time: { created: T + 2_000, completed: T + 2_100 }
-	}));
-	// 30 blank-tool parts → 'unknown' (mcp)
+	addSessionV2(db, { id: 's-unk', dir: '/repo/unk', title: 'Unk', agent: 'plan', created: T + 2_000, updated: T + 2_100, cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }, model: MODEL });
+	addUserMessage(db, { id: 'm-unk', sessionId: 's-unk', seq: 1, created: T + 2_000, text: 'prompt' });
+	addAssistantMessage(db, { id: 'ma-unk', sessionId: 's-unk', seq: 2, created: T + 2_000, completed: T + 2_100, agent: 'plan', model: MODEL, cost: 0, tokens: { input: 5, output: 5, reasoning: 0 }, finish: 'tool-calls', content: [] });
+	const w2 = new Database(path);
+	const insPart2 = w2.prepare('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
 	for (let i = 0; i < 30; i++) {
-		insPart.run(`p-unk-${i}`, 'm-unk', 's-unk', T + 2_000 + i, T + 2_000 + i, JSON.stringify({
-			type: 'tool', callID: `kc-unk-${i}`,
-			state: { status: 'completed', time: { start: T + 2_000 + i, end: T + 2_000 + i } }
+		insPart2.run(`p-unk-${i}`, 's-unk', 'assistant', 3 + i, T + 2_000 + i, T + 2_000 + i, JSON.stringify({
+			time: { created: T + 2_000 + i },
+			agent: 'plan', model: { id: 'gpt-5', providerID: 'anthropic' },
+			content: [toolItem('', { id: `kc-unk-${i}`, status: 'completed', input: {}, created: T + 2_000 + i, ran: T + 2_000 + i, completed: T + 2_000 + i })],
+			finish: 'tool-calls', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }
 		}));
 	}
+	w2.close();
 
 	db.close();
 }
@@ -282,8 +225,6 @@ describe('Tier-S — countSessionsByAgent / Model / Provider', () => {
 describe('Tier-S — countSessionsByDirectory', () => {
 	test('blank and NULL directories are dropped; project-name join when linked', () => {
 		const rows = countSessionsByDirectory({});
-		// /repo/a (s1, s-kf), /repo/b (s2), /repo/x (s-midnight-end, s-midnight-start),
-		// /repo/kf (s-kf), /repo/unk (s-unk)
 		expect(rows.length).toBe(5);
 		const a = rows.find((r) => r.directory === '/repo/a');
 		const b = rows.find((r) => r.directory === '/repo/b');
@@ -368,24 +309,15 @@ describe('Tier-M — aggregateMessageUsageByUtcDay', () => {
 		expect(IN_CHUNK_SIZE).toBe(500);
 		// Inject 510 dummy sessions (just over one chunk) so the merge path is exercised.
 		const w = writableDb();
-		const ins = w.prepare(
-			`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-				time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-				tokens_cache_read, tokens_cache_write, model, project_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		const insSession = w.prepare(
+			`INSERT INTO session_v2 (id, project_id, slug, directory, title, agent, time_created, time_updated, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		);
-		const insMsg = w.prepare('INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)');
+		const insMsg = w.prepare('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
 		// One transaction: 1020 individual autocommit inserts were ~20x slower.
 		w.transaction(() => {
 			for (let i = 0; i < 510; i++) {
-				ins.run(`chunk-${i}`, null, '/repo/chunk', `Chunk ${i}`, 'build', T + i, T + i, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-			}
-			for (let i = 0; i < 510; i++) {
-				insMsg.run(`cm-${i}`, `chunk-${i}`, T + i, T + i, JSON.stringify({
-					role: 'assistant', cost: 1,
-					tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } },
-					time: { created: T + i }
-				}));
+				insSession.run(`chunk-${i}`, 'proj_fixture', `chunk-${i}`, '/repo/chunk', `Chunk ${i}`, 'build', T + i, T + i, 0, 0, 0, 0, 0, 0, '2.0.20');
+				insMsg.run(`cm-${i}`, `chunk-${i}`, 'assistant', 1, T + i, T + i, JSON.stringify({ time: { created: T + i }, agent: 'build', model: { id: 'gpt-5', providerID: 'anthropic' }, cost: 1, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }, finish: 'stop', content: [] }));
 			}
 		})();
 		w.close();
@@ -423,7 +355,7 @@ describe('Tier-P — aggregateToolUsage', () => {
 	test('blank / NULL tool name labels as "unknown"', () => {
 		const rows = aggregateToolUsage(['s1']);
 		const names = rows.map((r) => r.name);
-		expect(names).toContain('unknown'); // p-blank has no tool key
+		expect(names).toContain('unknown'); // p-blank carries no tool name (blank → 'unknown')
 	});
 
 	test('error share: 1 error out of 1 mcp_recall call -> errors=1', () => {
@@ -478,26 +410,20 @@ describe('Tier-P — aggregateToolUsage', () => {
 	test('chunk merge across 510 ids (> IN_CHUNK_SIZE=500)', () => {
 		const w = writableDb();
 		const insSession = w.prepare(
-			`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-				time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-				tokens_cache_read, tokens_cache_write, model, project_id)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+			`INSERT INTO session_v2 (id, project_id, slug, directory, title, agent, time_created, time_updated, cost, tokens_input, tokens_output, tokens_reasoning, tokens_cache_read, tokens_cache_write, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 		);
-		const insPart = w.prepare(
-			'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-		);
-		const insMsg = w.prepare(
-			'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-		);
+		const insMsg = w.prepare('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
+		const insContent = w.prepare('INSERT INTO session_message (id, session_id, type, seq, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?, ?)');
 		// One transaction: 1530 individual autocommit inserts blow the 15s timeout.
 		w.transaction(() => {
 			for (let i = 0; i < 510; i++) {
 				const sid = `big-${i}`;
-				insSession.run(sid, null, '/repo/big', `Big ${i}`, 'build', T, T, null, 0, 0, 0, 0, 0, 0, MODEL, null);
-				insMsg.run(`pm-${i}`, sid, T, T, '{}');
-				insPart.run(`pp-${i}`, `pm-${i}`, sid, T, T, JSON.stringify({
-					type: 'tool', tool: 'bash', callID: `call-${i}`,
-					state: { status: i % 2 === 0 ? 'completed' : 'error', time: { start: T, end: T } }
+				insSession.run(sid, 'proj_fixture', sid, '/repo/big', `Big ${i}`, 'build', T, T, 0, 0, 0, 0, 0, 0, '2.0.20');
+				insMsg.run(`pm-${i}`, sid, 'assistant', 1, T, T, '{}');
+				insContent.run(`pp-${i}`, sid, 'assistant', 2, T, T, JSON.stringify({
+					time: { created: T }, agent: 'build', model: { id: 'gpt-5', providerID: 'anthropic' },
+					content: [toolItem('bash', { id: `call-${i}`, status: i % 2 === 0 ? 'completed' : 'error', input: {}, created: T, ran: T, completed: T })],
+					finish: 'tool-calls', cost: 0, tokens: { input: 0, output: 0, reasoning: 0 }
 				}));
 			}
 		})();
@@ -519,7 +445,6 @@ describe('Tier-P — aggregateToolUsage', () => {
 	// ---- kind-filter tests (epic #512, task #519) ---------------------------
 
 	test('basic-only excludes every non-allowlist tool (mcp_recall, unknown)', () => {
-		// Use specific session ids to avoid interfering with other tests.
 		const ids = ['s1', 's-kf', 's-unk'];
 		const rows = aggregateToolUsage(ids, DEFAULT_TOP_N, { basic: true, mcp: false });
 		const names = rows.map((r) => r.name);
@@ -566,9 +491,6 @@ describe('Tier-P — aggregateToolUsage', () => {
 		expect(unfiltered[1].name).toBe('bash');
 		expect(unfiltered[1].count).toBe(51);
 		// Basic-only limit=2: only bash(51) and invalid(50) are candidates → both appear.
-		// If top-N were applied BEFORE filtering, mcp_x(200) would consume one slot
-		// and we would get only one basic tool. The fact that both basic tools appear
-		// proves filter-before-top-N.
 		const basic = aggregateToolUsage(ids, 2, { basic: true, mcp: false });
 		expect(basic.length).toBe(2);
 		expect(basic[0].name).toBe('bash');
@@ -594,16 +516,11 @@ describe('Tier-P — aggregateToolUsage', () => {
 	});
 
 	test('capped semantics unchanged: period=all with both-on still returns correct capped flag', () => {
-		// The fixture has sessions spanning two UTC days. With period=all and no scope,
-		// all 6 sessions are in range. The session ceiling (MAX_TOOL_SESSIONS) is much
-		// larger than 6, so capped must be false.
 		const allIds = listSessionIds({});
 		expect(allIds.length).toBeLessThanOrEqual(MAX_TOOL_SESSIONS);
 		const usage = aggregateToolUsage(allIds, DEFAULT_TOP_N, { basic: true, mcp: true });
 		expect(Array.isArray(usage)).toBe(true);
 		expect(usage.length).toBeGreaterThan(0);
-		// capped is a service-level concern; the query just returns the full list.
-		// Verify the query does not truncate due to a hidden cap.
 		expect(usage.map((r) => r.name)).toContain('mcp_x');
 	});
 });

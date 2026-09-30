@@ -9,7 +9,7 @@
  *
  * Membership is exact and case-sensitive (`Bash` is not `bash`). A name the
  * allowlist does not list — a namespaced MCP tool, or the synthesised `unknown`
- * for a NULL/blank `part.data.tool` — is MCP; `invalid` is explicitly basic.
+ * for a NULL/blank tool name — is MCP; `invalid` is explicitly basic.
  * Everything not allowlisted is MCP, so new MCP tools are picked up for free.
  *
  * It also carries the shared definition of a failed tool call
@@ -18,15 +18,24 @@
  * count the same rows.
  */
 
-/** The opencode built-in tool names; every other name is treated as MCP. */
+/**
+ * The opencode built-in tool names; every other name is treated as MCP.
+ *
+ * `shell`, `execute` and `subagent` are the live V2 built-ins. `bash` and
+ * `task` are the removed V1 names, kept because the split only affects the
+ * basic/mcp label and historical rows still carry `bash` (spec OQ-3, E-21).
+ */
 export const BASIC_TOOL_NAMES: readonly string[] = [
 	'bash',
+	'shell',
+	'execute',
 	'read',
 	'edit',
 	'write',
 	'grep',
 	'glob',
 	'task',
+	'subagent',
 	'todowrite',
 	'webfetch',
 	'websearch',
@@ -56,7 +65,7 @@ export function toolKind(name: string): ToolKind {
 }
 
 /**
- * Raw `part.data.state.status` values treated as a failed tool call
+ * Raw content-item `state.status` values treated as a failed tool call
  * (case-insensitive). The single shared definition of "failed": the top-tools
  * aggregate, the tool-error detail and the node step summary all read it, so
  * the widget's errors column, the detail's unfiltered total and the node

@@ -1,11 +1,12 @@
 /**
  * Tier-P dashboard aggregate service (dashboard Phase 2, task #407).
  *
- * The `part`-derived half of the dashboard service: top tools by call count with
- * their error share. It resolves the in-range session ids (Tier S) under a hard
- * session ceiling ({@link MAX_TOOL_SESSIONS}) so a `period=all` request cannot
- * trigger an unbounded `part` scan, then delegates the grouped read to
- * `queries/dashboard.ts` (chunked `IN`, merged in JS) and maps it to the DTO.
+ * The `session_message`-derived half of the dashboard service: top tools by call
+ * count with their error share. It resolves the in-range session ids (Tier S)
+ * under a hard session ceiling ({@link MAX_TOOL_SESSIONS}) so a `period=all`
+ * request cannot trigger an unbounded `json_each` walk of `data.content[]`, then
+ * delegates the grouped read to `queries/dashboard.ts` (chunked `IN`, merged in
+ * JS) and maps it to the DTO.
  * Split out of `services/dashboard.ts` to keep the tiers in their own modules;
  * it reuses that module's {@link toWindow} so window/scope resolution is defined
  * once. No caching here: the memoized dashboard cache wraps these loaders.
@@ -35,12 +36,12 @@ function kindSelection(settings: WidgetSettingValues | undefined): ToolKindSelec
 /**
  * Top tools (count desc, name asc) with error share for the selected
  * window/scope. Only the most recent `maxSessions` in-range sessions contribute
- * (the ceiling that bounds a `period=all` `part` scan; the parameter is exposed
- * for tests). `capped` is the flag the widget uses to label the all-time view as
- * approximate. `settings` is the persisted `top-tools` setting map: it selects
- * which tool kinds are aggregated (`undefined` = both), and when both are off
- * the call returns an empty payload without resolving sessions or scanning
- * `part`.
+ * (the ceiling that bounds a `period=all` `json_each` walk of `data.content[]`;
+ * the parameter is exposed for tests). `capped` is the flag the widget uses to
+ * label the all-time view as approximate. `settings` is the persisted
+ * `top-tools` setting map: it selects which tool kinds are aggregated
+ * (`undefined` = both), and when both are off the call returns an empty payload
+ * without resolving sessions or walking any content items.
  */
 export function getTopTools(
 	filter: DashboardFilter,
@@ -50,7 +51,7 @@ export function getTopTools(
 	maxSessions = MAX_TOOL_SESSIONS
 ): ToolUsage {
 	const kinds = kindSelection(settings);
-	// Both kinds off: no `part` scan (or Tier-S session resolve) at all.
+	// Both kinds off: no `json_each` content walk (or Tier-S session resolve) at all.
 	if (!kinds.basic && !kinds.mcp) return { tools: [], capped: false };
 	const window = toWindow(filter, now);
 	const { ids, capped } = cappedSessionIds(window, maxSessions);

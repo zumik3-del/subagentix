@@ -11,70 +11,32 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addAssistantMessage, addProject, addSessionV2, applyV2Schema, toolItem, T } from '../../../lib/server/test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000;
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'anthropic' });
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
+const MODEL = { id: 'gpt-5', providerID: 'anthropic' };
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Proj A')").run();
+	applyV2Schema(db);
+	addProject(db, { id: 'proj-a', name: 'Proj A' });
 
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	// V2 makes `project_id` NOT NULL, so both sessions share 'proj-a'; the
+	// directory is what the scope filter splits on.
+	addSessionV2(db, { id: 's1', dir: '/repo/a', title: 'S1', agent: 'build', created: T, updated: T + 100, model: MODEL });
+	addSessionV2(db, { id: 's2', dir: '/repo/b', title: 'S2', agent: 'plan', created: T, updated: T + 100, model: MODEL });
 
-	insSession.run('s1', null, '/repo/a', 'S1', 'build', T, T + 100, null, 0, 0, 0, 0, 0, 0, MODEL, 'proj-a');
-	insSession.run('s2', null, '/repo/b', 'S2', 'plan', T, T + 100, null, 0, 0, 0, 0, 0, 0, MODEL, null);
+	addAssistantMessage(db, {
+		id: 'm1', sessionId: 's1', seq: 1, created: T, completed: T + 100, agent: 'build', model: MODEL,
+		content: [
+			toolItem('bash', { id: 'c1', status: 'error', error: { type: 'error', message: 'boom' }, created: T + 10, ran: T + 10, completed: T + 20 }),
+			toolItem('bash', { id: 'c3', status: 'completed', created: T + 50, ran: T + 50, completed: T + 60 })
+		]
+	});
 
-	insMessage.run('m1', 's1', T, T + 100, '{}');
-	insMessage.run('m2', 's2', T, T + 100, '{}');
-
-	insPart.run('p1', 'm1', 's1', T + 10, T + 20, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c1',
-		state: { status: 'error', error: 'boom', time: { start: T + 10, end: T + 20 } }
-	}));
-	insPart.run('p2', 'm2', 's2', T + 30, T + 40, JSON.stringify({
-		type: 'tool', tool: 'read', callID: 'c2',
-		state: { status: 'failed', error: 'not found', time: { start: T + 30, end: T + 40 } }
-	}));
-	insPart.run('p3', 'm1', 's1', T + 50, T + 60, JSON.stringify({
-		type: 'tool', tool: 'bash', callID: 'c3',
-		state: { status: 'completed', time: { start: T + 50, end: T + 60 } }
-	}));
+	addAssistantMessage(db, {
+		id: 'm2', sessionId: 's2', seq: 1, created: T, completed: T + 100, agent: 'plan', model: MODEL,
+		content: [toolItem('read', { id: 'c2', status: 'failed', error: { type: 'not_found', message: 'not found' }, created: T + 30, ran: T + 30, completed: T + 40 })]
+	});
 
 	db.close();
 }

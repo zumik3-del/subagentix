@@ -241,27 +241,27 @@ describe('buildNodeRows()', () => {
 			toolCallIds: ['t1']
 		});
 		const text = makeAction({ id: 'a1', nodeId: 'root', kind: 'text', at: 1_050, summary: 'hello' });
-		const patch = makeAction({
+		const early = makeAction({
 			id: 'a2',
 			nodeId: 'root',
-			kind: 'patch',
+			kind: 'reasoning',
 			at: 300,
-			label: 'patch',
-			summary: '/a.ts, /b.ts'
+			label: 'reasoning',
+			summary: 'early thinking'
 		});
 		const call = makeTool({ id: 't1', nodeId: 'root', startedAt: 1_000, stepId: null });
 		const model = makeModel({
 			nodes: [makeNode({ sessionId: 'root', startedAt: 1_000, endedAt: 2_000 })],
 			steps: [s1],
 			toolCalls: [call],
-			actions: [text, patch]
+			actions: [text, early]
 		});
 		const detail = selectNodeDetail(model, 'root');
 		expect(detail).not.toBeNull();
 		const rows = buildNodeRows(detail!);
-		// `patch` precedes the first step -> top-level; the start marker leads the
-		// step at the same timestamp; the tool + text nest under the step.
-		expect(rows.map((row) => row.key)).toEqual(['patch:a2', 'start', 'step:s1']);
+		// The early reasoning precedes the first step -> top-level; the start marker
+		// leads the step at the same timestamp; the tool + text nest under the step.
+		expect(rows.map((row) => row.key)).toEqual(['reasoning:a2', 'start', 'step:s1']);
 		expect(rows[1].kind).toBe('start');
 		expect(rows[2].step).toBe(s1);
 		expect(rows[2].stepIndex).toBe(0);

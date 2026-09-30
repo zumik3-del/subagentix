@@ -13,67 +13,43 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addAssistantMessage, addProject, addSessionV2, applyV2Schema, toolItem, T } from '../../../lib/server/test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000;
 const DAY = 86_400_000;
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'anthropic' });
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (id TEXT PRIMARY KEY, name TEXT);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
+const MODEL = { id: 'gpt-5', providerID: 'anthropic' };
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-	db.prepare("INSERT INTO project (id, name) VALUES ('proj-a', 'Proj A')").run();
-
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	applyV2Schema(db);
+	addProject(db, { id: 'proj-a', name: 'Proj A' });
 
 	// 3 sessions across two directories, spanning two UTC days.
-	insSession.run('s1', null, '/repo/a', 'S1', 'build', T, T + 100, null, 1, 100, 200, 50, 10, 20, MODEL, 'proj-a');
-	insSession.run('s2', null, '/repo/b', 'S2', 'plan', T + DAY, T + DAY + 100, null, 2, 300, 100, 20, 5, 10, MODEL, null);
-	insSession.run('s3', null, '/repo/a', 'S3', 'build', T + DAY + 50, T + DAY + 60, null, 0.5, 50, 30, 10, 2, 5, MODEL, 'proj-a');
+	// V2 makes `project_id` NOT NULL, so every session shares 'proj-a'; the
+	// directory is what the scope filter splits on.
+	addSessionV2(db, { id: 's1', dir: '/repo/a', title: 'S1', agent: 'build', created: T, updated: T + 100, cost: 1, tokens: { input: 100, output: 200, reasoning: 50, cacheRead: 10, cacheWrite: 20 }, model: MODEL });
+	addSessionV2(db, { id: 's2', dir: '/repo/b', title: 'S2', agent: 'plan', created: T + DAY, updated: T + DAY + 100, cost: 2, tokens: { input: 300, output: 100, reasoning: 20, cacheRead: 5, cacheWrite: 10 }, model: MODEL });
+	addSessionV2(db, { id: 's3', dir: '/repo/a', title: 'S3', agent: 'build', created: T + DAY + 50, updated: T + DAY + 60, cost: 0.5, tokens: { input: 50, output: 30, reasoning: 10, cacheRead: 2, cacheWrite: 5 }, model: MODEL });
 
-	// Messages (Tier-M data)
-	insMessage.run('m1', 's1', T, T + 100, JSON.stringify({ role: 'assistant', cost: 3, tokens: { input: 100, output: 200, reasoning: 50, cache: { read: 10, write: 20 } }, time: { created: T } }));
-	insMessage.run('m2', 's2', T + DAY, T + DAY + 100, JSON.stringify({ role: 'assistant', cost: 5, tokens: { input: 300, output: 100, reasoning: 20, cache: { read: 5, write: 10 } }, time: { created: T + DAY } }));
-	insMessage.run('m3', 's3', T + DAY + 50, T + DAY + 60, JSON.stringify({ role: 'assistant', cost: 0.5, tokens: { input: 50, output: 30, reasoning: 10, cache: { read: 2, write: 5 } }, time: { created: T + DAY + 50 } }));
-
-	// Tool parts (Tier-P data)
-	insPart.run('p1', 'm1', 's1', T + 10, T + 20, JSON.stringify({ type: 'tool', tool: 'bash', callID: 'c1', state: { status: 'completed' } }));
-	insPart.run('p2', 'm1', 's1', T + 30, T + 40, JSON.stringify({ type: 'tool', tool: 'bash', callID: 'c2', state: { status: 'error', error: 'boom' } }));
-	insPart.run('p3', 'm2', 's2', T + DAY + 10, T + DAY + 20, JSON.stringify({ type: 'tool', tool: 'edit', callID: 'c3', state: { status: 'completed' } }));
+	// Assistant messages: Tier-M reads cost/tokens off `data`, Tier-P reads the
+	// `data.content[]` tool items of the same rows.
+	addAssistantMessage(db, {
+		id: 'm1', sessionId: 's1', seq: 1, created: T, completed: T + 100, agent: 'build', model: MODEL,
+		cost: 3, tokens: { input: 100, output: 200, reasoning: 50, cacheRead: 10, cacheWrite: 20 },
+		content: [
+			toolItem('bash', { id: 'c1', status: 'completed', created: T + 10, ran: T + 10, completed: T + 20 }),
+			toolItem('bash', { id: 'c2', status: 'error', error: { type: 'error', message: 'boom' }, created: T + 30, ran: T + 30, completed: T + 40 })
+		]
+	});
+	addAssistantMessage(db, {
+		id: 'm2', sessionId: 's2', seq: 1, created: T + DAY, completed: T + DAY + 100, agent: 'plan', model: MODEL,
+		cost: 5, tokens: { input: 300, output: 100, reasoning: 20, cacheRead: 5, cacheWrite: 10 },
+		content: [toolItem('edit', { id: 'c3', status: 'completed', created: T + DAY + 10, ran: T + DAY + 10, completed: T + DAY + 20 })]
+	});
+	addAssistantMessage(db, {
+		id: 'm3', sessionId: 's3', seq: 1, created: T + DAY + 50, completed: T + DAY + 60, agent: 'build', model: MODEL,
+		cost: 0.5, tokens: { input: 50, output: 30, reasoning: 10, cacheRead: 2, cacheWrite: 5 },
+		content: []
+	});
 
 	db.close();
 }

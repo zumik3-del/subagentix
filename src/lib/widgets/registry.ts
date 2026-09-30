@@ -32,9 +32,10 @@ import { formatCost, formatNumber } from '$lib/model/format';
 export { WIDGET_MAX_HEIGHT, WIDGET_MAX_WIDTH, WIDGET_MIN_HEIGHT, WIDGET_MIN_WIDTH };
 
 /**
- * Dominant aggregation source tier (spec §2.3): `S` = `session` scan (cheap),
- * `M` = `message` day buckets (medium), `P` = `part` tool frequency (heavy).
- * Metadata only: the descriptor does not use it to dispatch a payload.
+ * Dominant aggregation source tier (spec §2.3): `S` = `session_v2` scan
+ * (cheap), `M` = `session_message` day buckets (medium), `P` = `json_each`
+ * content-item tool frequency (heavy). Metadata only: the descriptor does not
+ * use it to dispatch a payload.
  */
 export type WidgetTier = 'S' | 'M' | 'P';
 

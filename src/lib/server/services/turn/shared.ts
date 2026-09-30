@@ -5,25 +5,21 @@
  * None of this is part of the public DTO surface (`model/types.ts`); it exists
  * only to keep the domain logic in one direction (`shared` is a leaf).
  */
-import { addUsage, emptyUsage, usageFromCounts } from '../../../model/token';
+import { addUsage, emptyUsage } from '../../../model/token';
 import type { Action, Marker, Node, Step, TimeFlag, ToolCall, Usage } from '../../../model/types';
 import type { SessionSubtreeRecord } from '../../queries/sessions';
-import type {
-	DelegationRecord,
-	MessageRecord,
-	PartRecord,
-	RemovedMarkerRecord
-} from '../../schema';
+import type { ContentRecord, DelegationRecord, MessageRecord } from '../../schema';
 
 /** Every raw record one session contributes to a turn. */
 export interface SessionData {
 	session: SessionSubtreeRecord;
 	messages: MessageRecord[];
-	stepParts: PartRecord[];
-	toolParts: PartRecord[];
-	actionParts: PartRecord[];
-	compaction: PartRecord[];
-	removed: RemovedMarkerRecord[];
+	/** `tool` content items (`getToolParts`), one per tool call. */
+	toolItems: ContentRecord[];
+	/** `text`/`reasoning` content items (`getActionParts`). */
+	actionItems: ContentRecord[];
+	/** `type='compaction'` messages (`getCompactionParts`). */
+	compactions: ContentRecord[];
 }
 
 /** A node plus the DTO slices it owns, as returned by the session assembler. */
@@ -35,20 +31,6 @@ export interface BuiltNode {
 	toolCalls: ToolCall[];
 	markers: Marker[];
 	actions: Action[];
-}
-
-export function subtractUsage(message: Usage, closed: Usage): Usage {
-	const sub = (a: number, b: number) => Math.max(0, a - b);
-	return usageFromCounts(
-		{
-			input: sub(message.input, closed.input),
-			output: sub(message.output, closed.output),
-			reasoning: sub(message.reasoning, closed.reasoning),
-			cacheRead: sub(message.cacheRead, closed.cacheRead),
-			cacheWrite: sub(message.cacheWrite, closed.cacheWrite)
-		},
-		sub(message.cost, closed.cost)
-	);
 }
 
 export function sumUsage(usages: Usage[]): Usage {
@@ -93,12 +75,15 @@ export function turnIndexOf(time: number, triggers: MessageRecord[]): number {
 }
 
 /**
- * Keep only the parts attached to a restricted message set, or return them
- * unchanged when no restriction applies. Every turn builder filters its part
- * lists this way, so the "restrict to these message ids" rule has one
+ * Keep only the content items attached to a restricted message set, or return
+ * them unchanged when no restriction applies. Every turn builder filters its
+ * item lists this way, so the "restrict to these message ids" rule has one
  * definition. (Messages themselves are filtered on `m.id` by the assembler,
  * not through this helper.)
  */
-export function partsIn(parts: PartRecord[], restrict: ReadonlySet<string> | null): PartRecord[] {
-	return restrict ? parts.filter((part) => restrict.has(part.messageId)) : parts;
+export function itemsIn(
+	items: ContentRecord[],
+	restrict: ReadonlySet<string> | null
+): ContentRecord[] {
+	return restrict ? items.filter((item) => restrict.has(item.messageId)) : items;
 }

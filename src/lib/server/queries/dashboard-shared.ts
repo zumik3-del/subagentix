@@ -27,13 +27,17 @@ const MAX_TOP_N = 100;
 /** Label used for a NULL/blank group key, matching `SessionSummary.agent`. */
 export const UNKNOWN_LABEL = 'unknown';
 
+/** The `json_each` alias every Tier-P query uses for the `data.content[]` walk. */
+export const CONTENT_ITEM_ALIAS = 'j';
+
 /**
- * `part.data.tool` as a display label, shared by the Tier-P aggregate and the
- * tool-error detail: the raw tool name, or `unknown` for a NULL/blank value.
+ * The `json_each` item's `$.name` as a display label, shared by the Tier-P
+ * aggregate and the tool-error detail: the raw tool name, or `unknown` for a
+ * NULL/blank value (the content item's `name` replaced V1's `part.data.tool`).
  */
 export const TOOL_LABEL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
-	'part.data',
-	JSON_PATH.part.tool
+	`${CONTENT_ITEM_ALIAS}.value`,
+	JSON_PATH.content.name
 )}), ''), '${UNKNOWN_LABEL}')`;
 
 /**

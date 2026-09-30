@@ -20,6 +20,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addProject, applyV2Schema } from '../test-fixtures/opencode-v2';
 
 /* ------------------------------------------------------------------ */
 /* Fixture scaffolding                                                */
@@ -38,28 +39,21 @@ afterAll(() => {
 	mock.restore();
 });
 
-/** Build a minimal opencode-shaped fixture DB with a `project` table. */
+/**
+ * Build a fixture DB with just the `project` rows the files service reads.
+ * Under V2 a project-only schema is no longer a valid opencode DB — `getDb()`
+ * gates on `session_v2` + `session_message` — so the full V2 schema is applied
+ * and only `project` is seeded.
+ */
 function buildFixtureDb(
 	dir: string,
 	projects: Array<{ id: string; worktree: string; name: string }>
 ): string {
 	const dbPath = join(dir, 'fixture.db');
 	const db = new Database(dbPath);
-	db.exec(`
-		CREATE TABLE project (
-			id TEXT PRIMARY KEY, worktree TEXT NOT NULL, name TEXT,
-			vcs TEXT, icon_url TEXT, icon_color TEXT,
-			time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
-			time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT,
-			icon_url_override TEXT
-		);
-		CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT, project_id TEXT);
-	`);
-	const ins = db.prepare(
-		'INSERT INTO project (id, worktree, name, time_created, time_updated, sandboxes) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	applyV2Schema(db);
 	for (const p of projects) {
-		ins.run(p.id, p.worktree, p.name, 0, 0, '[]');
+		addProject(db, { id: p.id, worktree: p.worktree, name: p.name });
 	}
 	db.close();
 	return dbPath;

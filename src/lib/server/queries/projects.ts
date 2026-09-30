@@ -3,9 +3,8 @@
  *
  * The single home of the `project` table SQL (ADR §7.1 layering): only
  * `id`, `worktree` and `name` are read, never any other column. The table
- * probe is cached per connection like `project-link.ts:hasProjectLink()`, so a
- * settings `dbPath` change re-probes the new schema instead of trusting a
- * stale result.
+ * probe is cached per connection, so a settings `dbPath` change re-probes the
+ * new schema instead of trusting a stale result.
  */
 import type { Database } from 'bun:sqlite';
 import { getDb } from '../db';

@@ -33,13 +33,27 @@ agent ran, and what tokens/cost it consumed, with per-node drill-down.
 ## Data source & privacy
 
 Reads the opencode SQLite database
-`~/.local/share/opencode/opencode.db` (read-only). Usage comes from
-`part` `step-finish` records (`input + output + reasoning + cache_read +
-cache_write`); `message`/`session` rollups are cross-checks. The data layer
-whitelists `session`, `message`, `part`, `project` and `todo`, and never returns
-`account` or `credential`. Access is strictly read-only (`readonly:true`,
-`PRAGMA query_only=1`, `busy_timeout`); the app never writes, checkpoints or
-vacuums the database.
+`~/.local/share/opencode/opencode.db` (read-only). The data layer targets the
+opencode **V2** schema: sessions live in `session_v2`, messages in
+`session_message`, and a message's parts are the `data.content[]` JSON array,
+walked with `json_each(session_message.data, '$.content')`. There is no `part`,
+`message`, `session` or `todo` table any more. Messages are ordered within a
+session by the `seq` column (there is no `parentID`), and the
+`session_message.type` column (`user`/`assistant`/`idle`/`system`/`synthetic`/
+`compaction`) replaces the old `data.role` discriminator.
+
+Usage is read per assistant message: one `assistant` message is one **step**, so
+its tokens and cost come from that message's `data.tokens` and `data.cost` — there
+are no `step-finish` rows. Delegation edges come from `data.content[]` items whose
+`name` is `subagent`, with the child session id at `state.metadata.sessionID`;
+the session tree itself walks `session_v2.parent_id`. `synthetic` messages never
+produce edges.
+
+The data layer reads only `session_v2`, `session_message` and `project` (plus
+`sqlite_master` for the V2 signature probe), and never returns `account` or
+`credential`. Access is strictly read-only (`readonly:true`,
+`PRAGMA query_only=1`, `busy_timeout`), never `immutable=1`; the app never
+writes, checkpoints or vacuums the database.
 
 The `/files` viewer applies the same read-only rule to the filesystem: it lists
 only allowlisted opencode config and project directories and never touches
@@ -72,6 +86,9 @@ Quality gates:
 bun test               # unit + integration suites
 bun run check          # svelte-check / TypeScript
 ```
+
+All test suites build their V2 SQLite fixtures from one shared module,
+`src/lib/server/test-fixtures/opencode-v2.ts`.
 
 ## Configuration
 

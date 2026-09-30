@@ -5,15 +5,15 @@
  * `ToolErrorsModal`, so it must stay free of `$lib/server` / DB imports and of
  * any DOM/Svelte dependency. Pure and deterministic; no I/O.
  *
- * "Failed" is deliberately unified with the top-tools aggregate: a part counts
- * when `part.data.state.status` is `error` **or** `failed` (the same pair
+ * "Failed" is deliberately unified with the top-tools aggregate: a content item
+ * counts when its `$.state.status` is `error` **or** `failed` (the same pair
  * `model/node.ts` uses), so the widget's errors column and this detail's
  * unfiltered total are the same number within the shared session ceiling.
  *
  * Since #484 the detail has two modes: `errors` (failed only, the default and
  * the unchanged `?toolErrors=` deep link) and `all` (every tool call, the
- * `?toolCalls=` deep link). The mode is the base `part` predicate, so rows,
- * total and the agent options all honour it.
+ * `?toolCalls=` deep link). The mode is the base content-item predicate, so
+ * rows, total and the agent options all honour it.
  */
 
 /**
@@ -35,7 +35,7 @@ export function isToolCallStatus(value: unknown): value is ToolCallStatus {
  * opened in (`?toolErrors=` = failures, `?toolCalls=` = all calls).
  */
 export interface ToolCallDetail {
-	/** Exact `part.data.tool` the overlay is filtered to. */
+	/** Exact content-item `$.name` the overlay is filtered to. */
 	tool: string;
 	/** `errors` = failures only; `all` = every call. */
 	mode: ToolCallStatus;
@@ -46,32 +46,33 @@ export interface ToolCallDetail {
  *
  * Since #538 a row also carries the fields the shared `ToolCallDetail` card
  * needs (`input`/`output`/`endedAt` plus the two name-derived flags), so a row
- * can be expanded into the same record the Gantt node inspector shows.
+ * can be expanded into the same record the Gantt node inspector shows. In V2 the
+ * row is a `data.content[]` tool item (spec §P4/AC4.c).
  */
 export interface ToolErrorEntry {
-	/** `part.id`; stable row key. */
+	/** The content item's `$.id` (provider call id); stable row key. */
 	id: string;
 	/** Owning session id. */
 	sessionId: string;
-	/** `part.time_created` (epoch-ms). */
+	/** The owning `session_message.time_created` (epoch-ms). */
 	at: number;
-	/** `session.agent`; `unknown` for a NULL/blank agent. */
+	/** `session_v2.agent`; `unknown` for a NULL/blank agent. */
 	agent: string;
-	/** `part.data.tool`; `unknown` for a NULL/blank tool. */
+	/** The content item's `$.name`; `unknown` for a NULL/blank tool. */
 	tool: string;
-	/** Raw `part.data.state.status`; empty string when the part has no status. */
+	/** Raw `$.state.status`; empty string when the item has no status. */
 	status: string;
-	/** `part.data.state.error`; empty string when the part carries no error text. */
+	/** `$.state.error.message`; empty string when the item carries no error text. */
 	error: string;
-	/** `part.data.state.input` (raw); `null` when absent. */
+	/** `$.state.input` (raw); `null` when absent. */
 	input: string | null;
-	/** `part.data.state.output` (raw); `null` when absent. */
+	/** The joined `$.state.content` text items, capped; `null` when absent. */
 	output: string | null;
-	/** `part.data.state.time.end`; `null` => still running / no end recorded. */
+	/** The item's `$.time.completed`; `null` => still running / no end recorded. */
 	endedAt: number | null;
 	/** True when `tool` is outside the built-in allowlist (MCP). */
 	isMcp: boolean;
-	/** True for the `task` delegation tool. */
+	/** True for the `subagent` delegation tool (V2's former `task`). */
 	isDelegation: boolean;
 }
 
@@ -97,15 +98,15 @@ export interface ToolErrorsPage {
 export interface ToolErrorsFilter {
 	/**
 	 * Base row predicate: `errors` keeps the unified failed definition,
-	 * `all` lists every `part.data.type = 'tool'` call. Absent = the default
+	 * `all` lists every tool content item. Absent = the default
 	 * ({@link DEFAULT_TOOL_CALL_STATUS}). Not a per-row filter.
 	 */
 	status?: ToolCallStatus;
-	/** Exact `part.data.tool`; `null`/blank = every tool. */
+	/** Exact content-item `$.name`; `null`/blank = every tool. */
 	tool?: string | null;
-	/** Exact `session.agent`; `null`/blank = every agent. */
+	/** Exact `session_v2.agent`; `null`/blank = every agent. */
 	agent?: string | null;
-	/** Case-insensitive substring of `part.data.state.error`. */
+	/** Case-insensitive substring of `$.state.error.message`. */
 	search?: string | null;
 }
 

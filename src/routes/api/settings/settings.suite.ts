@@ -14,6 +14,7 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addProject, addSessionV2, applyV2Schema, T } from '../../../lib/server/test-fixtures/opencode-v2';
 
 const tempDir = mkdtempSync(join(tmpdir(), 'subagentix-settings-api-'));
 const SETTINGS_FILE = join(tempDir, 'settings.json');
@@ -327,18 +328,20 @@ describe('PUT /api/settings', () => {
 /* Live apply across two DB fixtures                                  */
 /* ------------------------------------------------------------------ */
 
-/** Build a minimal opencode-shaped fixture under `dir`. */
+/**
+ * Build a minimal opencode V2 fixture under `dir`. The discovery/probe path
+ * gates on `session_v2` + `session_message`, so the shared schema is applied and
+ * only `session_v2` rows are seeded.
+ */
 function buildFixture(dir: string, sessions = 3): string {
 	mkdirSync(dir, { recursive: true });
 	const path = join(dir, 'fixture.db');
 	const db = new Database(path);
-	db.exec(`
-		CREATE TABLE session (id TEXT PRIMARY KEY);
-		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
-		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
-	`);
-	const ins = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < sessions; i++) ins.run(`s${i}`);
+	applyV2Schema(db);
+	addProject(db, { name: 'Settings' });
+	for (let i = 0; i < sessions; i++) {
+		addSessionV2(db, { id: `s${i}`, dir: '/repo/settings', title: `S${i}`, created: T + i });
+	}
 	db.close();
 	return path;
 }

@@ -1,13 +1,14 @@
 /**
- * Tier-M dashboard aggregates: `message` usage by UTC day.
+ * Tier-M dashboard aggregates: `session_message` usage by UTC day (V2).
  *
- * Reads `message` only for the session ids resolved by Tier-S
+ * Reads `session_message` only for the session ids resolved by Tier-S
  * ({@link listSessionIds} in `dashboard-sessions.ts`), in chunks under SQLite's
- * variable limit, merging the per-chunk partial sums in JS. `event` stays
- * untouched.
+ * variable limit, merging the per-chunk partial sums in JS. Only
+ * `type='assistant'` rows carry cost/tokens (V2 put the former `message.data`
+ * payload on `session_message.data`); `event` stays untouched.
  */
 import { getDb } from '../db';
-import { jsonExtract, JSON_PATH, tokenCounts, type Row } from '../schema';
+import { jsonExtract, JSON_PATH, MESSAGE_TYPE, tokenCounts, type Row } from '../schema';
 import type { TokenCounts } from '../../model/token';
 import {
 	chunk,
@@ -18,13 +19,13 @@ import {
 	type DashboardWindow
 } from './dashboard-shared';
 
-/** One UTC-day bucket of `message` usage (`data.cost` + `data.tokens.*`). */
+/** One UTC-day bucket of `session_message` usage (`data.cost` + `data.tokens.*`). */
 export interface MessageDayRecord {
 	/** UTC calendar day, `YYYY-MM-DD`. */
 	day: string;
-	/** Summed `message.data.cost`. */
+	/** Summed `session_message.data.cost`. */
 	cost: number;
-	/** Summed `message.data.tokens.*` categories. */
+	/** Summed `session_message.data.tokens.*` categories. */
 	tokens: TokenCounts;
 }
 
@@ -34,59 +35,61 @@ function zeroTokens(): TokenCounts {
 }
 
 /**
- * `message` usage grouped by UTC calendar day, ascending: gross cost plus the
- * five token categories. The id list is queried in chunks of
- * {@link IN_CHUNK_SIZE} and the per-day partial sums are merged in JS, so a
- * `period=all` call over thousands of sessions stays under SQLite's
- * bound-parameter limit. A `null` `from`/`to` is unbounded; when bound, the
- * message timestamp is filtered too, restricted to the same half-open window as
- * the session set.
+ * `session_message` usage grouped by UTC calendar day, ascending: gross cost
+ * plus the five token categories, over `type='assistant'` rows only. The id list
+ * is queried in chunks of {@link IN_CHUNK_SIZE} and the per-day partial sums are
+ * merged in JS, so a `period=all` call over thousands of sessions stays under
+ * SQLite's bound-parameter limit. A `null` `from`/`to` is unbounded; when bound,
+ * the message timestamp is filtered too, restricted to the same half-open window
+ * as the session set.
  *
- * The day key and window filter use the `message.time_created` column — the
- * NOT NULL, indexed mirror of `data.time.created` (they are equal on every live
- * row), unlike a `json_extract` per scanned row. The JSON path stays the single
- * source for the cost/token payload via `schema.ts`.
+ * The day key and window filter use the `session_message.time_created` column —
+ * the NOT NULL mirror of `data.time.created` (they are equal on every live row),
+ * unlike a `json_extract` per scanned row. The JSON path stays the single source
+ * for the cost/token payload via `schema.ts`.
  *
- * Index note (spec R3) — revisit trigger: the live opencode schema has no
- * standalone `message.time_created` index, only
- * `(session_id, time_created, id)`, so a `period=all` call is a full `message`
- * scan (bounded by the chunked id list; ~72k rows today). Revisit — drop the id
- * chunks and filter on time alone, or materialize a daily rollup — when
- * `message` grows past ~1M rows or opencode ships a standalone time index.
+ * Index note (spec §5) — V2 has standalone `session_message_time_created_idx` as
+ * well as `session_message_session_type_seq_idx(session_id, type, seq)`, so the
+ * chunked `session_id IN (…) AND type='assistant'` reads are index-driven; the
+ * V1 "full `message` scan" note no longer applies. A future change could drop
+ * the id chunks and filter on time alone (the standalone index covers it).
  */
 export function aggregateMessageUsageByUtcDay(
 	sessionIds: readonly string[],
 	window: DashboardWindow = {}
 ): MessageDayRecord[] {
 	if (sessionIds.length === 0) return [];
-	const costExpr = jsonExtract('message.data', JSON_PATH.message.cost);
-	const inputExpr = jsonExtract('message.data', JSON_PATH.message.input);
-	const outputExpr = jsonExtract('message.data', JSON_PATH.message.output);
-	const reasoningExpr = jsonExtract('message.data', JSON_PATH.message.reasoning);
-	const cacheReadExpr = jsonExtract('message.data', JSON_PATH.message.cacheRead);
-	const cacheWriteExpr = jsonExtract('message.data', JSON_PATH.message.cacheWrite);
+	const costExpr = jsonExtract('m.data', JSON_PATH.message.cost);
+	const inputExpr = jsonExtract('m.data', JSON_PATH.message.input);
+	const outputExpr = jsonExtract('m.data', JSON_PATH.message.output);
+	const reasoningExpr = jsonExtract('m.data', JSON_PATH.message.reasoning);
+	const cacheReadExpr = jsonExtract('m.data', JSON_PATH.message.cacheRead);
+	const cacheWriteExpr = jsonExtract('m.data', JSON_PATH.message.cacheWrite);
 
 	const totals = new Map<string, MessageDayRecord>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
-		const clauses = [`message.session_id IN (${ids.map(() => '?').join(', ')})`];
+		const clauses = [
+			`m.session_id IN (${ids.map(() => '?').join(', ')})`,
+			`m.type = '${MESSAGE_TYPE.assistant}'`
+		];
 		const params: Array<string | number> = [...ids];
 		if (isBound(window.from)) {
-			clauses.push('message.time_created >= ?');
+			clauses.push('m.time_created >= ?');
 			params.push(window.from);
 		}
 		if (isBound(window.to)) {
-			clauses.push('message.time_created < ?');
+			clauses.push('m.time_created < ?');
 			params.push(window.to);
 		}
 		const sql = `
-			SELECT date(message.time_created / 1000, 'unixepoch') AS day,
+			SELECT date(m.time_created / 1000, 'unixepoch') AS day,
 				COALESCE(sum(${costExpr}), 0) AS cost,
 				COALESCE(sum(${inputExpr}), 0) AS tok_input,
 				COALESCE(sum(${outputExpr}), 0) AS tok_output,
 				COALESCE(sum(${reasoningExpr}), 0) AS tok_reasoning,
 				COALESCE(sum(${cacheReadExpr}), 0) AS cache_read,
 				COALESCE(sum(${cacheWriteExpr}), 0) AS cache_write
-			FROM message
+			FROM session_message m
 			WHERE ${clauses.join(' AND ')}
 			GROUP BY day`;
 		const rows = getDb().query(sql).all(...params) as Row[];

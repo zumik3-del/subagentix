@@ -121,16 +121,9 @@
 				return row.kind === 'tool';
 			case 'misc':
 				// `Other` is the catch-all for everything that is neither a step,
-				// tool, text nor reasoning action: file/patch actions and the
-				// remaining marker kinds, plus agent/compaction/start/prompt rows.
-				return (
-					row.kind === 'file' ||
-					row.kind === 'patch' ||
-					row.kind === 'agent' ||
-					row.kind === 'compaction' ||
-					row.kind === 'start' ||
-					row.kind === 'prompt'
-				);
+				// tool, text nor reasoning action: compaction markers plus the
+				// start and prompt rows.
+				return row.kind === 'compaction' || row.kind === 'start' || row.kind === 'prompt';
 			default:
 				return row.kind === kindFilter;
 		}

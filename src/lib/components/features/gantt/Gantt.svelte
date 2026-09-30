@@ -420,7 +420,7 @@
 				flags.push({
 					key: 'openStep',
 					label: 'open step',
-					description: 'A step-start has no matching step-finish.'
+					description: 'An open step: the assistant message has no time.completed.'
 				});
 			}
 			for (const flag of node.flags) {

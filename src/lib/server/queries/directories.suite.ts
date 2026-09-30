@@ -14,9 +14,9 @@
  * child-only directory must be dropped; and `/repo/a` ties `/repo/c` on
  * `updatedAt` so the `directory ASC` tie-break is observable.
  *
- * Task #239 adds a `project` table plus `session.project_id`: the probe
- * (`hasProjectLink`) finds both, triggers the LEFT JOIN, and every directory
- * row now carries a `projectName`. `/repo/a` maps to a named project;
+ * Task #239 adds a `project` table plus `session_v2.project_id`: the
+ * V2 schema always has a `project` join (no probe needed), and every directory
+ * row carries a `projectName`. `/repo/a` maps to a named project;
  * `/repo/c` has no project link so `projectName` stays `null`.
  *
  * The live opencode DB is never opened or written.
@@ -26,34 +26,9 @@ import { Database } from 'bun:sqlite';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from '../test-fixtures/opencode-v2';
 
 const T = 1_700_000_000_000;
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT,
-		project_id TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE project (
-		id TEXT PRIMARY KEY, name TEXT
-	);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
 
 /**
  * `/repo/a` = 2 roots (newest T+500) + a child with the newest update T+9000;
@@ -65,61 +40,26 @@ const SCHEMA = `
  */
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
-
-	// Insert a named project so `/repo/a` gets a non-null projectName.
-	db.prepare(`INSERT INTO project (id, name) VALUES ('proj-a', 'Repo A')`).run();
-	// `/repo/b` and `/repo/c` have no project row, so their projectName is null.
-
-	const ins = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model, project_id)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const add = (
-		id: string,
-		parentId: string | null,
-		directory: string | null,
-		updated: number,
-		projectId: string | null = null
-	) =>
-		ins.run(
-			id,
-			parentId,
-			directory,
-			id,
-			'build',
-			T,
-			updated,
-			null,
-			0,
-			0,
-			0,
-			0,
-			0,
-			0,
-			null,
-			projectId
-		);
+	applyV2Schema(db);
+	db.prepare("INSERT INTO project (id, worktree, name, time_created, time_updated, sandboxes) VALUES ('proj-a', '/', 'Repo A', 0, 0, '[]')").run();
 
 	// /repo/c is inserted BEFORE /repo/a and ties it on updatedAt (T+500), but
 	// sorts after it alphabetically; a missing `directory ASC` tie-break is thus
 	// observable rather than accidentally matching the insertion order.
-	add('rootC1', null, '/repo/c', T + 500, null);
+	addSessionV2(db, { id: 'rootC1', dir: '/repo/c', title: 'Root C1', created: T, updated: T + 500 });
 
 	// /repo/a: two roots, and a child whose update is newer than both. Links to proj-a.
-	add('rootA1', null, '/repo/a', T + 100, 'proj-a');
-	add('rootA2', null, '/repo/a', T + 500, 'proj-a');
-	add('childA', 'rootA1', '/repo/a', T + 9_000, 'proj-a');
+	addSessionV2(db, { id: 'rootA1', dir: '/repo/a', title: 'Root A1', created: T, updated: T + 100, projectId: 'proj-a' });
+	addSessionV2(db, { id: 'rootA2', dir: '/repo/a', title: 'Root A2', created: T, updated: T + 500, projectId: 'proj-a' });
+	addSessionV2(db, { id: 'childA', parentId: 'rootA1', dir: '/repo/a', title: 'Child A', created: T, updated: T + 9_000, projectId: 'proj-a' });
 
 	// /repo/b: strictly older, no project.
-	add('rootB1', null, '/repo/b', T + 300, null);
+	addSessionV2(db, { id: 'rootB1', dir: '/repo/b', title: 'Root B1', created: T, updated: T + 300 });
 
 	// Excluded: blank directory, NULL directory, and a directory with no roots.
-	add('rootBlank', null, '', T + 7_000, null);
-	add('rootNull', null, null, T + 8_000, null);
-	add('orphanChild', 'rootC1', '/repo/childonly', T + 6_000, null);
+	addSessionV2(db, { id: 'rootBlank', dir: '', title: 'Blank', created: T, updated: T + 7_000 });
+	addSessionV2(db, { id: 'rootNull', dir: '', title: 'Null', created: T, updated: T + 8_000 });
+	addSessionV2(db, { id: 'orphanChild', parentId: 'rootC1', dir: '/repo/childonly', title: 'Orphan', created: T, updated: T + 6_000 });
 
 	db.close();
 }
@@ -192,7 +132,7 @@ describe('listDirectories() — root-only grouping, count, max updatedAt, order'
 	test('performs no writes and keeps the connection query_only', () => {
 		const db = getDb();
 		const count = (): number =>
-			(db.query('SELECT COUNT(*) AS n FROM session').get() as { n: number }).n;
+			(db.query('SELECT COUNT(*) AS n FROM session_v2').get() as { n: number }).n;
 		const before = count();
 		listDirectories();
 		expect(count()).toBe(before);

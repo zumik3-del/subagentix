@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
-import { countSessions } from './queries/health';
+import { countSessions, isV2Schema } from './queries/health';
 import { onSettingsChange, resolveDbPath } from './settings';
 
 export { resolveDbPath };
@@ -113,13 +113,11 @@ export function getDb(): Database {
 		);
 	}
 
+	let db: Database;
 	try {
-		const db = new Database(path, { readonly: true });
+		db = new Database(path, { readonly: true });
 		db.exec('PRAGMA query_only = 1;');
 		db.exec('PRAGMA busy_timeout = 5000;');
-		conn = db;
-		connPath = path;
-		return db;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		throw new Error(
@@ -127,6 +125,22 @@ export function getDb(): Database {
 				`Ensure opencode is running so the -wal/-shm files are readable.`
 		);
 	}
+
+	// V2 signature gate (spec decision D-4): no V1 compatibility. A V1 or
+	// foreign DB must fail here with one clear error naming the expected
+	// tables, never a downstream "no such table: session_v2".
+	if (!isV2Schema(db)) {
+		db.close();
+		throw new Error(
+			`Not an opencode V2 database at "${path}": expected the tables ` +
+				`"session_v2" and "session_message". Point OPENCODE_DB (or the settings dbPath) ` +
+				`at an opencode v2 database.`
+		);
+	}
+
+	conn = db;
+	connPath = path;
+	return db;
 }
 
 export interface HealthReport {
@@ -136,9 +150,10 @@ export interface HealthReport {
 }
 
 /**
- * Startup/read self-check: open read-only and read a known row (session count)
- * without writing anything. Throws a clear error on failure. The SQL lives in
- * the query layer (`queries/health.ts`); this is the DB-path-owning wrapper.
+ * Startup/read self-check: open read-only and read a known row (V2 session
+ * count) without writing anything. Throws a clear error on failure. The SQL
+ * lives in the query layer (`queries/health.ts`); this is the DB-path-owning
+ * wrapper.
  */
 export function healthCheck(): HealthReport {
 	const dbPath = resolveDbPath();

@@ -19,6 +19,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { addProject, applyV2Schema } from '../../../lib/server/test-fixtures/opencode-v2';
 
 /* ------------------------------------------------------------------ */
 /* Fixture scaffolding                                                */
@@ -36,26 +37,21 @@ afterAll(() => {
 	for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
 });
 
+/**
+ * The `/files` route resolves the DB through `getDb()`, which under V2 gates on
+ * `session_v2` + `session_message` being present. A project-only schema is no
+ * longer a valid opencode DB, so the fixture builds the full V2 schema and seeds
+ * just the `project` rows the route actually reads.
+ */
 function buildFixtureDb(
 	dir: string,
 	projects: Array<{ id: string; worktree: string; name: string }>
 ): string {
 	const dbPath = join(dir, 'fixture.db');
 	const db = new Database(dbPath);
-	db.exec(`
-		CREATE TABLE project (
-			id TEXT PRIMARY KEY, worktree TEXT NOT NULL, name TEXT,
-			vcs TEXT, icon_url TEXT, icon_color TEXT,
-			time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL,
-			time_initialized INTEGER, sandboxes TEXT NOT NULL, commands TEXT,
-			icon_url_override TEXT
-		);
-	`);
-	const ins = db.prepare(
-		'INSERT INTO project (id, worktree, name, time_created, time_updated, sandboxes) VALUES (?, ?, ?, ?, ?, ?)'
-	);
+	applyV2Schema(db);
 	for (const p of projects) {
-		ins.run(p.id, p.worktree, p.name, 0, 0, '[]');
+		addProject(db, { id: p.id, worktree: p.worktree, name: p.name });
 	}
 	db.close();
 	return dbPath;

@@ -1,42 +1,43 @@
 /**
- * Tool-call assembly: map raw `tool` parts to {@link ToolCall} DTOs.
+ * Tool-call assembly: map raw `tool` content items to {@link ToolCall} DTOs.
  */
 import { isMcpTool } from '$lib/model/tool-kind';
 import type { ToolCall } from '../../../model/types';
-import type { PartRecord } from '../../schema';
-import { clampEnd, partsIn, type SessionData } from './shared';
+import { toolOutputText, type ContentRecord } from '../../schema';
+import { clampEnd, itemsIn, type SessionData } from './shared';
 import { extractTrackerRefs } from './tracker-refs';
 
-function mapToolCall(part: PartRecord, nodeId: string, now: number): ToolCall {
-	const startedAt = part.stateStart;
-	const { endedAt, flags } = clampEnd(startedAt ?? now, part.stateEnd, now);
-	const name = part.tool ?? 'unknown';
+function mapToolCall(item: ContentRecord, nodeId: string, now: number): ToolCall {
+	const startedAt = item.timeRan ?? item.timeCreated;
+	const { endedAt, flags } = clampEnd(startedAt ?? now, item.timeCompleted, now);
+	const name = item.name ?? 'unknown';
+	const output = toolOutputText(item.content);
 	return {
-		id: part.id,
+		id: item.id,
 		nodeId,
 		stepId: null,
-		callId: part.callId,
+		callId: item.callId,
 		name,
-		status: part.status ?? 'unknown',
-		error: part.error,
+		status: item.status ?? 'unknown',
+		error: item.errorMessage ?? item.errorType,
 		startedAt,
 		endedAt,
 		flags,
-		input: part.input,
-		output: part.output,
+		input: item.input,
+		output,
 		isMcp: isMcpTool(name),
-		isDelegation: name === 'task',
+		isDelegation: name === 'subagent',
 		trackerRefs: extractTrackerRefs(name, {
-			input: part.input,
-			output: part.output,
-			prompt: part.prompt,
-			description: part.description
+			input: item.input,
+			output,
+			prompt: item.prompt,
+			description: item.description
 		})
 	};
 }
 
 /**
- * Map a session's tool parts to calls, restricted to `restrict` message ids
+ * Map a session's tool items to calls, restricted to `restrict` message ids
  * when given.
  */
 export function buildToolCalls(
@@ -45,8 +46,8 @@ export function buildToolCalls(
 	now: number
 ): ToolCall[] {
 	const calls: ToolCall[] = [];
-	for (const part of partsIn(sd.toolParts, restrict)) {
-		calls.push(mapToolCall(part, sd.session.id, now));
+	for (const item of itemsIn(sd.toolItems, restrict)) {
+		calls.push(mapToolCall(item, sd.session.id, now));
 	}
 	return calls;
 }

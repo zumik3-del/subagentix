@@ -1,7 +1,7 @@
 /**
  * Tier-M dashboard aggregate service (dashboard Phase 2, task #406).
  *
- * The `message`-derived half of the dashboard service: cost/day, tokens/day
+ * The `session_message`-derived half of the dashboard service: cost/day, tokens/day
  * and windowed KPI totals, all bucketed by the same UTC day rule as the Tier-S
  * series (`model/chart.ts`). Split out of `services/dashboard.ts` to stay under
  * the service 150-line target; it reuses that module's {@link toWindow} (window
@@ -26,29 +26,30 @@ import { daySeries, toWindow } from './dashboard';
 
 /**
  * Raw Tier-M day records for one resolved window: resolve the in-window session
- * ids (Tier S), then aggregate their `message` rows by UTC day with the query
- * layer's chunked `IN` list.
+ * ids (Tier S), then aggregate their `session_message` assistant rows by UTC day
+ * with the query layer's chunked `IN` list.
  *
  * `listSessionIds(window)` is deliberately UNCAPPED (no `max`): cost/day and
  * token/day must be exact, so every in-window session is scanned — unlike the
  * Tier-P tool usage, which caps to the most recent sessions to stay bounded.
- * The cost is exact-by-design, not unbounded: it is the `message` rows of the
- * in-window session set, chunked under SQLite's variable limit by the query
- * layer, and the dashboard cache absorbs repeated requests for the same filter.
+ * The cost is exact-by-design, not unbounded: it is the `session_message`
+ * assistant rows of the in-window session set, chunked under SQLite's
+ * variable limit by the query layer, and the dashboard cache absorbs repeated
+ * requests for the same filter.
  */
 function messageDays(window: DashboardWindow): MessageDayRecord[] {
 	return aggregateMessageUsageByUtcDay(listSessionIds(window), window);
 }
 
-/** Dense UTC-day gross cost from `message` timestamps, gaps filled with 0. */
+/** Dense UTC-day gross cost from `session_message` timestamps, gaps filled with 0. */
 export function getCostPerDay(filter: DashboardFilter, now = Date.now()): DayBucket[] {
 	const window = toWindow(filter, now);
 	return daySeries(messageDays(window), (row) => row.cost, window);
 }
 
 /**
- * Dense UTC-day total tokens (all five categories) from `message` timestamps,
- * gaps filled with 0.
+ * Dense UTC-day total tokens (all five categories) from `session_message`
+ * timestamps, gaps filled with 0.
  */
 export function getTokensPerDay(filter: DashboardFilter, now = Date.now()): DayBucket[] {
 	const window = toWindow(filter, now);

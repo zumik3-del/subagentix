@@ -14,19 +14,22 @@ import {
  */
 
 describe('BASIC_TOOL_NAMES', () => {
-	test('contains exactly the 13 documented names', () => {
-		expect(BASIC_TOOL_NAMES).toHaveLength(13);
+	test('contains exactly the 16 documented names', () => {
+		expect(BASIC_TOOL_NAMES).toHaveLength(16);
 	});
 
 	test('lists every expected built-in tool', () => {
 		const expected = [
 			'bash',
+			'shell',
+			'execute',
 			'read',
 			'edit',
 			'write',
 			'grep',
 			'glob',
 			'task',
+			'subagent',
 			'todowrite',
 			'webfetch',
 			'websearch',

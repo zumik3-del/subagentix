@@ -124,15 +124,16 @@ export interface DashboardTotals {
 
 /**
  * Windowed message-derived usage totals (dashboard Phase 2, Tier M): gross
- * `message.data.cost` and the five `message.data.tokens.*` categories summed
- * over messages in the window. Unlike {@link DashboardTotals} there is no
- * session count — Tier M measures spend/work, not rows, and the KPI widget
- * pairs it with the Tier-S session counts.
+ * `session_message.data.cost` and the five `session_message.data.tokens.*`
+ * categories summed over assistant messages in the window. Unlike
+ * {@link DashboardTotals} there is no session count — Tier M measures
+ * spend/work, not rows, and the KPI widget pairs it with the Tier-S session
+ * counts.
  */
 export interface MessageUsageTotals {
-	/** Sum of `message.data.cost` (gross). */
+	/** Sum of `session_message.data.cost` (gross). */
 	cost: number;
-	/** Sum of the five `message.data.tokens.*` categories. */
+	/** Sum of the five `session_message.data.tokens.*` categories. */
 	tokens: TokenCounts;
 }
 
@@ -146,28 +147,29 @@ export interface KpiData {
 	sessions: number;
 	/** Summed `message.data.cost` (Tier M). */
 	cost: number;
-	/** Summed `message.data.tokens.*` (Tier M). */
+	/** Summed `session_message.data.tokens.*` (Tier M). */
 	tokens: TokenCounts;
 }
 
 /**
  * Hard ceiling on the sessions a Tier-P (top-tools) read may scan. `period=all`
- * has no time bound, and `part` has no time/tool index, so without a ceiling the
- * scan would grow without limit with history (~285k rows today, one row per tool
- * call; spec R1). A Tier-P read contributes only the most recent
- * `MAX_TOOL_SESSIONS` sessions and flags the result as capped, so the widget can
- * label the all-time view as approximate. Bounded periods rarely reach the
- * ceiling; it applies to every Tier-P read as a safety bound.
+ * has no time bound, and the Tier-P read walks every `data.content[]` item of
+ * the in-scope assistant messages with `json_each`, so without a ceiling the
+ * walk would grow without limit with history (spec §5). A Tier-P read
+ * contributes only the most recent `MAX_TOOL_SESSIONS` sessions and flags the
+ * result as capped, so the widget can label the all-time view as approximate.
+ * Bounded periods rarely reach the ceiling; it applies to every Tier-P read as a
+ * safety bound.
  */
 export const MAX_TOOL_SESSIONS = 2_000;
 
 /** One row of the top-tools (Tier P) widget. */
 export interface ToolUsageEntry {
-	/** Tool name (`part.data.tool`); `unknown` for a NULL/blank tool. */
+	/** Tool name (the content item `$.name`); `unknown` for a NULL/blank tool. */
 	name: string;
-	/** Matching `part` rows in the capped window/scope. */
+	/** Matching tool content items in the capped window/scope. */
 	count: number;
-	/** Of `count`, tool parts whose `state.status` is `error`. */
+	/** Of `count`, tool items whose `$.state.status` is `error`. */
 	errors: number;
 	/** `errors / count` in `[0, 1]`; `0` when `count` is `0`. */
 	errorShare: number;

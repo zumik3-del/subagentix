@@ -3,12 +3,13 @@ import { Database } from 'bun:sqlite';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { applyV2Schema, addSessionV2 } from './test-fixtures/opencode-v2';
 
 /**
  * Unit tests for `probeOpencodeDb` (task #257, ADR §7.1).
  *
- * The probe opens candidates read-only and checks the opencode signature
- * (`session` + `message` + `part` tables = 3). It never writes to the
+ * The probe opens candidates read-only and checks the opencode V2 signature
+ * (`session_v2` + `session_message` tables = 2). It never writes to the
  * candidate file.
  */
 
@@ -24,17 +25,12 @@ function tempDir(): string {
 	return dir;
 }
 
-/** Create a minimal opencode-shaped fixture (3 tables + N sessions). */
+/** Create a minimal opencode V2-shaped fixture (2 tables + N sessions). */
 function buildOpencodeFixture(sessions = 3): string {
 	const path = join(tempDir(), 'opencode.db');
 	const db = new Database(path);
-	db.exec(`
-		CREATE TABLE session (id TEXT PRIMARY KEY, parent_id TEXT);
-		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
-		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
-	`);
-	const ins = db.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < sessions; i++) ins.run(`s${i}`);
+	applyV2Schema(db);
+	for (let i = 0; i < sessions; i++) addSessionV2(db, { id: `s${i}`, dir: '/repo', created: 0 });
 	db.close();
 	return path;
 }
@@ -99,12 +95,11 @@ test('probeOpencodeDb is read-only: fixture bytes are unchanged after probing', 
 	expect(existsSync(`${path}-journal`)).toBe(false);
 });
 
-test('probeOpencodeDb rejects a fixture missing one of the three required tables', async () => {
+test('probeOpencodeDb rejects a fixture missing one of the two required tables', async () => {
 	const path = join(tempDir(), 'partial.db');
 	const db = new Database(path);
-	db.exec('CREATE TABLE session (id TEXT PRIMARY KEY);');
-	db.exec('CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);');
-	// Missing `part` table.
+	db.exec('CREATE TABLE session_v2 (id TEXT PRIMARY KEY);');
+	// Missing `session_message` table.
 	db.close();
 
 	const mod = (await import('./db-probe')) as ProbeModule;
@@ -115,13 +110,9 @@ test('probeOpencodeDb with a WAL-mode fixture sees committed rows without checkp
 	const path = join(tempDir(), 'wal.db');
 	const writer = new Database(path);
 	writer.exec('PRAGMA journal_mode = WAL;');
-	writer.exec(`
-		CREATE TABLE session (id TEXT PRIMARY KEY);
-		CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT);
-		CREATE TABLE part (id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT, data TEXT);
-	`);
-	const ins = writer.prepare('INSERT INTO session (id) VALUES (?)');
-	for (let i = 0; i < 4; i++) ins.run(`w${i}`);
+	applyV2Schema(writer);
+	const ins = writer.prepare('INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, version, time_created, time_updated) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+	for (let i = 0; i < 4; i++) ins.run(`w${i}`, 'proj', null, `w${i}`, '/repo', '2.0.20', 0, 0);
 	writer.close();
 
 	const mainBefore = readFileSync(path);

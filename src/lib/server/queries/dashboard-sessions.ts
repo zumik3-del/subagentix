@@ -1,21 +1,20 @@
 /**
  * Tier-S dashboard aggregates plus the shared session-id resolver.
  *
- * The Tier-S loaders read only the small `session` table (~1.6k rows) plus, for
- * directory names, `project` when the live schema links it — no `message`,
- * `part` or `event` scan can enter those paths. {@link listSessionIds} resolves
- * the in-window session set that bounds the Tier-M (`message`) and Tier-P
- * (`part`) reads to those sessions, chunked under SQLite's variable limit.
+ * The Tier-S loaders read only the small `session_v2` table plus, for
+ * directory names, `project` — no `session_message` JSON scan can enter those
+ * paths. {@link listSessionIds} resolves the in-window session set that bounds
+ * the Tier-M (`session_message`) and Tier-P (`json_each` content) reads to those
+ * sessions, chunked under SQLite's variable limit.
  *
  * All caller values are bound parameters — no string interpolation. The period
- * window is a half-open `[from, to)` over `session.time_created`; a `null` bound
+ * window is a half-open `[from, to)` over `session_v2.time_created`; a `null` bound
  * is unbounded (`period = all`). Values come from `schema.ts` helpers, so no
  * `json_extract` or JSON path literal is spelled out here.
  */
 import { getDb } from '../db';
 import { jsonExtract, JSON_PATH, tokenCounts, type Row } from '../schema';
 import type { TokenCounts } from '../../model/token';
-import { hasProjectLink } from './project-link';
 import {
 	DEFAULT_TOP_N,
 	isBound,
@@ -45,25 +44,25 @@ export interface DirectoryCountRecord {
 	count: number;
 }
 
-/** Windowed totals over the `session` rollup columns. */
+/** Windowed totals over the `session_v2` rollup columns. */
 export interface SessionTotalsRecord {
 	count: number;
 	cost: number;
 	tokens: TokenCounts;
 }
 
-const AGENT_EXPR = `COALESCE(NULLIF(trim(session.agent), ''), '${UNKNOWN_LABEL}')`;
+const AGENT_EXPR = `COALESCE(NULLIF(trim(session_v2.agent), ''), '${UNKNOWN_LABEL}')`;
 const MODEL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
-	'session.model',
+	'session_v2.model',
 	JSON_PATH.session.modelId
 )}), ''), '${UNKNOWN_LABEL}')`;
 const PROVIDER_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
-	'session.model',
+	'session_v2.model',
 	JSON_PATH.session.providerId
 )}), ''), '${UNKNOWN_LABEL}')`;
 
 /**
- * Build the shared `WHERE` clause over `session` from a window/scope. `extra`
+ * Build the shared `WHERE` clause over `session_v2` from a window/scope. `extra`
  * predicates (constant SQL, never caller input) are ANDed in front. Returns the
  * SQL fragment plus the matching named bindings; an empty clause means no
  * predicates.
@@ -75,15 +74,15 @@ function buildWhere(
 	const clauses = [...extra];
 	const params: Record<string, number | string> = {};
 	if (isBound(window.from)) {
-		clauses.push('session.time_created >= :from');
+		clauses.push('session_v2.time_created >= :from');
 		params[':from'] = window.from;
 	}
 	if (isBound(window.to)) {
-		clauses.push('session.time_created < :to');
+		clauses.push('session_v2.time_created < :to');
 		params[':to'] = window.to;
 	}
 	if (typeof window.directory === 'string' && window.directory !== '') {
-		clauses.push('session.directory = :directory');
+		clauses.push('session_v2.directory = :directory');
 		params[':directory'] = window.directory;
 	}
 	return {
@@ -96,14 +95,14 @@ function buildWhere(
  * Sessions per UTC calendar day, ascending. Buckets come from
  * `date(time_created/1000, 'unixepoch')`, i.e. the same UTC boundaries
  * `model/chart.ts` uses to densify the series, so no row can land in a day the
- * chart would place elsewhere. Only `session` is read.
+ * chart would place elsewhere. Only `session_v2` is read.
  */
 export function countSessionsByUtcDay(window: DashboardWindow): DayCountRecord[] {
-	const filter = buildWhere(window, ['session.time_created IS NOT NULL']);
+	const filter = buildWhere(window, ['session_v2.time_created IS NOT NULL']);
 	const sql = `
-		SELECT date(session.time_created / 1000, 'unixepoch') AS day,
+		SELECT date(session_v2.time_created / 1000, 'unixepoch') AS day,
 			count(*) AS count
-		FROM session${filter.clause}
+		FROM session_v2${filter.clause}
 		GROUP BY day
 		ORDER BY day ASC`;
 	const rows = getDb().query(sql).all(filter.params) as Row[];
@@ -125,14 +124,14 @@ function countSessionsBy(
 	const filter = buildWhere(window);
 	const sql = `
 		SELECT ${nameExpr} AS name, count(*) AS count
-		FROM session${filter.clause}
+		FROM session_v2${filter.clause}
 		GROUP BY name
 		ORDER BY count DESC, name ASC
 		LIMIT :limit`;
 	return toNamedCounts(sql, filter.params, limit);
 }
 
-/** Sessions grouped by `session.agent`, count desc then name asc, top-N capped. */
+/** Sessions grouped by `session_v2.agent`, count desc then name asc, top-N capped. */
 export function countSessionsByAgent(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
@@ -140,7 +139,7 @@ export function countSessionsByAgent(
 	return countSessionsBy(window, AGENT_EXPR, limit);
 }
 
-/** Sessions grouped by `session.model.id`, count desc then name asc, top-N capped. */
+/** Sessions grouped by `session_v2.model.id`, count desc then name asc, top-N capped. */
 export function countSessionsByModel(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
@@ -148,7 +147,7 @@ export function countSessionsByModel(
 	return countSessionsBy(window, MODEL_EXPR, limit);
 }
 
-/** Sessions grouped by `session.model.providerID`, count desc then name asc, top-N capped. */
+/** Sessions grouped by `session_v2.model.providerID`, count desc then name asc, top-N capped. */
 export function countSessionsByProvider(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
@@ -161,25 +160,23 @@ export function countSessionsByProvider(
  * and NULL directories are dropped (the shared directory list filter treats an
  * empty value as "no filter", so such a group could not be scoped back).
  *
- * The `project.name` join is added only when the live schema links sessions to
- * projects, mirroring `listDirectories`; otherwise `projectName` stays `null`.
+ * The `project.name` join is unconditional: `session_v2.project_id` is
+ * `NOT NULL` and `project` always exists in V2 (spec decision D-4: no probe);
+ * `projectName` is `null` only when the joined name is blank.
  */
 export function countSessionsByDirectory(
 	window: DashboardWindow,
 	limit = DEFAULT_TOP_N
 ): DirectoryCountRecord[] {
-	const linked = hasProjectLink();
-	const projectColumn = linked ? 'max(project.name) AS project_name' : 'NULL AS project_name';
-	const join = linked ? ' LEFT JOIN project ON project.id = session.project_id' : '';
 	const filter = buildWhere(window, [
-		'session.directory IS NOT NULL',
-		"session.directory <> ''"
+		'session_v2.directory IS NOT NULL',
+		"session_v2.directory <> ''"
 	]);
 	const sql = `
-		SELECT session.directory AS directory, ${projectColumn}, count(*) AS count
-		FROM session${join}${filter.clause}
-		GROUP BY session.directory
-		ORDER BY count DESC, session.directory ASC
+		SELECT session_v2.directory AS directory, max(project.name) AS project_name, count(*) AS count
+		FROM session_v2 LEFT JOIN project ON project.id = session_v2.project_id${filter.clause}
+		GROUP BY session_v2.directory
+		ORDER BY count DESC, session_v2.directory ASC
 		LIMIT :limit`;
 	const params = { ...filter.params, ':limit': sanitizeLimit(limit) };
 	const rows = getDb().query(sql).all(params) as Row[];
@@ -194,20 +191,20 @@ export function countSessionsByDirectory(
 }
 
 /**
- * Windowed totals over `session`: row count, summed `cost` and the five summed
+ * Windowed totals over `session_v2`: row count, summed `cost` and the five summed
  * token columns. A single aggregate row, never a per-row fetch.
  */
 export function aggregateSessionTotals(window: DashboardWindow): SessionTotalsRecord {
 	const filter = buildWhere(window);
 	const sql = `
 		SELECT count(*) AS count,
-			COALESCE(sum(session.cost), 0) AS cost,
-			COALESCE(sum(session.tokens_input), 0) AS tok_input,
-			COALESCE(sum(session.tokens_output), 0) AS tok_output,
-			COALESCE(sum(session.tokens_reasoning), 0) AS tok_reasoning,
-			COALESCE(sum(session.tokens_cache_read), 0) AS cache_read,
-			COALESCE(sum(session.tokens_cache_write), 0) AS cache_write
-		FROM session${filter.clause}`;
+			COALESCE(sum(session_v2.cost), 0) AS cost,
+			COALESCE(sum(session_v2.tokens_input), 0) AS tok_input,
+			COALESCE(sum(session_v2.tokens_output), 0) AS tok_output,
+			COALESCE(sum(session_v2.tokens_reasoning), 0) AS tok_reasoning,
+			COALESCE(sum(session_v2.tokens_cache_read), 0) AS cache_read,
+			COALESCE(sum(session_v2.tokens_cache_write), 0) AS cache_write
+		FROM session_v2${filter.clause}`;
 	const row = (getDb().query(sql).get(filter.params) as Row | null) ?? {};
 	return {
 		count: toCount(row.count),
@@ -229,7 +226,8 @@ function toNamedCounts(
 
 /**
  * Ids of the sessions matching the window/scope. Used to bound the Tier-M
- * `message` and Tier-P `part` reads to the in-window session set. Without `max`
+ * `session_message` and Tier-P `json_each` content reads to the in-window session
+ * set. Without `max`
  * the order is not specified (both aggregates are order-independent) and every
  * match is returned. With `max`, the most recent sessions (by `time_created`)
  * are returned first, capped at `max` — the Tier-P ceiling that keeps a
@@ -240,11 +238,11 @@ export function listSessionIds(window: DashboardWindow, max?: number): string[] 
 	const filter = buildWhere(window);
 	const capped = max !== undefined;
 	const cap = capped ? (Number.isFinite(max) ? Math.max(0, Math.floor(max)) : 0) : 0;
-	const order = capped ? ' ORDER BY session.time_created DESC, session.id DESC' : '';
+	const order = capped ? ' ORDER BY session_v2.time_created DESC, session_v2.id DESC' : '';
 	const limit = capped ? ' LIMIT :max' : '';
 	const params = capped ? { ...filter.params, ':max': cap } : filter.params;
 	const rows = getDb()
-		.query(`SELECT session.id AS id FROM session${filter.clause}${order}${limit}`)
+		.query(`SELECT session_v2.id AS id FROM session_v2${filter.clause}${order}${limit}`)
 		.all(params) as Row[];
 	return rows.map((row) => toText(row.id)).filter((id) => id !== '');
 }

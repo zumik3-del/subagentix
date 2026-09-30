@@ -16,96 +16,67 @@ import { isHttpError } from '@sveltejs/kit';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+	addAssistantMessage,
+	addProject,
+	addSessionV2,
+	addUserMessage,
+	applyV2Schema,
+	subagentItem,
+	T
+} from '../../../lib/server/test-fixtures/opencode-v2';
 
-const T = 1_700_000_000_000;
+const MODEL = { id: 'gpt-5', providerID: 'openai' };
 
-interface SessionSeed {
-	id: string;
-	parentId?: string | null;
-	dir: string;
-	title: string;
-	agent?: string | null;
-	created: number;
-	updated: number;
-	archived?: number | null;
-	cost?: number;
-	input?: number;
-	output?: number;
-	reasoning?: number;
-	cacheRead?: number;
-	cacheWrite?: number;
-	model?: string | null;
-}
-
-const SCHEMA = `
-	CREATE TABLE session (
-		id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, title TEXT, agent TEXT,
-		time_created INTEGER, time_updated INTEGER, time_archived INTEGER, cost REAL,
-		tokens_input INTEGER, tokens_output INTEGER, tokens_reasoning INTEGER,
-		tokens_cache_read INTEGER, tokens_cache_write INTEGER, model TEXT
-	);
-	CREATE INDEX session_parent_idx ON session(parent_id);
-	CREATE TABLE message (
-		id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX message_session_idx ON message(session_id);
-	CREATE TABLE part (
-		id TEXT PRIMARY KEY, message_id TEXT, session_id TEXT,
-		time_created INTEGER, time_updated INTEGER, data TEXT
-	);
-	CREATE INDEX part_session_idx ON part(session_id);
-	CREATE TABLE event (
-		id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT
-	);
-`;
-
-const MODEL = JSON.stringify({ id: 'gpt-5', providerID: 'openai' });
-
+/**
+ * V2 changes three identities the assertions below depend on:
+ *   - a `Step` is the assistant message itself, so step ids are message ids
+ *     (`a1`, `a1b`, `a2`, `ca1`) — there is no `step-finish` row to name;
+ *   - a `ToolCall`/`Edge` has no row id, so it is `messageId#contentIndex`
+ *     (`a1#0`, `a1#1`, `ca1#0`);
+ *   - turns come from `seq` order, not `data.parentID`, so `u1` owns `a1`+`a1b`.
+ */
 function buildFixture(path: string): void {
 	const db = new Database(path);
-	db.exec(SCHEMA);
+	applyV2Schema(db);
+	addProject(db, { name: 'M3a' });
 
-	const insSession = db.prepare(
-		`INSERT INTO session (id, parent_id, directory, title, agent, time_created, time_updated,
-			time_archived, cost, tokens_input, tokens_output, tokens_reasoning,
-			tokens_cache_read, tokens_cache_write, model)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-	);
-	const addSession = (s: SessionSeed) =>
-		insSession.run(
-			s.id,
-			s.parentId ?? null,
-			s.dir,
-			s.title,
-			s.agent ?? null,
-			s.created,
-			s.updated,
-			s.archived ?? null,
-			s.cost ?? 0,
-			s.input ?? 0,
-			s.output ?? 0,
-			s.reasoning ?? 0,
-			s.cacheRead ?? 0,
-			s.cacheWrite ?? 0,
-			s.model ?? null
-		);
-
-	const insMessage = db.prepare(
-		'INSERT INTO message (id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?)'
-	);
-	const addMessage = (id: string, sessionId: string, created: number, data: Record<string, unknown>) =>
-		insMessage.run(id, sessionId, created, created, JSON.stringify(data));
-
-	const insPart = db.prepare(
-		'INSERT INTO part (id, message_id, session_id, time_created, time_updated, data) VALUES (?, ?, ?, ?, ?, ?)'
-	);
-	const addPart = (
-		id: string,
-		messageId: string,
-		sessionId: string,
-		created: number,
-		data: Record<string, unknown>
-	) => insPart.run(id, messageId, sessionId, created, created, JSON.stringify(data));
+	const addSession = (s: {
+		id: string;
+		parentId?: string | null;
+		dir: string;
+		title: string;
+		agent?: string | null;
+		created: number;
+		updated: number;
+		archived?: number | null;
+		cost?: number;
+		input?: number;
+		output?: number;
+		reasoning?: number;
+		cacheRead?: number;
+		cacheWrite?: number;
+		model?: { id: string; providerID: string } | null;
+	}) =>
+		addSessionV2(db, {
+			id: s.id,
+			parentId: s.parentId ?? null,
+			dir: s.dir,
+			title: s.title,
+			agent: s.agent ?? null,
+			created: s.created,
+			updated: s.updated,
+			archived: s.archived ?? null,
+			cost: s.cost ?? 0,
+			tokens: {
+				input: s.input ?? 0,
+				output: s.output ?? 0,
+				reasoning: s.reasoning ?? 0,
+				cacheRead: s.cacheRead ?? 0,
+				cacheWrite: s.cacheWrite ?? 0
+			},
+			model: s.model === undefined ? MODEL : s.model
+		});
 
 	// --- 210 filler roots (exercises the 1..200 clamp + default 50) -------
 	for (let i = 0; i < 210; i++) {
@@ -126,29 +97,48 @@ function buildFixture(path: string): void {
 	addSession({ id: 'root2', dir: '/repo/b', title: 'Root two', agent: null, created: T + 3000, updated: T + 3100 });
 
 	// root1: three turns (u1 with two assistants, u2 with one, u3 with zero).
-	addMessage('u1', 'root1', T + 1100, { role: 'user', time: { created: T + 1100 } });
-	addMessage('a1', 'root1', T + 1200, { role: 'assistant', parentID: 'u1', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 2, tokens: { input: 300, output: 120, reasoning: 40, cache: { read: 20, write: 10 } }, time: { created: T + 1200, completed: T + 1500 } });
-	addMessage('a1b', 'root1', T + 1300, { role: 'assistant', parentID: 'u1', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 10, output: 5, reasoning: 0 }, time: { created: T + 1300, completed: T + 1400 } });
-	addMessage('u2', 'root1', T + 4000, { role: 'user', time: { created: T + 4000 } });
-	addMessage('a2', 'root1', T + 4100, { role: 'assistant', parentID: 'u2', agent: 'build', modelID: 'gpt-5', providerID: 'openai', cost: 0, tokens: { input: 20, output: 10, reasoning: 5 }, time: { created: T + 4100, completed: T + 4200 } });
+	// The delegation `subagent` items live in a1, so `buildTurnModel` has a
+	// non-trivial GanttModel to assemble without any step parts.
+	addUserMessage(db, { id: 'u1', sessionId: 'root1', seq: 1, created: T + 1100, text: 'do the thing' });
+	addAssistantMessage(db, {
+		id: 'a1', sessionId: 'root1', seq: 2, created: T + 1200, completed: T + 1500,
+		agent: 'build', model: MODEL,
+		cost: 2, tokens: { input: 300, output: 120, reasoning: 40, cacheRead: 20, cacheWrite: 10 },
+		finish: 'tool-calls',
+		content: [
+			subagentItem({ id: 'c1', childSessionId: 'child1', agent: 'developer', description: 'build', status: 'completed', text: 'result', created: T + 1400, ran: T + 1400, completed: T + 2500 }),
+			subagentItem({ id: 'c3', childSessionId: null, agent: 'broken', status: 'error', error: { type: 'error', message: 'spawn failed' }, created: T + 2600, ran: T + 2600, completed: T + 2700 })
+		]
+	});
+	addAssistantMessage(db, {
+		id: 'a1b', sessionId: 'root1', seq: 3, created: T + 1300, completed: T + 1400,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 10, output: 5, reasoning: 0 },
+		finish: 'stop',
+		content: []
+	});
+	addUserMessage(db, { id: 'u2', sessionId: 'root1', seq: 4, created: T + 4000, text: 'second' });
+	addAssistantMessage(db, {
+		id: 'a2', sessionId: 'root1', seq: 5, created: T + 4100, completed: T + 4200,
+		agent: 'build', model: MODEL,
+		cost: 0, tokens: { input: 20, output: 10, reasoning: 5 },
+		finish: 'stop',
+		content: []
+	});
 	// u3 has no assistant reply — exercises the LEFT JOIN / count = 0 path.
-	addMessage('u3', 'root1', T + 5000, { role: 'user', time: { created: T + 5000 } });
-	// child1: one synthetic spawn turn (must not surface in root1's turn list).
-	addMessage('cu1', 'child1', T + 1600, { role: 'user', time: { created: T + 1600 } });
-	addMessage('ca1', 'child1', T + 1700, { role: 'assistant', parentID: 'cu1', agent: 'developer', modelID: 'gpt-5', providerID: 'openai', cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 }, time: { created: T + 1700, completed: T + 4500 } });
+	addUserMessage(db, { id: 'u3', sessionId: 'root1', seq: 6, created: T + 5000, text: 'third' });
 
-	// Step parts let `buildTurnModel` assemble a non-trivial GanttModel.
-	addPart('s1a', 'a1', 'root1', T + 1200, { type: 'step-start' });
-	addPart('f1a', 'a1', 'root1', T + 1500, { type: 'step-finish', reason: 'stop', tokens: { input: 150, output: 60, reasoning: 20, cache: { read: 10, write: 5 } }, cost: 1 });
-	addPart('s1c', 'a2', 'root1', T + 4100, { type: 'step-start' });
-	addPart('f1c', 'a2', 'root1', T + 4200, { type: 'step-finish', reason: 'stop', tokens: { input: 20, output: 10, reasoning: 5 }, cost: 0 });
-	addPart('s1d', 'ca1', 'child1', T + 1700, { type: 'step-start' });
-	addPart('f1d', 'ca1', 'child1', T + 4500, { type: 'step-finish', reason: 'stop', tokens: { input: 50, output: 20, reasoning: 10 }, cost: 0.5 });
-
-	// Delegation edges: root1 -> child1, root1 -> (failed) + child1 -> grandchild1.
-	addPart('d1', 'a1', 'root1', T + 1400, { type: 'tool', tool: 'task', callID: 'c1', state: { status: 'completed', time: { start: T + 1400, end: T + 2500 }, metadata: { parentSessionId: 'root1', sessionId: 'child1' }, input: { subagent_type: 'developer', description: 'build' }, output: 'result' } });
-	addPart('d3', 'a1', 'root1', T + 2600, { type: 'tool', tool: 'task', callID: 'c3', state: { status: 'error', error: 'spawn failed', time: { start: T + 2600, end: T + 2700 }, metadata: { parentSessionId: 'root1' }, input: { subagent_type: 'broken' }, output: '' } });
-	addPart('d2', 'ca1', 'child1', T + 2100, { type: 'tool', tool: 'task', callID: 'c2', state: { status: 'completed', time: { start: T + 2000, end: T + 2500 }, metadata: { parentSessionId: 'child1', sessionId: 'grandchild1' }, input: { subagent_type: 'tester', description: 'tests' }, output: 'ok' } });
+	// child1: its own turn, plus the delegation down to grandchild1.
+	addUserMessage(db, { id: 'cu1', sessionId: 'child1', seq: 1, created: T + 1600, text: 'child prompt' });
+	addAssistantMessage(db, {
+		id: 'ca1', sessionId: 'child1', seq: 2, created: T + 1700, completed: T + 4500,
+		agent: 'developer', model: MODEL,
+		cost: 0.5, tokens: { input: 50, output: 20, reasoning: 10 },
+		finish: 'tool-calls',
+		content: [
+			subagentItem({ id: 'c2', childSessionId: 'grandchild1', agent: 'tester', description: 'tests', status: 'completed', text: 'ok', created: T + 2000, ran: T + 2000, completed: T + 2500 })
+		]
+	});
 
 	db.close();
 }
@@ -487,14 +477,14 @@ describe('GET /api/sessions/[id] — detail + 404', () => {
 			['grandchild1', 2]
 		]);
 
-		expect(detail.edges.map((edge) => edge.id).sort()).toEqual(['d1', 'd2', 'd3']);
-		expect(detail.edges.find((edge) => edge.id === 'd1')).toMatchObject({
+		expect(detail.edges.map((edge) => edge.id).sort()).toEqual(['a1#0', 'a1#1', 'ca1#0']);
+		expect(detail.edges.find((edge) => edge.id === 'a1#0')).toMatchObject({
 			parentNodeId: 'root1',
 			childNodeId: 'child1',
 			subagentType: 'developer',
 			status: 'completed'
 		});
-		expect(detail.edges.find((edge) => edge.id === 'd3')).toMatchObject({
+		expect(detail.edges.find((edge) => edge.id === 'a1#1')).toMatchObject({
 			childNodeId: null,
 			status: 'error'
 		});
@@ -630,9 +620,9 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 			depth: 1,
 			status: 'completed'
 		});
-		// child1 owns step f1d and delegation d2; no root step/tool leaks in.
-		expect(detail.steps.map((step) => step.id)).toEqual(['f1d']);
-		expect(detail.toolCalls.map((call) => call.id)).toEqual(['d2']);
+		// child1 owns step ca1 and its own delegation; no root step/tool leaks in.
+		expect(detail.steps.map((step) => step.id)).toEqual(['ca1']);
+		expect(detail.toolCalls.map((call) => call.id)).toEqual(['ca1#0']);
 		expect(detail.markers).toEqual([]);
 	});
 
@@ -646,8 +636,9 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 			markers: unknown[];
 		};
 		expect(detail.node).toMatchObject({ sessionId: 'root1', kind: 'orchestrator', depth: 0 });
-		expect(detail.steps.map((step) => step.id)).toEqual(['f1a']);
-		expect(detail.toolCalls.map((call) => call.id).sort()).toEqual(['d1', 'd3']);
+		// Turn u1 owns assistant messages a1 and a1b — one Step each (D-1).
+		expect(detail.steps.map((step) => step.id).sort()).toEqual(['a1', 'a1b']);
+		expect(detail.toolCalls.map((call) => call.id).sort()).toEqual(['a1#0', 'a1#1']);
 		expect(detail.markers).toEqual([]);
 	});
 
@@ -708,10 +699,8 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		const count = (table: string): number =>
 			(db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 		const snapshot = {
-			session: count('session'),
-			message: count('message'),
-			part: count('part'),
-			event: count('event')
+			session: count('session_v2'),
+			message: count('session_message')
 		};
 
 		// Exercise every branch that reaches the DB.
@@ -725,10 +714,8 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		}
 
 		expect({
-			session: count('session'),
-			message: count('message'),
-			part: count('part'),
-			event: count('event')
+			session: count('session_v2'),
+			message: count('session_message')
 		}).toEqual(snapshot);
 		// The connection itself stays query_only.
 		expect(db.query('PRAGMA query_only').get()).toEqual({ query_only: 1 });
@@ -788,8 +775,8 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		const tools = d.toolCalls as Array<Record<string, unknown>>;
 		expect(steps.every((s) => s.nodeId === 'root1')).toBe(true);
 		expect(tools.every((t) => t.nodeId === 'root1')).toBe(true);
-		// Step ids for turn u1 on root: f1a only (a1b has no step parts in this fixture).
-		expect(steps.map((s) => s.id).sort()).toEqual(['f1a']);
+		// Step ids for turn u1 on root: one per assistant message (a1, a1b).
+		expect(steps.map((s) => s.id).sort()).toEqual(['a1', 'a1b']);
 	});
 
 	test('child detail: correct DTO shape, all steps/tools scoped to child', async () => {
@@ -802,9 +789,9 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		const tools = d.toolCalls as Array<Record<string, unknown>>;
 		expect(steps.every((s) => s.nodeId === 'child1')).toBe(true);
 		expect(tools.every((t) => t.nodeId === 'child1')).toBe(true);
-		expect(steps.map((s) => s.id)).toEqual(['f1d']);
-		// child1's own tool: the delegation to grandchild1 (d2).
-		expect(tools.map((t) => t.id)).toEqual(['d2']);
+		expect(steps.map((s) => s.id)).toEqual(['ca1']);
+		// child1's own tool: the delegation to grandchild1.
+		expect(tools.map((t) => t.id)).toEqual(['ca1#0']);
 	});
 
 	test('grandchild detail: correct DTO shape, all steps/tools scoped to grandchild', async () => {
@@ -838,8 +825,8 @@ describe('GET /api/sessions/[id]/nodes/[nodeId] — NodeDetail + 404', () => {
 		// Cross-node containment: root steps are NOT in child detail and vice versa.
 		const rootStepIds = new Set((rootDetail.steps as Array<Record<string, unknown>>).map((s) => s.id));
 		const childStepIds = new Set((childDetail.steps as Array<Record<string, unknown>>).map((s) => s.id));
-		expect(rootStepIds.has('f1d')).toBe(false); // root must not have child's step
-		expect(childStepIds.has('f1a')).toBe(false); // child must not have root's step
+		expect(rootStepIds.has('ca1')).toBe(false); // root must not have child's step
+		expect(childStepIds.has('a1')).toBe(false); // child must not have root's step
 	});
 
 	test('server parity: buildNodeDetail matches selectNodeDetail(buildTurnModel) for root', async () => {
@@ -938,7 +925,7 @@ describe('session page — load() data', () => {
 		expect(gantt?.rootSessionId).toBe('root1');
 		expect(gantt?.t0).toBe(T + 1100);
 		expect(gantt?.nodes.map((node) => node.sessionId)).toContain('root1');
-		expect(gantt?.edges.map((edge) => edge.id).sort()).toEqual(['d1', 'd2', 'd3']);
+		expect(gantt?.edges.map((edge) => edge.id).sort()).toEqual(['a1#0', 'a1#1', 'ca1#0']);
 	});
 
 	test('/sessions/[id]?turn= 404s for an unknown / non-user / empty trigger', async () => {
@@ -976,7 +963,7 @@ describe('read-only guard', () => {
 		expect(existsSync(DB_PATH)).toBe(true);
 		const db = getDb();
 		expect(db.query('PRAGMA query_only').get()).toEqual({ query_only: 1 });
-		expect(() => db.exec("INSERT INTO session (id) VALUES ('nope')")).toThrow(/readonly/i);
+		expect(() => db.exec("INSERT INTO session_v2 (id, project_id, slug, directory, version) VALUES ('nope', 'p', 'nope', '/', '2.0.20')")).toThrow(/readonly/i);
 	});
 
 	test('the list route and session page load perform no writes', async () => {
@@ -984,10 +971,8 @@ describe('read-only guard', () => {
 		const count = (table: string): number =>
 			(db.query(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
 		const snapshot = {
-			session: count('session'),
-			message: count('message'),
-			part: count('part'),
-			event: count('event')
+			session: count('session_v2'),
+			message: count('session_message')
 		};
 
 		// Exercise every offset branch of the list route.
@@ -1019,10 +1004,8 @@ describe('read-only guard', () => {
 		}
 
 		expect({
-			session: count('session'),
-			message: count('message'),
-			part: count('part'),
-			event: count('event')
+			session: count('session_v2'),
+			message: count('session_message')
 		}).toEqual(snapshot);
 		expect(db.query('PRAGMA query_only').get()).toEqual({ query_only: 1 });
 	});
