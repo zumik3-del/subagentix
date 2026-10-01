@@ -5,6 +5,4 @@ build
 .svelte-kit
 .env
 .data/
-deploy/
-deploy-quick.sh
 docs/ui-standards.md

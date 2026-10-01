@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+
+# ════════════════════════════════════════════════════════════════════════════
+#  pre-update — intentional no-op for subagentix
+#
+#  Called by deploy/update.sh as a hook (see run_hook in update.sh). update.sh
+#  treats a FAILING pre-update as fatal (it aborts before the code swap), so
+#  this hook exists as an explicit, honest statement rather than as an omission
+#  that leaves install.sh warning about a hook it cannot find.
+#
+#  WHY THERE IS NOTHING TO BACK UP. Three facts, each verifiable in the repo:
+#
+#    1. subagentix writes no database. Its only persistent writes are
+#       /var/lib/subagentix/settings.json (settingsFilePath(),
+#       src/lib/server/settings.ts). The opencode SQLite database is opened
+#       strictly read-only (`readonly` + `query_only`), so the WAL-safe
+#       `.backup` dance the upstream hook exists for has nothing to operate on.
+#    2. The source-mode swap never touches DATA_DIR. update.sh checks out a
+#       different git ref in INSTALL_DIR and leaves /var/lib alone, so
+#       settings.json cannot be damaged by a swap.
+#    3. There is no forward-only migration to guard. The rollback point for this
+#       app is the previous git ref (PREV_REF), which the update itself keeps;
+#       no schema has to travel with it.
+#
+#  So: back up settings.json by hand before a risky update if you want to, and
+#  do not expect this hook to have done it for you.
+# ════════════════════════════════════════════════════════════════════════════
+set -euo pipefail
+
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd -P)" || SCRIPT_DIR=""
+
+load_common() {
+  local cand
+  # Hooks live in ${RUN_DIR}/hooks; common.sh lives in ${RUN_DIR}/scripts/lib/.
+  for cand in "${SCRIPT_DIR}/../scripts/lib/common.sh" "${SCRIPT_DIR}/../scripts/common.sh" \
+              "${SCRIPT_DIR}/../lib/common.sh" "${SCRIPT_DIR}/../common.sh"; do
+    if [ -f "$cand" ]; then
+      # shellcheck source=../lib/common.sh
+      . "$cand"
+      return 0
+    fi
+  done
+  echo "[app] ERROR: cannot find lib/common.sh next to $0" >&2
+  exit 1
+}
+load_common
+
+# ── app.env, so DATA_DIR is this install's value ───────────────────────────
+# Without this the hook below would report the default path rather than the one
+# the unit actually writes to — and DATA_DIR is exactly the kind of value an
+# operator overrides (--dir, a sandboxed test), so guessing it here would be a
+# lie in the one message this hook prints. Same search order as the framework's
+# own pre-update: the installed layout first, then a bare checkout.
+if [ -n "$SCRIPT_DIR" ]; then
+  : "${RUN_DIR:=$(cd -- "${SCRIPT_DIR}/.." 2>/dev/null && pwd -P || true)}"
+  for f in "${RUN_DIR}/scripts/app.env" "${SCRIPT_DIR}/../app.env" "${SCRIPT_DIR}/app.env"; do
+    if [ -f "$f" ]; then
+      # shellcheck source=/dev/null
+      . "$f"
+      break
+    fi
+  done
+fi
+
+settings="${DATA_DIR:-/var/lib/subagentix}/settings.json"
+if [ -f "$settings" ]; then
+  info "pre-update: nothing to back up (subagentix writes no database)."
+  info "pre-update: your dashboard settings are in ${settings} and are NOT touched by"
+  info "pre-update: the code swap — copy it yourself if this update worries you."
+else
+  info "pre-update: nothing to back up (subagentix writes no database); no ${settings} yet."
+fi
+exit 0
