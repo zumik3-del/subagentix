@@ -326,6 +326,9 @@ a {
  *   .ui-btn--block    — full-width button.
  *   .ui-icon-btn      — square, borderless icon-only control (gear, copy…);
  *                       hover uses the neutral overlay.
+ *   .ui-icon-btn--circle — circular icon-only control (the icon-only mode of
+ *                          the shared RefreshButton: radius-full over the
+ *                          default radius-sm).
  *   .ui-link-btn      — borderless inline text action; :hover underlines and
  *                       brightens to --text-strong.
  *   .ui-swatch        — fixed 8px agent colour chip; geometry is standard,
@@ -471,6 +474,37 @@ a {
 .ui-icon-btn:hover:not(:disabled) {
 	background: var(--overlay-hover);
 	color: var(--text-strong);
+}
+
+/* Circular icon control — the icon-only mode of the shared RefreshButton. */
+.ui-icon-btn--circle {
+	border-radius: var(--radius-full);
+}
+
+/*
+ * One-shot refresh spin (shared RefreshButton, docs/ui-standards.md §10).
+ * The button carries `data-rotate` for the length of a single click, so the
+ * glyph turns exactly once and then stops: a fetch that outlasts the animation
+ * must not keep spinning. The class lives here, not on the component, because
+ * the animation target is the `Icon` svg the composite renders.
+ */
+@keyframes ui-icon-rotate {
+	to {
+		transform: rotate(360deg);
+	}
+}
+
+.ui-icon-btn[data-rotate] .icon,
+.ui-btn[data-rotate] .icon {
+	animation: ui-icon-rotate 600ms linear;
+}
+
+/* No rotation to show — the timer still clears `data-rotate` (see RefreshButton). */
+@media (prefers-reduced-motion: reduce) {
+	.ui-icon-btn[data-rotate] .icon,
+	.ui-btn[data-rotate] .icon {
+		animation: none;
+	}
 }
 
 /* Borderless text action (expand, reason links, …). */

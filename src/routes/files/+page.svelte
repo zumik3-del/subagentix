@@ -14,7 +14,7 @@
 	import type { PageProps } from './$types';
 	import type { FileIndex } from '$lib/model/files';
 	import { onDestroy } from 'svelte';
-	import Icon from '$lib/components/primitives/Icon.svelte';
+	import RefreshButton from '$lib/components/composites/RefreshButton.svelte';
 	import FileBrowser from '$lib/components/features/files/FileBrowser.svelte';
 	import { createFileContentLoader, fetchFileIndex } from '$lib/components/features/files/content';
 
@@ -56,16 +56,12 @@
 	<header class="files-page__header">
 		<h1 class="files-page__title">Files</h1>
 		<div class="files-page__actions">
-			<button
-				type="button"
-				class="ui-btn"
+			<RefreshButton
+				label="Reload"
+				ariaLabel="Reload"
 				onclick={() => void reload()}
 				disabled={reloading}
-				aria-busy={reloading}
-			>
-				<Icon name="refresh" />
-				Reload
-			</button>
+			/>
 			<a class="ui-link-btn files-page__back" href="/">← Dashboard</a>
 		</div>
 	</header>

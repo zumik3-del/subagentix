@@ -148,6 +148,72 @@ describe('.ui-icon-btn is excluded from --control-height', () => {
 	});
 });
 
+describe('.ui-icon-btn--circle primitive (icon-only RefreshButton)', () => {
+	test('is declared as a modifier of .ui-icon-btn', () => {
+		expect(css).toMatch(/\.ui-icon-btn--circle\s*\{[^}]*\}/);
+	});
+
+	test('overrides the box radius with --radius-full', () => {
+		const block = css.match(/\.ui-icon-btn--circle\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).toContain('border-radius: var(--radius-full)');
+	});
+
+	test('adds nothing but the radius — the box stays owned by .ui-icon-btn', () => {
+		// class-vs-component rule (docs/ui-standards.md §6): a modifier restyles, it
+		// does not re-declare the control box.
+		const block = css.match(/\.ui-icon-btn--circle\s*\{[^}]*\}/)?.[0] ?? '';
+		expect(block).not.toMatch(/width\s*:/);
+		expect(block).not.toMatch(/height\s*:/);
+		expect(block).not.toMatch(/padding\s*:/);
+		expect(block).not.toMatch(/background\s*:/);
+		expect(block).not.toMatch(/border\s*:/);
+	});
+});
+
+describe('one-shot refresh spin (shared RefreshButton, docs/ui-standards.md §10)', () => {
+	/** The selector list that owns the rotation (not the reduced-motion off-rule). */
+	function rotationSelector(): string {
+		return css.match(/([^{}]*)\{\s*animation:\s*ui-icon-rotate/)?.[1] ?? '';
+	}
+
+	test('the keyframe is the shared ui-icon-rotate', () => {
+		expect(css).toMatch(/@keyframes\s+ui-icon-rotate/);
+		expect(css).toMatch(/ui-icon-rotate[^{]*\{[^}]*transform:\s*rotate\(360deg\)/);
+	});
+
+	test('the animation is driven by the data-rotate marker, not a class', () => {
+		// Both variants of the composite (icon-only and labelled) must animate, so
+		// the selector list that owns the rotation names both primitives.
+		const selector = rotationSelector();
+		expect(selector).toContain('.ui-icon-btn[data-rotate] .icon');
+		expect(selector).toContain('.ui-btn[data-rotate] .icon');
+	});
+
+	test('the animation is a single linear turn, not an infinite loop', () => {
+		const block = css.match(/[^{}]*\{\s*animation:\s*ui-icon-rotate[^}]*\}/)?.[0] ?? '';
+		expect(block).toMatch(/animation:\s*ui-icon-rotate\s+600ms\s+linear/);
+		expect(block).not.toContain('infinite');
+	});
+
+	test('prefers-reduced-motion turns the rotation off', () => {
+		// The glyph stops rotating, so animationend never fires — RefreshButton's
+		// 700 ms timer is what guarantees data-rotate is still cleared.
+		const reduced =
+			css.match(
+				/@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)\s*\{[^}]*ui-icon-btn\[data-rotate\][^}]*\}/
+			)?.[0] ?? '';
+		expect(reduced).toContain('animation: none');
+	});
+
+	test('ui-icon-rotate is the only keyframe app.css declares', () => {
+		// No bespoke refresh/spin keyframe may creep back in per call site.
+		const names = (css.match(/@keyframes\s+[\w-]+/g) ?? []).map((d) =>
+			d.replace(/@keyframes\s+/, '')
+		);
+		expect(names).toEqual(['ui-icon-rotate']);
+	});
+});
+
 describe('Call-site adoption of .ui-select', () => {
 	const components = [
 		{ name: 'ToolErrorsModal', path: './features/dashboard/ToolErrorsModal.svelte' },

@@ -10,6 +10,7 @@
 	 */
 	import type { Snippet } from 'svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
+	import RefreshButton from '$lib/components/composites/RefreshButton.svelte';
 	import type { WidgetStatus } from './widget';
 
 	interface Props {
@@ -46,17 +47,12 @@
 		{#if onRefresh || onSettings}
 			<div class="widget-card__controls">
 				{#if onRefresh}
-					<button
-						class="ui-icon-btn widget-card__refresh"
-						class:is-spinning={refreshing || status === 'loading'}
-						type="button"
+					<RefreshButton
 						onclick={onRefresh}
-						disabled={refreshing || status === 'loading'}
-						aria-label="Refresh {title}"
+						ariaLabel={`Refresh ${title}`}
 						title="Refresh"
-					>
-						<Icon name="refresh" />
-					</button>
+						disabled={refreshing || status === 'loading'}
+					/>
 				{/if}
 				{#if onSettings}
 					<button
@@ -150,23 +146,10 @@
 		pointer-events: none;
 	}
 
-	/* Refresh control feedback while a fetch is in flight (task #438): CSS-only
-	   keyframes, no JS timer; suppressed for reduced-motion users. */
-	.widget-card__refresh.is-spinning :global(svg) {
-		animation: widget-refresh-spin 1s linear infinite;
-	}
-
-	@keyframes widget-refresh-spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-
+	/* The body dimming above is the only motion left in this card — the refresh
+	   spin is owned by `RefreshButton` + app.css. Suppress it for reduced-motion
+	   users. */
 	@media (prefers-reduced-motion: reduce) {
-		.widget-card__refresh.is-spinning :global(svg) {
-			animation: none;
-		}
-
 		.widget-card__body {
 			transition: none;
 		}
