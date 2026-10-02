@@ -90,6 +90,29 @@ bun run check          # svelte-check / TypeScript
 All test suites build their V2 SQLite fixtures from one shared module,
 `src/lib/server/test-fixtures/opencode-v2.ts`.
 
+## Service install
+
+Production runs as a systemd unit installed by the shared `deploy/` framework
+(`DIST=source` — a git checkout built on the host; see
+[`deploy/app.env`](deploy/app.env)):
+
+```sh
+sudo bash deploy/install.sh            # clone to /opt/subagentix, bun install, build, unit, start
+bash ~/.subagentix/scripts/updater.sh # update (a build, not a file swap)
+```
+
+This is the **one deliberate exception** to the convention the other two apps
+follow: code in `/opt/subagentix` (with `node_modules/` and `build/` beside
+`package.json`), state in `/var/lib/subagentix/settings.json` — reached through
+the unit's `StateDirectory=`, not through a file in `/opt` — and operator
+configuration in `/etc/subagentix/subagentix.env` (`EnvironmentFile=`). It has
+no database of its own; it reads the opencode database strictly read-only.
+
+The shared convention — canonical layout, unit policy, the two distribution
+modes, the per-app `app.env` keys and why the binary variant is deferred — is
+documented once, in
+[zumik3-del/synaptomind `docs/DEPLOY-LAYOUT.md`](https://github.com/zumik3-del/synaptomind/blob/main/docs/DEPLOY-LAYOUT.md).
+
 ## Configuration
 
 Environment variables (see `.env.example`); values stored via the Settings UI
