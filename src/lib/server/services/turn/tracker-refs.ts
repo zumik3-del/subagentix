@@ -1,7 +1,10 @@
 /**
  * Tracker-reference inference for tool calls and delegation edges (spec §6
  * "ziptask link"). Pure and server-free, so the client can reuse it.
+ *
+ * The Code Mode `execute` branch lives in its sibling `code-mode-refs.ts`.
  */
+import { extractExecuteTrackerRefs } from './code-mode-refs';
 
 /** The tool text fields a tracker reference can be inferred from. */
 export interface TrackerTexts {
@@ -15,23 +18,29 @@ export interface TrackerTexts {
 	description: string | null;
 }
 
-/** Read the first present, non-empty JSON key from a `state.*` text blob. */
-function jsonTrackerId(text: string | null, keys: readonly string[]): string | null {
+/** JSON-decode a `state.*` text blob into a record, or null when unusable. */
+function jsonRecord(text: string | null): Record<string, unknown> | null {
 	if (!text) return null;
 	try {
 		const parsed: unknown = JSON.parse(text);
 		if (!parsed || typeof parsed !== 'object') return null;
-		const record = parsed as Record<string, unknown>;
-		for (const key of keys) {
-			const value = record[key];
-			if (value === undefined || value === null) continue;
-			const id = String(value).trim();
-			if (id !== '') return id;
-		}
-		return null;
+		return parsed as Record<string, unknown>;
 	} catch {
 		return null;
 	}
+}
+
+/** Read the first present, non-empty JSON key from a `state.*` text blob. */
+function jsonTrackerId(text: string | null, keys: readonly string[]): string | null {
+	const record = jsonRecord(text);
+	if (record === null) return null;
+	for (const key of keys) {
+		const value = record[key];
+		if (value === undefined || value === null) continue;
+		const id = String(value).trim();
+		if (id !== '') return id;
+	}
+	return null;
 }
 
 /**
@@ -39,7 +48,11 @@ function jsonTrackerId(text: string | null, keys: readonly string[]): string | n
  * fixed order:
  * 1. `ziptask_*` calls read `state.input.task_id` / `state.input.id`, else
  *    JSON-decode the joined output text and read its `id`.
- * 2. `subagent` calls (V2's delegation tool, formerly `task`) match
+ * 2. `execute` calls (V2's Code Mode tool, where every tracker call is
+ *    `tools.ziptask.*` inside the submitted `state.input.code`) read the literal
+ *    task ids out of those invocations — only this call's own body, so nothing
+ *    is inherited from a delegation edge (decision D-1).
+ * 3. `subagent` calls (V2's delegation tool, formerly `task`) match
  *    `Task #(\d+)` in `state.input.prompt` / `description`.
  *
  * Deduplicated in first-seen order and always inferred — never authoritative.
@@ -51,6 +64,7 @@ export function extractTrackerRefs(name: string, texts: TrackerTexts): string[] 
 		const outputId = jsonTrackerId(texts.output, ['id']);
 		return outputId === null ? [] : [outputId];
 	}
+	if (name === 'execute') return extractExecuteTrackerRefs(texts.input);
 	if (name === 'subagent') {
 		const refs = new Set<string>();
 		for (const text of [texts.prompt, texts.description]) {

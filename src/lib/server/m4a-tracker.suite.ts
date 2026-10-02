@@ -14,6 +14,12 @@
  *   - `subagent` (V2 delegation) prompt / description / both, and the #198
  *     deviation (a non-`subagent` tool whose text contains `Task #N` is NOT
  *     parsed);
+ *   - `execute` (V2's Code Mode tool, task #1143): dot / bracket / whitespace /
+ *     optional-chaining call forms, several calls per block, `epic_id`, string
+ *     ids, ids inside string literals and comments, and a malformed input. The
+ *     items live in the NON-root `developer` session, so the same fixture also
+ *     proves the inference reaches a subagent node and is never inherited by
+ *     the root (decision D-1);
  *   - dedup across both inference paths and node vs turn aggregation.
  *
  * The live opencode DB is never opened or written.
@@ -31,9 +37,37 @@ import {
 	toolItem,
 	subagentItem,
 	T,
+	type ContentItem,
 } from './test-fixtures/opencode-v2';
 
 const MODEL = { id: 'gpt-5', providerID: 'openai' };
+
+/**
+ * A Code Mode `execute` tool item (task #1143): the tracker calls are not tool
+ * names but `tools.ziptask.*` source text inside `state.input.code`. `code` is
+ * the shorthand for that input; pass `input` to model a degenerate one
+ * (`state.input` absent, not an object, no `code`, a non-string `code`).
+ */
+function executeItem(options: {
+	id: string;
+	/** `state.input.code`. */
+	code?: string;
+	/** The whole `state.input`, replacing `code` when given. */
+	input?: unknown;
+	/** One `state.content[]` output text item (must never feed the refs). */
+	text?: string;
+	created: number;
+}): ContentItem {
+	return toolItem('execute', {
+		id: options.id,
+		status: 'completed',
+		input: options.code !== undefined ? { code: options.code } : options.input,
+		...(options.text !== undefined ? { text: options.text } : {}),
+		created: options.created,
+		ran: options.created,
+		completed: options.created + 5
+	});
+}
 
 function buildFixture(path: string): void {
 	const db = new Database(path);
@@ -81,6 +115,33 @@ function buildFixture(path: string): void {
 		finish: 'tool-calls',
 		content: [
 			toolItem('ziptask_get_task', { id: 'child_zt', status: 'completed', input: { id: 300 }, text: '{"id":300}', created: T + 250, ran: T + 250, completed: T + 260 }),
+			// --- Code Mode `execute` inference (task #1143), indices 1-12 ------
+			// Dot form. The output text carries a different id: only the
+			// submitted `code` may feed the refs.
+			executeItem({ id: 'ex_dot', code: 'const t = await tools.ziptask.get_task({ id: 401 });', text: '{"id":999}', created: T + 265 }),
+			// Bracket form, namespace and method key both bracketed.
+			executeItem({ id: 'ex_bracket', code: 'const t = await tools["ziptask"]["get_task"]({ task_id: 402 });', created: T + 270 }),
+			// Arbitrary whitespace + optional chaining on both keys, two calls
+			// contributing in source order.
+			executeItem({ id: 'ex_ws_optional', code: 'const a = await tools ?. ziptask ?. get_task ?. ({ id : 403 });\nconst b = await tools [ "ziptask" ] ?. [ "get_task" ] ?. ({ task_id: 411 });', created: T + 275 }),
+			// Several calls in one block; the repeat of 404 dedupes first-seen.
+			executeItem({ id: 'ex_multi', code: 'const first = await tools.ziptask.get_task({ id: 404 });\nconst second = await tools.ziptask.update_status({ id: 405, agent: "tester", status: "review" });\nconst third = await tools.ziptask.add_comment({ id: 404, comment: "re-listed" });', created: T + 280 }),
+			// `epic_id` is a parent pointer, not a ref.
+			executeItem({ id: 'ex_epic_only', code: 'const e = await tools.ziptask.list_tasks({ epic_id: 406, status: "queued" });', created: T + 285 }),
+			// A quoted id is not a literal: neither quote form contributes.
+			executeItem({ id: 'ex_string_ids', code: 'const a = await tools.ziptask.get_task({ id: "407" });\nconst b = await tools.ziptask.get_task({ task_id: \'408\' });', created: T + 290 }),
+			// The same call text inside a comment and a string literal is a
+			// snippet, not a call that ran: only the last line contributes.
+			executeItem({ id: 'ex_id_in_string', code: '// tools.ziptask.get_task({ id: 409 })\nconst snippet = \'tools.ziptask.get_task({ id: 410 })\';\nconst t = await tools.ziptask.get_task({ id: 412 });', created: T + 295 }),
+			// Degenerate `state.input` values: not an object, no `code`,
+			// a non-string `code`, and no `state.input` at all.
+			executeItem({ id: 'ex_bad_input', input: 'not json', created: T + 300 }),
+			executeItem({ id: 'ex_no_code', input: { text: 'tools.ziptask.get_task({ id: 501 })' }, created: T + 305 }),
+			executeItem({ id: 'ex_code_object', input: { code: { body: 'tools.ziptask.get_task({ id: 502 })' } }, created: T + 310 }),
+			executeItem({ id: 'ex_no_input', created: T + 315 }),
+			// A digit inside a string argument of a call that does run: the free
+			// text is masked out, only the real argument counts.
+			executeItem({ id: 'ex_digits_in_arg_text', code: 'const c = await tools.ziptask.add_comment({ id: 413, comment: "blocked on id: 414 and Task #415" });', created: T + 320 }),
 		],
 	});
 
@@ -177,6 +238,82 @@ describe('#198 deviation — only `subagent` calls parse Task #N', () => {
 	});
 });
 
+describe('execute (Code Mode) resolution — the submitted code, never the output', () => {
+	test('infers a literal id from a dot-form tools.ziptask call', () => {
+		expect(byCall.get('ca1#1')?.name).toBe('execute');
+		expect(byCall.get('ca1#1')?.trackerRefs).toEqual(['401']);
+	});
+
+	test('infers from the bracket form tools["ziptask"]["get_task"]', () => {
+		expect(byCall.get('ca1#2')?.trackerRefs).toEqual(['402']);
+	});
+
+	test('tolerates whitespace and optional chaining, keeping source order', () => {
+		expect(byCall.get('ca1#3')?.trackerRefs).toEqual(['403', '411']);
+	});
+
+	test('collects every call of a multi-call block, deduplicating first-seen', () => {
+		expect(byCall.get('ca1#4')?.trackerRefs).toEqual(['404', '405']);
+	});
+
+	test('`epic_id` alone is not a ref', () => {
+		expect(byCall.get('ca1#5')?.trackerRefs).toEqual([]);
+	});
+
+	test('a string id is not a ref', () => {
+		expect(byCall.get('ca1#6')?.trackerRefs).toEqual([]);
+	});
+
+	test('an id inside a string literal or a comment is not a ref', () => {
+		expect(byCall.get('ca1#7')?.trackerRefs).toEqual(['412']);
+	});
+
+	test('digits inside a string argument of a call that does run are not refs', () => {
+		expect(byCall.get('ca1#12')?.trackerRefs).toEqual(['413']);
+	});
+
+	test('a `state.input` that is not a JSON object yields no ref', () => {
+		expect(byCall.get('ca1#8')?.trackerRefs).toEqual([]);
+	});
+
+	test('a missing `code` yields no ref even when the input has tracker text', () => {
+		expect(byCall.get('ca1#9')?.trackerRefs).toEqual([]);
+	});
+
+	test('a non-string `code` yields no ref', () => {
+		expect(byCall.get('ca1#10')?.trackerRefs).toEqual([]);
+	});
+
+	test('an absent `state.input` yields no ref', () => {
+		expect(byCall.get('ca1#11')?.trackerRefs).toEqual([]);
+	});
+
+	test('the `ziptask_*` and `subagent` branches are unaffected by an execute sibling', () => {
+		expect(byCall.get('ca1#0')?.trackerRefs).toEqual(['300']);
+		expect(byCall.get('a1#0')?.trackerRefs).toEqual(['179']);
+		expect(byEdge.get('a1#7')?.trackerRefs).toEqual(['179']);
+	});
+});
+
+describe('node aggregation — non-root execute inference without inheritance (D-1)', () => {
+	const node = (sessionId: string) => model.nodes.find((entry) => entry.sessionId === sessionId);
+
+	test('a non-root `developer` node surfaces its own execute refs', () => {
+		const child = node('child1');
+		expect(child?.agent).toBe('developer');
+		expect(child?.depth).toBe(1);
+		expect(child?.trackerRefs?.length).toBeGreaterThan(0);
+		expect(child?.trackerRefs).toContain('401');
+		expect(child?.trackerRefs).toContain('412');
+	});
+
+	test('the root node stays untouched: no execute ref is inherited from the child', () => {
+		const root = node('root1');
+		expect(root?.trackerRefs).toEqual(['179', '200', '201', '202', '203', '204', '205']);
+		for (const ref of ['401', '412']) expect(root?.trackerRefs).not.toContain(ref);
+	});
+});
+
 describe('node vs turn aggregation (M4a DTO fields)', () => {
 	test('the root node unifies its tool calls and spawned `subagent` edges', () => {
 		const root = model.nodes.find((node) => node.sessionId === 'root1');
@@ -185,7 +322,13 @@ describe('node vs turn aggregation (M4a DTO fields)', () => {
 
 	test('the child node only owns refs of its own session', () => {
 		const child = model.nodes.find((node) => node.sessionId === 'child1');
-		expect(child?.trackerRefs).toEqual(['300']);
+		// Its own `ziptask_*` call plus its own Code Mode `execute` block; no ref
+		// of the root session leaks in.
+		expect(child?.trackerRefs).toEqual([
+			'300', '401', '402', '403', '411', '404', '405', '412', '413'
+		]);
+		expect(child?.trackerRefs).not.toContain('179');
+		expect(child?.trackerRefs).not.toContain('205');
 	});
 
 	test('turnTrackerRefs equals the union of node, call and edge refs', () => {
@@ -197,10 +340,15 @@ describe('node vs turn aggregation (M4a DTO fields)', () => {
 	});
 
 	test('the turn refs union every path, deduplicated in first-seen order', () => {
-		expect(model.trackerRefs).toEqual(['179', '200', '201', '202', '203', '204', '205', '300']);
+		expect(model.trackerRefs).toEqual([
+			'179', '200', '201', '202', '203', '204', '205',
+			'300', '401', '402', '403', '411', '404', '405', '412', '413'
+		]);
 		// `179` is inferred twice (ziptask input + subagent prompt) but surfaces once.
 		expect(model.trackerRefs?.filter((ref) => ref === '179')).toEqual(['179']);
 		expect(model.trackerRefs?.filter((ref) => ref === '203')).toEqual(['203']);
+		// `404` is inferred from two calls of one `execute` block, so it surfaces once.
+		expect(model.trackerRefs?.filter((ref) => ref === '404')).toEqual(['404']);
 	});
 
 	test('exposes the refs as strings on both node and model DTOs', () => {
