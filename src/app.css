@@ -213,6 +213,12 @@
 	--color-accent-base: var(--blue-dark-9);
 	--color-accent-strong: var(--blue-dark-11);
 	--color-accent-surface: color-mix(in srgb, var(--blue-dark-9) 22%, transparent);
+	/* MCP badge tone — derived from the solaris (gold) scale, distinct from
+	   every other badge tone: accent (blue), info (lilac), danger (ember),
+	   success (sage), warning (amber), compaction (neutral). */
+	--color-mcp-base: var(--solaris-dark-9);
+	--color-mcp-strong: var(--solaris-dark-11);
+	--color-mcp-surface: color-mix(in srgb, var(--solaris-dark-9) 22%, transparent);
 
 	/* Compat layer: legacy tokens (pre-theme components) ------------------ */
 	--bg: var(--background-base);
@@ -364,7 +370,9 @@ a {
  *   .ui-badge--danger     — generic danger tone (flagTone default).
  *   .ui-badge--info       — generic info tone. unused.
  *   .ui-badge--accent     — generic accent tone. unused.
- *   .ui-badge--mcp        — MCP tool-call marker.
+ *   .ui-badge--mcp        — MCP tool-call marker; distinct gold tone
+ *                           (--color-mcp-*, derived from solaris scale)
+ *                           so MCP calls read differently from accent/text.
  *   .ui-badge--text       — action kind "text".
  *   .ui-badge--deleg      — delegation tool-call marker.
  *   .ui-badge--reasoning  — action kind "reasoning".
@@ -643,10 +651,13 @@ a {
 	color: var(--color-info-strong);
 }
 .ui-badge--accent,
-.ui-badge--mcp,
 .ui-badge--text {
 	background: var(--color-accent-surface);
 	color: var(--color-accent-strong);
+}
+.ui-badge--mcp {
+	background: var(--color-mcp-surface);
+	color: var(--color-mcp-strong);
 }
 .ui-badge--deleg,
 .ui-badge--reasoning {
