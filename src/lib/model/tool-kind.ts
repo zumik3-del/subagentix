@@ -69,7 +69,8 @@ export function isMcpTool(name: string): boolean {
 
 /** The {@link ToolKind} of a tool name, in one place for callers that branch on it. */
 export function toolKind(name: string): ToolKind {
-	return isBasicTool(name) ? 'basic' : 'mcp';
+	// Delegates to isMcpTool so the dot-namespace rule (ADR D-3) has one source.
+	return isMcpTool(name) ? 'mcp' : 'basic';
 }
 
 /**

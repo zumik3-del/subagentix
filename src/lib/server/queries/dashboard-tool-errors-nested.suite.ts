@@ -109,8 +109,9 @@ describe('countToolErrors — nested calls in errors mode', () => {
 		expect(row.status).toBe('error');
 		expect(row.isMcp).toBe(true);
 		expect(row.isDelegation).toBe(false);
-		// Nested entries carry no provider call id, error text, output or end time.
-		expect(row.id).toBe('');
+		// Nested entries carry no provider call id (id is synthesised as
+		// messageId#itemIndex#n{nestedIndex}), error text, output or end time.
+		expect(row.id).toBe('m1#0#n1');
 		expect(row.error).toBe('');
 		expect(row.output).toBeNull();
 		expect(row.endedAt).toBeNull();

@@ -79,6 +79,13 @@ const CONTENT_EXPR = jsonExtract(ITEM, JSON_PATH.content.content);
 const ENDED_EXPR = jsonExtract(ITEM, JSON_PATH.content.timeCompleted);
 /** The `execute` filter: only `execute` items carry nested tool calls. */
 const EXECUTE_FILTER = jsonEquals(ITEM, JSON_PATH.content.name, 'execute');
+/**
+ * The nested row id: `messageId#itemIndex#n{nestedIndex}`. A nested entry has
+ * no provider call id, so a stable unique one is synthesised — the modal keys
+ * rows by `id` and a shared empty id collides (task #1503). Mirrors the
+ * `messageId#index` content-item convention (schema.ts {@link mapContentRow}).
+ */
+const NESTED_ID_EXPR = `m.id || '#' || CAST(${CONTENT_ITEM_ALIAS}.key AS TEXT) || '#n' || CAST(${NESTED_TOOL_CALL_ALIAS}.key AS TEXT)`;
 /** The `metadata.toolCalls` is-array guard (ADR D-5/E-2/E-4). */
 const ARRAY_GUARD = nestedToolCallsArrayGuard(CONTENT_ITEM_ALIAS);
 
@@ -120,7 +127,8 @@ function escapeLike(value: string): string {
  * `toolLabelExpr` and `errorExpr` parameterise the expressions so the same
  * filter shape serves both the top-level branch ({@link TOOL_LABEL_EXPR} /
  * {@link ERROR_EXPR}) and the nested branch ({@link NESTED_TOOL_LABEL_EXPR} /
- * `''` — nested entries carry no error text).
+ * `''` — nested entries carry no error text, so a non-empty search
+ * intentionally matches no nested row).
  */
 function buildFilters(
 	filter: ToolErrorsFilter,
@@ -286,7 +294,7 @@ export function listToolErrors(
 				WHERE m.session_id IN (${idPlaceholders(ids.length)})
 					AND m.type = '${MESSAGE_TYPE.assistant}' AND ${where}${clause}
 				UNION ALL
-				SELECT NULL AS call_id,
+				SELECT ${NESTED_ID_EXPR} AS call_id,
 					m.session_id AS session_id,
 					m.time_created AS at,
 					${NESTED_TOOL_LABEL_EXPR} AS tool,
