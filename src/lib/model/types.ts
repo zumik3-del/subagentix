@@ -130,6 +130,11 @@ export interface ToolCall {
 	isMcp: boolean;
 	isDelegation: boolean;
 	trackerRefs: string[];
+	/**
+	 * For nested Code Mode tool calls: the parent `execute` item's `id`.
+	 * `undefined` for top-level calls.
+	 */
+	parentCallId?: string;
 }
 
 /**
