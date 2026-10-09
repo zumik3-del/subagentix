@@ -443,6 +443,42 @@ export function subagentItem(options: SubagentItemOptions): ContentItem {
 	});
 }
 
+/** One nested Code Mode tool call seed (`state.metadata.toolCalls[]` entry, ADR D-2). */
+export interface NestedToolCallSeed {
+	tool: string;
+	status: string;
+	/** `input` object verbatim (e.g. `{ query, namespace }`); omit for a call with no input. */
+	input?: unknown;
+}
+
+export interface ExecuteItemOptions {
+	id: string;
+	status?: string;
+	/** Nested Code Mode tool calls recorded under `state.metadata.toolCalls`. */
+	toolCalls?: NestedToolCallSeed[];
+	created: number;
+	ran?: number;
+	completed?: number;
+}
+
+/**
+ * Build an `execute` tool item (the Code Mode JS sandbox) with nested MCP tool
+ * calls under `state.metadata.toolCalls[]` (ADR D-2). Reuses the `toolItem`
+ * shape; the sandbox's own `state.input` (the JS code) is not modelled.
+ */
+export function executeItem(options: ExecuteItemOptions): ContentItem {
+	const metadata: Record<string, unknown> = {};
+	if (options.toolCalls !== undefined) metadata.toolCalls = options.toolCalls;
+	return toolItem('execute', {
+		id: options.id,
+		status: options.status ?? 'completed',
+		...(Object.keys(metadata).length > 0 ? { metadata } : {}),
+		created: options.created,
+		...(options.ran !== undefined ? { ran: options.ran } : {}),
+		...(options.completed !== undefined ? { completed: options.completed } : {})
+	});
+}
+
 /** Build a `type='reasoning'` item with `time.{created,completed}` (spec §3.9). */
 export function reasoningItem(text: string, time: { created: number; completed?: number }): ContentItem {
 	return {

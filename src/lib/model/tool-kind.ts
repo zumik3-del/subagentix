@@ -24,6 +24,8 @@
  * `shell`, `execute` and `subagent` are the live V2 built-ins. `bash` and
  * `task` are the removed V1 names, kept because the split only affects the
  * basic/mcp label and historical rows still carry `bash` (spec OQ-3, E-21).
+ * `search` and `fetch` are the Code Mode built-ins recorded as nested calls
+ * inside `execute` items (ADR D-3).
  */
 export const BASIC_TOOL_NAMES: readonly string[] = [
 	'bash',
@@ -39,6 +41,8 @@ export const BASIC_TOOL_NAMES: readonly string[] = [
 	'todowrite',
 	'webfetch',
 	'websearch',
+	'search',
+	'fetch',
 	'skill',
 	'question',
 	'invalid'
@@ -54,8 +58,12 @@ export function isBasicTool(name: string): boolean {
 	return BASIC_TOOL_SET.has(name);
 }
 
-/** True for every tool name outside the built-in allowlist (MCP). */
+/**
+ * True for every MCP tool name. A dot-namespaced name (`<server>.<tool>`) is
+ * always MCP; every other name falls back to the allowlist check (ADR D-3).
+ */
 export function isMcpTool(name: string): boolean {
+	if (name.includes('.')) return true;
 	return !isBasicTool(name);
 }
 

@@ -14,8 +14,8 @@ import {
  */
 
 describe('BASIC_TOOL_NAMES', () => {
-	test('contains exactly the 16 documented names', () => {
-		expect(BASIC_TOOL_NAMES).toHaveLength(16);
+	test('contains exactly the 18 documented names', () => {
+		expect(BASIC_TOOL_NAMES).toHaveLength(18);
 	});
 
 	test('lists every expected built-in tool', () => {
@@ -33,6 +33,8 @@ describe('BASIC_TOOL_NAMES', () => {
 			'todowrite',
 			'webfetch',
 			'websearch',
+			'search',
+			'fetch',
 			'skill',
 			'question',
 			'invalid'
