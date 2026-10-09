@@ -195,3 +195,25 @@ describe('consistency with top-tools aggregate', () => {
 		expect(aggregateErrors).toBe(detailTotal);
 	});
 });
+
+/* ------------------------------------------------------------------ */
+/* Regression #1503: nested rows must have unique, non-empty ids       */
+/* ------------------------------------------------------------------ */
+
+describe('nested row id uniqueness (regression #1503)', () => {
+	test('all mode returns >=2 nested rows with distinct, non-empty ids', () => {
+		const rows = listToolErrors(IDS, { status: 'all' }, 0, 100);
+		// Nested rows have ids like `m1#0#n0`, `m1#0#n1`, `m1#0#n2`
+		const nestedRows = rows.filter((row) => row.id.includes('#n'));
+		// Pre-#1503: all nested ids were '' (empty string)
+		// Post-#1503: nested ids are messageId#itemIndex#n{nestedIndex}
+		expect(nestedRows.length).toBeGreaterThanOrEqual(2);
+		// All nested ids must be non-empty
+		for (const row of nestedRows) {
+			expect(row.id).not.toBe('');
+		}
+		// All nested ids must be distinct (pre-#1503: new Set(['', '', '']).size === 1 < 3)
+		const ids = new Set(nestedRows.map((row) => row.id));
+		expect(ids.size).toBe(nestedRows.length);
+	});
+});
