@@ -40,6 +40,51 @@ export const TOOL_LABEL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
 	JSON_PATH.content.name
 )}), ''), '${UNKNOWN_LABEL}')`;
 
+/** The nested tool-call entry alias (`tc.value` is the nested entry). */
+export const NESTED_TOOL_CALL_ALIAS = 'tc';
+
+/**
+ * The nested tool-call entry's `$.tool` as a display label: the raw tool name,
+ * or `unknown` for a NULL/blank value. Mirrors {@link TOOL_LABEL_EXPR} for the
+ * nested `json_each` walk (ADR D-5).
+ */
+export const NESTED_TOOL_LABEL_EXPR = `COALESCE(NULLIF(trim(${jsonExtract(
+	`${NESTED_TOOL_CALL_ALIAS}.value`,
+	JSON_PATH.nestedToolCall.tool
+)}), ''), '${UNKNOWN_LABEL}')`;
+
+/**
+ * The nested tool-call entry's `$.status`, or an empty string when absent.
+ */
+export const NESTED_STATUS_EXPR = `COALESCE(${jsonExtract(
+	`${NESTED_TOOL_CALL_ALIAS}.value`,
+	JSON_PATH.nestedToolCall.status
+)}, '')`;
+
+/**
+ * The nested tool-call entry's `$.input` as raw JSON text; `null` when absent.
+ */
+export const NESTED_INPUT_EXPR = jsonExtract(
+	`${NESTED_TOOL_CALL_ALIAS}.value`,
+	JSON_PATH.nestedToolCall.input
+);
+
+/**
+ * The `json_each` clause walking an `execute` item's nested tool calls
+ * (`state.metadata.toolCalls[]`, ADR D-5).
+ */
+export function nestedToolCallFrom(itemAlias: string): string {
+	return `json_each(json_extract(${itemAlias}.value, '${JSON_PATH.content.metadataToolCalls}')) AS ${NESTED_TOOL_CALL_ALIAS}`;
+}
+
+/**
+ * The guard predicate: only walk nested calls when `metadata.toolCalls` is an
+ * array (ADR D-5/E-2/E-4).
+ */
+export function nestedToolCallsArrayGuard(itemAlias: string): string {
+	return `json_type(json_extract(${itemAlias}.value, '${JSON_PATH.content.metadataToolCalls}')) = 'array'`;
+}
+
 /**
  * Maximum number of ids bound into one `IN (?, …)` clause. SQLite's default
  * `SQLITE_MAX_VARIABLE_NUMBER` has historically been 999, so a `period=all`

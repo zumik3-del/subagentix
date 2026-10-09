@@ -55,6 +55,8 @@ export const JSON_PATH = {
 		content: '$.state.content',
 		metadataSessionId: '$.state.metadata.sessionID',
 		metadataStatus: '$.state.metadata.status',
+		/** An `execute` item's nested Code Mode tool calls (ADR D-2). */
+		metadataToolCalls: '$.state.metadata.toolCalls',
 		agent: '$.state.input.agent',
 		description: '$.state.input.description',
 		prompt: '$.state.input.prompt',
@@ -62,6 +64,16 @@ export const JSON_PATH = {
 		timeRan: '$.time.ran',
 		timeCompleted: '$.time.completed',
 		text: '$.text'
+	},
+	/**
+	 * Nested Code Mode tool-call entry paths, relative to one entry of an
+	 * `execute` item's `state.metadata.toolCalls[]` (ADR D-2). Used by the
+	 * dashboard queries to walk the nested array with a second `json_each`.
+	 */
+	nestedToolCall: {
+		tool: '$.tool',
+		status: '$.status',
+		input: '$.input'
 	}
 } as const;
 
@@ -190,6 +202,7 @@ export function contentColumns(itemAlias: string, messageAlias?: string): string
 		jsonExtract(value, JSON_PATH.content.content, 'item_content'),
 		jsonExtract(value, JSON_PATH.content.metadataSessionId, 'item_metadata_session_id'),
 		jsonExtract(value, JSON_PATH.content.metadataStatus, 'item_metadata_status'),
+		jsonExtract(value, JSON_PATH.content.metadataToolCalls, 'item_metadata_tool_calls'),
 		jsonExtract(value, JSON_PATH.content.agent, 'item_agent'),
 		jsonExtract(value, JSON_PATH.content.description, 'item_description'),
 		jsonExtract(value, JSON_PATH.content.prompt, 'item_prompt'),
@@ -358,6 +371,51 @@ export function mapTurnSummaryRow(row: Row): TurnSummaryRecord {
 }
 
 /**
+ * One nested Code Mode tool call inside an `execute` item's
+ * `state.metadata.toolCalls[]` (ADR D-2). `input` is the raw JSON text of the
+ * entry's `input` value (an object in the live payload); `null` when absent.
+ */
+export interface NestedToolCall {
+	tool: string;
+	status: string;
+	input: string | null;
+}
+
+/**
+ * Parse an `execute` item's `state.metadata.toolCalls` raw JSON text into
+ * {@link NestedToolCall} DTOs. Safe by construction: `[]` on absent, malformed
+ * or non-array input; non-object entries are skipped; a missing/non-string
+ * `tool`/`status` coerces to `''`; a missing `input` becomes `null`, an object
+ * is re-serialised to JSON text, a string is kept verbatim.
+ */
+export function parseNestedToolCalls(raw: string | null): NestedToolCall[] {
+	if (raw === null || raw === '') return [];
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		return [];
+	}
+	if (!Array.isArray(parsed)) return [];
+	const calls: NestedToolCall[] = [];
+	for (const entry of parsed) {
+		if (entry === null || typeof entry !== 'object') continue;
+		const record = entry as Record<string, unknown>;
+		calls.push({
+			tool: typeof record.tool === 'string' ? record.tool : '',
+			status: typeof record.status === 'string' ? record.status : '',
+			input:
+				record.input === undefined || record.input === null
+					? null
+					: typeof record.input === 'string'
+						? record.input
+						: JSON.stringify(record.input)
+		});
+	}
+	return calls;
+}
+
+/**
  * One `data.content[]` item of a `session_message` (V2), walked with
  * `json_each` and selected via {@link contentColumns}: the item has no row id,
  * so identity is `(messageId, index)` — the synthesised `id` and `callId` is the
@@ -402,6 +460,11 @@ export interface ContentRecord {
 	timeCompleted: number | null;
 	/** Item body (`text`/`reasoning` items; `null` for `tool` items). */
 	text: string | null;
+	/**
+	 * Nested Code Mode tool calls (`state.metadata.toolCalls[]`, ADR D-2);
+	 * `[]` for items without nested calls (plain JS `execute`, `text`, …).
+	 */
+	toolCalls: NestedToolCall[];
 }
 
 export function mapContentRow(row: Row): ContentRecord {
@@ -428,7 +491,8 @@ export function mapContentRow(row: Row): ContentRecord {
 		timeCreated: asNumber(row.item_time_created),
 		timeRan: asNumber(row.item_time_ran),
 		timeCompleted: asNumber(row.item_time_completed),
-		text: asString(row.item_text)
+		text: asString(row.item_text),
+		toolCalls: parseNestedToolCalls(asString(row.item_metadata_tool_calls))
 	};
 }
 

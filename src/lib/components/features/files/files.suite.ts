@@ -521,10 +521,17 @@ describe('/files page SSR shell', () => {
 			join(repoRoot, 'src/routes/files/+page.svelte'),
 			'utf8'
 		);
-		// The header contains a Reload button wired to the reload() function.
+		// The header contains a Reload control wired to the reload() function, built
+		// from the shared RefreshButton labelled variant (#1146).
 		expect(source).toContain('files-page__actions');
-		expect(source).toMatch(/<button[^>]*onclick=\{\(\) => void reload\(\)\}/);
-		expect(source).toContain('Reload');
+		expect(source).toContain('<RefreshButton');
+		expect(source).toMatch(/onclick=\{\(\) => void reload\(\)\}/);
+		expect(source).toContain('label="Reload"');
+		expect(source).toContain('disabled={reloading}');
+		// The glyph and the spin now belong to the composite, not to this page.
+		expect(source).not.toContain('name="refresh"');
+		expect(source).not.toContain('is-spinning');
+		expect(source).not.toContain('data-rotate');
 		// Inline error paragraph is rendered when reloadError is non-null.
 		expect(source).toContain('files-page__error');
 		expect(source).toContain('reloadError');

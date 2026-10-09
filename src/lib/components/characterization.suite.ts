@@ -436,3 +436,39 @@ describe('normalization is stable across rebuilds', () => {
 		expect(countClass(html, 'b')).toBe(2);
 	});
 });
+
+// --- Nested Code Mode tool calls (ADR D-2, task #1501) --------------------
+
+describe('nested Code Mode tool calls — Gantt excludes, node detail includes', () => {
+	test('the Gantt renders a nested call (parentCallId set) as no tool rect', () => {
+		const base = makeGanttModel();
+		const nested = makeTool({
+			id: 't9',
+			name: 'synaptomind.memory_recall',
+			isMcp: true,
+			parentCallId: 't1'
+		});
+		const n = normalizeHtml(renderGantt(makeGanttModel({ toolCalls: [...base.toolCalls, nested] })));
+		// The base model has two top-level calls; the nested one adds no rect.
+		expect(countClass(n, 'tool')).toBe(base.toolCalls.length);
+		expect(n).not.toContain('synaptomind.memory_recall');
+	});
+
+	test('the node detail panel renders the nested call with its MCP badge', () => {
+		const base = makeDetail();
+		const nested = makeTool({
+			id: 't2#n0',
+			name: 'synaptomind.memory_recall',
+			isMcp: true,
+			parentCallId: 't2'
+		});
+		const baseHtml = normalizeHtml(renderPanel(base));
+		const n = normalizeHtml(renderPanel(makeDetail({ toolCalls: [...base.toolCalls, nested] })));
+		// The panel does not filter nested calls: one more details card. An
+		// unattached call (no stepId) also renders as a timeline SubRow, so the
+		// MCP badge appears twice per call (SubRow + card).
+		expect(countClass(n, 'call')).toBe(countClass(baseHtml, 'call') + 1);
+		expect(countClass(n, 'ui-badge--mcp')).toBe(countClass(baseHtml, 'ui-badge--mcp') + 2);
+		expect(n).toContain('id="tool-call-t2#n0"');
+	});
+});

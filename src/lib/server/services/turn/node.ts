@@ -68,6 +68,13 @@ export function buildSessionNode(
 	const callMessage = new Map<string, string>();
 	const allCalls = buildToolCalls(sd, restrict, now);
 	for (const item of toolItems) callMessage.set(item.id, item.messageId);
+	// Nested calls (parentCallId set) inherit the parent's message attribution.
+	for (const call of allCalls) {
+		if (call.parentCallId !== undefined) {
+			const messageId = callMessage.get(call.parentCallId);
+			if (messageId !== undefined) callMessage.set(call.id, messageId);
+		}
+	}
 	linkTools(steps, allCalls, callMessage);
 
 	const usage = sumUsage(steps.map((step) => step.usage));

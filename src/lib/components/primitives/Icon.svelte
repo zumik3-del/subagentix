@@ -1,3 +1,12 @@
+<script module lang="ts">
+	/**
+	 * Named icon sizes in px. Composites pass these instead of bare numbers so
+	 * a size stays a decision of the primitive set, not of each call site
+	 * (docs/ui-standards.md §7).
+	 */
+	export const ICON_SIZE = { xs: 12, sm: 14, md: 16, lg: 28 } as const;
+</script>
+
 <script lang="ts">
 	/**
 	 * Shared inline-SVG icon set (docs/ui-standards.md §7). Color inherits via
@@ -140,17 +149,18 @@
 		class="icon"
 		width={size}
 		height={size}
-		viewBox="0 0 16 16"
-		fill="none"
-		stroke="currentColor"
-		stroke-width="1.4"
-		stroke-linecap="round"
-		stroke-linejoin="round"
+		viewBox="0 0 24 24"
+		fill="currentColor"
+		stroke="none"
 		aria-hidden="true"
 		focusable="false"
 	>
-		<path d="M13.66 10a6 6 0 1 1-1.41-6.24L15.33 6.67" />
-		<polyline points="15.33 2.67 15.33 6.67 11.33 6.67" />
+		<!-- Remix `refresh` glyph: a filled 24-unit path, not a Lucide-style
+		     stroke, so it is authored and scaled on its own grid. Shared by
+		     every refresh control through `RefreshButton` (task #1146). -->
+		<path
+			d="M5.46257 4.43262C7.21556 2.91688 9.5007 2 12 2C17.5228 2 22 6.47715 22 12C22 14.1361 21.3302 16.1158 20.1892 17.7406L17 12H20C20 7.58172 16.4183 4 12 4C9.84982 4 7.89777 4.84827 6.46023 6.22842L5.46257 4.43262ZM18.5374 19.5674C16.7844 21.0831 14.4993 22 12 22C6.47715 22 2 17.5228 2 12C2 9.86386 2.66979 7.88416 3.8108 6.25944L7 12H4C4 16.4183 7.58172 20 12 20C14.1502 20 16.1022 19.1517 17.5398 17.7716L18.5374 19.5674Z"
+		/>
 	</svg>
 {:else if name === 'files'}
 	<svg

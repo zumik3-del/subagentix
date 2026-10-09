@@ -295,29 +295,45 @@ describe('WidgetCard source: all status branches + ARIA', () => {
 		});
 	});
 
-	describe('WidgetCard source: refresh spin + reduced-motion guard', () => {
+	describe('WidgetCard source: refresh control (shared RefreshButton, #1146)', () => {
 		const source = readFileSync(
 			new URL('./WidgetCard.svelte', import.meta.url),
 			'utf8'
 		);
 
-		test('refresh button gets is-spinning class when refreshing or loading', () => {
-			expect(source).toMatch(/class:is-spinning=\{refreshing \|\| status === 'loading'\}/);
+		test('renders the shared RefreshButton instead of a bespoke button', () => {
+			expect(source).toContain('<RefreshButton');
+			expect(source).toMatch(
+				/import RefreshButton from '\$lib\/components\/composites\/RefreshButton\.svelte'/
+			);
 		});
 
-		test('spinner animation keyframe rotates 360deg', () => {
-			expect(source).toMatch(/@keyframes\s+widget-refresh-spin/);
-			expect(source).toMatch(/transform:\s*rotate\(360deg\)/);
+		test('the control is disabled while refreshing or loading', () => {
+			expect(source).toMatch(/disabled=\{refreshing \|\| status === 'loading'\}/);
 		});
 
-		test('spinner applies to the refresh icon svg', () => {
-			expect(source).toMatch(/\.widget-card__refresh\.is-spinning/);
-			expect(source).toMatch(/animation:\s*widget-refresh-spin/);
+		test('the control is named after the card title', () => {
+			expect(source).toContain('ariaLabel={`Refresh ${title}`}');
 		});
 
-		test('prefers-reduced-motion suppresses the spinner', () => {
+		test('the card owns no spinner any more', () => {
+			// The one-shot spin moved to RefreshButton + app.css (#1146). A card-local
+			// `is-spinning` / keyframe would be a second, diverging refresh contract.
+			expect(source).not.toContain('is-spinning');
+			expect(source).not.toContain('widget-refresh-spin');
+			expect(source).not.toContain('widget-card__refresh');
+			expect(source).not.toContain('name="refresh"');
+			expect(source).not.toContain('data-rotate');
+		});
+
+		test('a same-scope re-fetch still dims the stale body', () => {
+			expect(source).toMatch(/class:is-refreshing=\{refreshing\}/);
+			expect(source).toMatch(/\.widget-card__body\.is-refreshing[^{]*\{[^}]*opacity:\s*0\.35/);
+		});
+
+		test('prefers-reduced-motion suppresses the body transition', () => {
 			expect(source).toMatch(/@media\s*\(\s*prefers-reduced-motion:\s*reduce\s*\)/);
-			expect(source).toMatch(/animation:\s*none/);
+			expect(source).toMatch(/\.widget-card__body[^{]*\{[^}]*transition:\s*none/);
 		});
 	});
 

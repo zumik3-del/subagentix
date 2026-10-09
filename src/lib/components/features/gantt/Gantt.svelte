@@ -451,16 +451,18 @@
 				};
 			});
 
-			const tools: ToolView[] = (toolsByNode.get(node.sessionId) ?? []).map((call) => ({
-				key: call.id,
-				x: x(call.startedAt ?? node.startedAt),
-				tone: toolTone(call.status),
-				delegation: call.isDelegation,
-				title: `${call.name} · ${call.status}${call.error ? ` · ${call.error}` : ''} · ${formatDuration(
-					call.startedAt ?? node.startedAt,
-					call.endedAt
-				)}${call.flags.length ? ` · ${call.flags.join(', ')}` : ''}`
-			}));
+			const tools: ToolView[] = (toolsByNode.get(node.sessionId) ?? [])
+				.filter((call) => call.parentCallId === undefined)
+				.map((call) => ({
+					key: call.id,
+					x: x(call.startedAt ?? node.startedAt),
+					tone: toolTone(call.status),
+					delegation: call.isDelegation,
+					title: `${call.name} · ${call.status}${call.error ? ` · ${call.error}` : ''} · ${formatDuration(
+						call.startedAt ?? node.startedAt,
+						call.endedAt
+					)}${call.flags.length ? ` · ${call.flags.join(', ')}` : ''}`
+				}));
 
 			const markers: MarkerView[] = nodeMarkers.map((marker, markerIndex) => ({
 				key: `${marker.type}-${markerIndex}`,

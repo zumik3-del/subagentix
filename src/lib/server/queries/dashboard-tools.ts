@@ -11,12 +11,16 @@
  */
 import { BASIC_TOOL_NAMES, FAILED_TOOL_STATUSES } from '../../model/tool-kind';
 import { getDb } from '../db';
-import { jsonEquals, jsonIn, JSON_PATH, CONTENT_TYPE, MESSAGE_TYPE, type Row } from '../schema';
+import { jsonEquals, jsonExtract, JSON_PATH, CONTENT_TYPE, MESSAGE_TYPE, type Row } from '../schema';
 import {
 	chunk,
 	CONTENT_ITEM_ALIAS,
 	DEFAULT_TOP_N,
 	IN_CHUNK_SIZE,
+	nestedToolCallFrom,
+	nestedToolCallsArrayGuard,
+	NESTED_TOOL_CALL_ALIAS,
+	NESTED_TOOL_LABEL_EXPR,
 	sanitizeLimit,
 	toCount,
 	toText,
@@ -92,20 +96,34 @@ export function aggregateToolUsage(
 	if (kinds?.basic === false && kinds.mcp === false) return [];
 	const item = `${CONTENT_ITEM_ALIAS}.value`;
 	const typeFilter = jsonEquals(item, JSON_PATH.content.itemType, CONTENT_TYPE.tool);
-	const errorFilter = jsonIn(item, JSON_PATH.content.status, FAILED_TOOL_STATUSES);
 	const kindFilter = toolKindClause(kinds, TOOL_LABEL_EXPR);
+	const nestedKindFilter = toolKindClause(kinds, NESTED_TOOL_LABEL_EXPR);
+	const nestedItem = `${NESTED_TOOL_CALL_ALIAS}.value`;
+	const executeFilter = jsonEquals(item, JSON_PATH.content.name, 'execute');
+	const arrayGuard = nestedToolCallsArrayGuard(CONTENT_ITEM_ALIAS);
+	const failedStatusesSql = FAILED_TOOL_STATUSES.map((s) => `'${s}'`).join(', ');
 
 	const totals = new Map<string, ToolUsageRecord>();
 	for (const ids of chunk(sessionIds, IN_CHUNK_SIZE)) {
 		const sql = `
-			SELECT ${TOOL_LABEL_EXPR} AS name,
-				count(*) AS count,
-				COALESCE(sum(CASE WHEN ${errorFilter} THEN 1 ELSE 0 END), 0) AS errors
-			FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
-			WHERE m.session_id IN (${ids.map(() => '?').join(', ')})
-				AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}${kindFilter}
+			SELECT name, count(*) AS count,
+				COALESCE(sum(CASE WHEN status IN (${failedStatusesSql}) THEN 1 ELSE 0 END), 0) AS errors
+			FROM (
+				SELECT ${TOOL_LABEL_EXPR} AS name,
+					${jsonExtract(item, JSON_PATH.content.status)} AS status
+				FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}
+				WHERE m.session_id IN (${ids.map(() => '?').join(', ')})
+					AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}${kindFilter}
+				UNION ALL
+				SELECT ${NESTED_TOOL_LABEL_EXPR} AS name,
+					${jsonExtract(nestedItem, JSON_PATH.nestedToolCall.status)} AS status
+				FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS ${CONTENT_ITEM_ALIAS}, ${nestedToolCallFrom(CONTENT_ITEM_ALIAS)}
+				WHERE m.session_id IN (${ids.map(() => '?').join(', ')})
+					AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}
+					AND ${executeFilter} AND ${arrayGuard}${nestedKindFilter}
+			)
 			GROUP BY name`;
-		const rows = getDb().query(sql).all(...ids) as Row[];
+		const rows = getDb().query(sql).all(...ids, ...ids) as Row[];
 		for (const row of rows) {
 			const name = toText(row.name);
 			const entry = totals.get(name) ?? { name, count: 0, errors: 0 };

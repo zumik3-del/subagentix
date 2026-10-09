@@ -14,8 +14,8 @@ import {
  */
 
 describe('BASIC_TOOL_NAMES', () => {
-	test('contains exactly the 16 documented names', () => {
-		expect(BASIC_TOOL_NAMES).toHaveLength(16);
+	test('contains exactly the 18 documented names', () => {
+		expect(BASIC_TOOL_NAMES).toHaveLength(18);
 	});
 
 	test('lists every expected built-in tool', () => {
@@ -33,6 +33,8 @@ describe('BASIC_TOOL_NAMES', () => {
 			'todowrite',
 			'webfetch',
 			'websearch',
+			'search',
+			'fetch',
 			'skill',
 			'question',
 			'invalid'
@@ -117,6 +119,43 @@ describe('isMcpTool()', () => {
 		for (const name of ['hello', 'my-tool', 'foo_bar', '']) {
 			expect(isMcpTool(name)).toBe(true);
 		}
+	});
+});
+
+describe('dot-namespace rule (ADR D-3)', () => {
+	test('isMcpTool is true for dot-namespaced <server>.<tool> names', () => {
+		const dotNamespaced = [
+			'synaptomind.memory_recall',
+			'ziptask.get_task',
+			'ziptask.update_status',
+			'weather.get_weather',
+			'telegram.send_message'
+		];
+		for (const name of dotNamespaced) {
+			expect(isMcpTool(name)).toBe(true);
+		}
+	});
+
+	test('isBasicTool is false for dot-namespaced names', () => {
+		for (const name of ['synaptomind.memory_recall', 'ziptask.get_task']) {
+			expect(isBasicTool(name)).toBe(false);
+		}
+	});
+
+	test('toolKind returns mcp for dot-namespaced names', () => {
+		expect(toolKind('synaptomind.memory_recall')).toBe('mcp');
+		expect(toolKind('ziptask.get_task')).toBe('mcp');
+	});
+
+	test('search and fetch are Code Mode built-ins: basic, not MCP', () => {
+		// ADR D-3: the only non-dotted nested names recorded inside `execute`
+		// items are the Code Mode built-ins `search` and `fetch`.
+		expect(isBasicTool('search')).toBe(true);
+		expect(isBasicTool('fetch')).toBe(true);
+		expect(isMcpTool('search')).toBe(false);
+		expect(isMcpTool('fetch')).toBe(false);
+		expect(toolKind('search')).toBe('basic');
+		expect(toolKind('fetch')).toBe('basic');
 	});
 });
 

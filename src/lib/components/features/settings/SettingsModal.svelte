@@ -11,6 +11,7 @@
 	import { onDestroy, tick } from 'svelte';
 	import Icon from '$lib/components/primitives/Icon.svelte';
 	import ScrollView from '$lib/components/primitives/ScrollView.svelte';
+	import RefreshButton from '$lib/components/composites/RefreshButton.svelte';
 
 	type Tab = 'opencode' | 'ziptask';
 	type DiscoverKind = Tab | 'agents';
@@ -415,14 +416,12 @@
 	<div class="agents-panel">
 		<div class="agents-head">
 			<span class="agents-title">Subagents{agentsCurrent && agents.length > 0 ? ` (${agents.length})` : ''}</span>
-			<button
-				type="button"
-				class="ui-btn refresh"
+			<RefreshButton
+				label={agentsLoading ? 'Reloading…' : 'Refresh'}
+				ariaLabel="Refresh subagents"
 				onclick={() => void loadAgents(true)}
 				disabled={agentsLoading || loading || saving}
-			>
-				{agentsLoading ? 'Reloading…' : 'Refresh'}
-			</button>
+			/>
 		</div>
 		{#if agentsError}
 			<p class="message error" role="alert">{agentsError}</p>
