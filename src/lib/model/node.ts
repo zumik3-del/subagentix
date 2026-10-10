@@ -207,12 +207,18 @@ export type DetailEntry =
 /**
  * Merge a node's tool calls and non-tool actions into one chronologically
  * ordered details list (the anchor target of the table rows). Pure and
- * deterministic: ordered by `at` (unknown tool starts last), ties by key.
+ * deterministic: ordered by `at` (unknown tool starts last, then ends, then
+ * falls back to the node start), ties by key.
  */
 export function buildDetailEntries(detail: NodeDetail): DetailEntry[] {
 	const entries: DetailEntry[] = [];
 	for (const call of detail.toolCalls) {
-		entries.push({ key: `tool:${call.id}`, kind: 'tool', at: call.startedAt, call });
+		entries.push({
+			key: `tool:${call.id}`,
+			kind: 'tool',
+			at: call.startedAt ?? call.endedAt ?? detail.node.startedAt,
+			call
+		});
 	}
 	for (const action of detail.actions ?? []) {
 		entries.push({ key: `${action.kind}:${action.id}`, kind: action.kind, at: action.at, action });
