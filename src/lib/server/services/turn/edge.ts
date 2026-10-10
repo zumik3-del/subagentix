@@ -2,6 +2,7 @@
  * Delegation-edge assembly: map one raw delegation record to the shared
  * {@link Edge} DTO.
  */
+import { DELEGATION_TOOL } from '$lib/model/tool-kind';
 import type { Edge, EdgeFlag } from '../../../model/types';
 import type { DelegationRecord } from '../../schema';
 import { clampEnd } from './shared';
@@ -34,7 +35,7 @@ export function buildEdge(record: DelegationRecord, now: number): Edge {
 		flags,
 		resultBytes: record.resultBytes,
 		description: record.description,
-		trackerRefs: extractTrackerRefs('subagent', {
+		trackerRefs: extractTrackerRefs(DELEGATION_TOOL, {
 			input: null,
 			output: null,
 			prompt: record.prompt,

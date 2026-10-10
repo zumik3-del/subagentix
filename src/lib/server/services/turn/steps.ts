@@ -6,7 +6,7 @@
 import { usageFromCounts } from '../../../model/token';
 import type { Step, ToolCall } from '../../../model/types';
 import { MESSAGE_TYPE } from '../../schema';
-import { clampEnd, hasCompactionBetween, type SessionData } from './shared';
+import { clampEnd, hasCompactionBetween, messagesIn, type SessionData } from './shared';
 
 /**
  * Build one step per `assistant` message in scope:
@@ -20,7 +20,7 @@ export function buildSteps(
 	compactionTimes: number[],
 	now: number
 ): Step[] {
-	const messages = restrict ? sd.messages.filter((message) => restrict.has(message.id)) : sd.messages;
+	const messages = messagesIn(sd.messages, restrict);
 	const steps: Step[] = [];
 	for (const message of messages) {
 		if (message.role !== MESSAGE_TYPE.assistant) continue;

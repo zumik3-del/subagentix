@@ -121,7 +121,8 @@ const MONTHS = [
 export function formatDate(epochMs: number, timeZone = 'UTC'): string {
 	if (!Number.isFinite(epochMs)) return '—';
 	const { year, month, day } = dateTimeParts(epochMs, timeZone);
-	return `${MONTHS[Number(month) - 1]} ${Number(day)}, ${year}`;
+	const monthName = MONTHS[Number(month) - 1] ?? '?';
+	return `${monthName} ${Number(day)}, ${year}`;
 }
 
 /** Human wall-clock duration; a `null` end means the span is still running. */

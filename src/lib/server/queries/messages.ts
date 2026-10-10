@@ -24,6 +24,7 @@ import {
 	mapTurnSummaryRow,
 	messageColumns,
 	CONTENT_TYPE,
+	INT64_MAX,
 	MESSAGE_TYPE,
 	JSON_PATH,
 	type ContentRecord,
@@ -86,7 +87,7 @@ export function getTurnSummaries(sessionId: string): TurnSummaryRecord[] {
 						WHERE next_trigger.session_id = trigger.session_id
 							AND next_trigger.type = '${MESSAGE_TYPE.user}'
 							AND next_trigger.seq > trigger.seq
-					), 9223372036854775807)
+					), ${INT64_MAX})
 			) AS assistant_count
 		FROM session_message trigger
 		WHERE trigger.session_id = :sid AND ${userFilter}
@@ -96,20 +97,34 @@ export function getTurnSummaries(sessionId: string): TurnSummaryRecord[] {
 }
 
 /**
+ * Shared SQL for content-item reads: walk `json_each(m.data, '$.content')`
+ * filtered by `typeFilterSql`, scoped to `messageIds` when given. Used by
+ * {@link getToolParts} and {@link getActionParts} so the query shape has one
+ * definition.
+ */
+export function getContentParts(
+	sessionId: string,
+	typeFilterSql: string,
+	messageIds?: readonly string[]
+): ContentRecord[] {
+	const scope = messageScope(messageIds);
+	const sql = `
+		SELECT ${contentColumns('item', 'm')}
+		FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS item
+		WHERE m.session_id = ? AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilterSql}${scope.clause}
+		ORDER BY m.seq, item.key`;
+	const rows = getDb().query(sql).all(sessionId, ...scope.values) as Row[];
+	return rows.map(mapContentRow);
+}
+
+/**
  * Tool items of one session, read from
  * `json_each(session_message.data, '$.content')` (decision D-3). Optional
  * owning-message scope as above.
  */
 export function getToolParts(sessionId: string, messageIds?: readonly string[]): ContentRecord[] {
 	const typeFilter = jsonEquals('item.value', JSON_PATH.content.itemType, CONTENT_TYPE.tool);
-	const scope = messageScope(messageIds);
-	const sql = `
-		SELECT ${contentColumns('item', 'm')}
-		FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS item
-		WHERE m.session_id = ? AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}${scope.clause}
-		ORDER BY m.seq, item.key`;
-	const rows = getDb().query(sql).all(sessionId, ...scope.values) as Row[];
-	return rows.map(mapContentRow);
+	return getContentParts(sessionId, typeFilter, messageIds);
 }
 
 /**
@@ -123,14 +138,7 @@ export function getActionParts(sessionId: string, messageIds?: readonly string[]
 		CONTENT_TYPE.text,
 		CONTENT_TYPE.reasoning
 	]);
-	const scope = messageScope(messageIds);
-	const sql = `
-		SELECT ${contentColumns('item', 'm')}
-		FROM session_message m, json_each(m.data, '${JSON_PATH.message.content}') AS item
-		WHERE m.session_id = ? AND m.type = '${MESSAGE_TYPE.assistant}' AND ${typeFilter}${scope.clause}
-		ORDER BY m.seq, item.key`;
-	const rows = getDb().query(sql).all(sessionId, ...scope.values) as Row[];
-	return rows.map(mapContentRow);
+	return getContentParts(sessionId, typeFilter, messageIds);
 }
 
 /**

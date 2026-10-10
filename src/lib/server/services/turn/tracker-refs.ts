@@ -4,7 +4,9 @@
  *
  * The Code Mode `execute` branch lives in its sibling `code-mode-refs.ts`.
  */
+import { CODE_MODE_TOOL, DELEGATION_TOOL } from '$lib/model/tool-kind';
 import { extractExecuteTrackerRefs } from './code-mode-refs';
+import { jsonRecord } from './json-utils';
 
 /** The tool text fields a tracker reference can be inferred from. */
 export interface TrackerTexts {
@@ -16,18 +18,6 @@ export interface TrackerTexts {
 	prompt: string | null;
 	/** `state.input.description`. */
 	description: string | null;
-}
-
-/** JSON-decode a `state.*` text blob into a record, or null when unusable. */
-function jsonRecord(text: string | null): Record<string, unknown> | null {
-	if (!text) return null;
-	try {
-		const parsed: unknown = JSON.parse(text);
-		if (!parsed || typeof parsed !== 'object') return null;
-		return parsed as Record<string, unknown>;
-	} catch {
-		return null;
-	}
 }
 
 /** Read the first present, non-empty JSON key from a `state.*` text blob. */
@@ -64,8 +54,8 @@ export function extractTrackerRefs(name: string, texts: TrackerTexts): string[] 
 		const outputId = jsonTrackerId(texts.output, ['id']);
 		return outputId === null ? [] : [outputId];
 	}
-	if (name === 'execute') return extractExecuteTrackerRefs(texts.input);
-	if (name === 'subagent') {
+	if (name === CODE_MODE_TOOL) return extractExecuteTrackerRefs(texts.input);
+	if (name === DELEGATION_TOOL) {
 		const refs = new Set<string>();
 		for (const text of [texts.prompt, texts.description]) {
 			if (!text) continue;

@@ -9,6 +9,7 @@
  * Pure and server-free — no `$lib/server`, DB, DOM or Node — like its sibling
  * `tracker-refs.ts`, which dispatches to {@link extractExecuteTrackerRefs}.
  */
+import { jsonRecord } from './json-utils';
 
 /**
  * The head of one `tools.ziptask.*` call, in every access form the harness
@@ -121,15 +122,9 @@ function executeCodeRefs(code: string): string[] {
  * that the two modules keep a one-way import instead of a cycle.
  */
 export function extractExecuteTrackerRefs(input: string | null): string[] {
-	if (!input) return [];
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(input);
-	} catch {
-		return [];
-	}
-	if (!parsed || typeof parsed !== 'object') return [];
-	const code = (parsed as Record<string, unknown>).code;
+	const record = jsonRecord(input);
+	if (record === null) return [];
+	const code = record.code;
 	if (typeof code !== 'string' || code === '') return [];
 	return executeCodeRefs(code);
 }

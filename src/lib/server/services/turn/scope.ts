@@ -7,6 +7,22 @@ import type { SessionSubtreeRecord } from '../../queries/sessions';
 import type { DelegationRecord, MessageRecord } from '../../schema';
 import { edgeSortTime, turnIndexOf, type SessionData } from './shared';
 
+/** Walk up the subtree to the depth-1 ancestor of `sessionId`. */
+export function topLevelAncestor(
+	subtree: SessionSubtreeRecord[],
+	sessionId: string
+): string {
+	const parentById = new Map(subtree.map((s) => [s.id, s.parentId]));
+	const depthById = new Map(subtree.map((s) => [s.id, s.depth]));
+	let current = sessionId;
+	while ((depthById.get(current) ?? 0) > 1) {
+		const parent = parentById.get(current);
+		if (!parent) break;
+		current = parent;
+	}
+	return current;
+}
+
 /**
  * Node -> turn index for the depth-1 sessions: the earliest spawn edge assigns
  * the node (spec R3).
@@ -36,21 +52,9 @@ export function selectTurnSessions(
 	turnOfSession: Map<string, number>,
 	triggerIndex: number
 ): SessionSubtreeRecord[] {
-	const parentById = new Map(subtree.map((session) => [session.id, session.parentId]));
-	const depthById = new Map(subtree.map((session) => [session.id, session.depth]));
-	const topLevelAncestor = (sessionId: string): string => {
-		let current = sessionId;
-		while ((depthById.get(current) ?? 0) > 1) {
-			const parent = parentById.get(current);
-			if (!parent) break;
-			current = parent;
-		}
-		return current;
-	};
-
 	return subtree.filter(
 		(session) =>
-			session.depth === 0 || turnOfSession.get(topLevelAncestor(session.id)) === triggerIndex
+			session.depth === 0 || turnOfSession.get(topLevelAncestor(subtree, session.id)) === triggerIndex
 	);
 }
 

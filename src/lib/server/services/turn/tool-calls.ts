@@ -1,16 +1,17 @@
 /**
  * Tool-call assembly: map raw `tool` content items to {@link ToolCall} DTOs.
  */
-import { isMcpTool } from '$lib/model/tool-kind';
+import { CODE_MODE_TOOL, DELEGATION_TOOL, isMcpTool } from '$lib/model/tool-kind';
 import type { ToolCall } from '../../../model/types';
 import { toolOutputText, type ContentRecord } from '../../schema';
 import { clampEnd, itemsIn, type SessionData } from './shared';
+import { UNKNOWN_LABEL } from '../../queries/dashboard-shared';
 import { extractTrackerRefs } from './tracker-refs';
 
 function mapToolCall(item: ContentRecord, nodeId: string, now: number): ToolCall {
 	const startedAt = item.timeRan ?? item.timeCreated;
 	const { endedAt, flags } = clampEnd(startedAt ?? now, item.timeCompleted, now);
-	const name = item.name ?? 'unknown';
+	const name = item.name ?? UNKNOWN_LABEL;
 	const output = toolOutputText(item.content);
 	return {
 		id: item.id,
@@ -18,7 +19,7 @@ function mapToolCall(item: ContentRecord, nodeId: string, now: number): ToolCall
 		stepId: null,
 		callId: item.callId,
 		name,
-		status: item.status ?? 'unknown',
+		status: item.status ?? UNKNOWN_LABEL,
 		error: item.errorMessage ?? item.errorType,
 		startedAt,
 		endedAt,
@@ -26,7 +27,7 @@ function mapToolCall(item: ContentRecord, nodeId: string, now: number): ToolCall
 		input: item.input,
 		output,
 		isMcp: isMcpTool(name),
-		isDelegation: name === 'subagent',
+		isDelegation: name === DELEGATION_TOOL,
 		trackerRefs: extractTrackerRefs(name, {
 			input: item.input,
 			output,
@@ -83,7 +84,7 @@ export function buildToolCalls(
 	const calls: ToolCall[] = [];
 	for (const item of itemsIn(sd.toolItems, restrict)) {
 		calls.push(mapToolCall(item, sd.session.id, now));
-		if (item.name === 'execute' && item.toolCalls.length > 0) {
+		if (item.name === CODE_MODE_TOOL && item.toolCalls.length > 0) {
 			for (let i = 0; i < item.toolCalls.length; i++) {
 				calls.push(mapNestedToolCall(item, item.toolCalls[i], i, sd.session.id, now));
 			}

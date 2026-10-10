@@ -98,6 +98,12 @@ export const CONTENT_TYPE = {
 	reasoning: 'reasoning'
 } as const;
 
+/**
+ * SQLite's signed 64-bit integer maximum, used as the open upper bound of a
+ * half-open `seq` window when no next trigger exists (`COALESCE(..., INT64_MAX)`).
+ */
+export const INT64_MAX = 9223372036854775807;
+
 type SqlValue = string | number;
 
 function sqlValue(value: SqlValue): string {

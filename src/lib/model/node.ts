@@ -7,6 +7,7 @@
  */
 import { formatDateTime, formatDuration } from './format';
 import { isFailedToolStatus } from './tool-kind';
+import { mergeTrackerRefs } from './tracker';
 import type { Action, ActionKind, GanttModel, NodeDetail, Step, ToolCall } from './types';
 
 /**
@@ -323,8 +324,7 @@ export function summarizeStepTools(calls: ToolCall[]): StepToolSummary {
 	let errorCount = 0;
 	for (const call of ordered) {
 		counts.set(call.name, (counts.get(call.name) ?? 0) + 1);
-		const status = call.status.toLowerCase();
-		if (status === 'error' || status === 'failed') errorCount += 1;
+		if (isFailedToolStatus(call.status)) errorCount += 1;
 	}
 	const names = [...counts.keys()];
 	const label = names
@@ -381,7 +381,7 @@ export function formatToolCallText(call: ToolCallTextInput, tz = 'UTC'): string 
 	lines.push(call.input ?? '');
 	lines.push('output:');
 	lines.push(call.output ?? '');
-	if (call.content !== null && call.content !== undefined && call.content !== '') {
+	if (call.content) {
 		lines.push('content:');
 		lines.push(call.content);
 	}
@@ -394,9 +394,5 @@ export function formatToolCallText(call: ToolCallTextInput, tz = 'UTC'): string 
  * them as inferred.
  */
 export function collectTrackerRefs(toolCalls: ToolCall[]): string[] {
-	const refs = new Set<string>();
-	for (const call of toolCalls) {
-		for (const ref of call.trackerRefs) refs.add(ref);
-	}
-	return [...refs];
+	return mergeTrackerRefs(...toolCalls.map((c) => c.trackerRefs));
 }

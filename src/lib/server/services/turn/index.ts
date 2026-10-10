@@ -21,6 +21,7 @@ import {
 	getToolParts
 } from '../../queries/messages';
 import { loadSessionGraph } from '../../queries/session-graph';
+import { UNKNOWN_LABEL } from '../../queries/dashboard-shared';
 import { MESSAGE_TYPE, type DelegationRecord } from '../../schema';
 import { buildEdge } from './edge';
 import { buildSessionNode } from './node';
@@ -30,7 +31,7 @@ import {
 	selectEdgeRecords,
 	selectTurnSessions
 } from './scope';
-import type { SessionData } from './shared';
+import { buildTurnMessageIds, buildTurnWindow, type SessionData } from './shared';
 
 export { buildEdge };
 
@@ -64,20 +65,11 @@ export function buildTurnModel(
 
 	// Turn membership is the `seq` window (decision D-2): assistant messages
 	// after the trigger, up to (excluding) the next trigger.
-	const turnMessageIds = new Set(
-		rootMessages
-			.filter(
-				(message) =>
-					message.role === MESSAGE_TYPE.assistant &&
-					message.seq > trigger.seq &&
-					(nextTrigger === null || message.seq < nextTrigger.seq)
-			)
-			.map((message) => message.id)
-	);
+	const turnMessageIdList = buildTurnMessageIds(rootMessages, trigger, nextTrigger);
+	const turnMessageIds = new Set(turnMessageIdList);
 	// The root's item reads are scoped to this turn's messages in SQL, so another
 	// turn's items never reach JS (task #386). Compaction markers stay
 	// session-scoped: the assembler intentionally mirrors every compaction.
-	const turnMessageIdList = [...turnMessageIds];
 
 	// Spawn counts / fallback agent names across every edge in the turn.
 	const spawnCounts = new Map<string, number>();
@@ -129,9 +121,7 @@ export function buildTurnModel(
 		const startOverride = isRoot ? trigger.startedAt : null;
 		// Turn window for root: [trigger.startedAt, nextTrigger.startedAt).
 		// Subagent nodes are turn-scoped by construction — no turn window needed.
-		const turnWindow = isRoot
-			? { start: trigger.startedAt, end: nextTrigger?.startedAt ?? Number.MAX_SAFE_INTEGER }
-			: undefined;
+		const turnWindow = isRoot ? buildTurnWindow(trigger, nextTrigger) : undefined;
 		const built = buildSessionNode(
 			data,
 			restrict,
@@ -168,7 +158,7 @@ export function buildTurnModel(
 		turnId: `${rootSessionId}_${triggerMessageId}`,
 		triggerMessageId,
 		rootSessionId,
-		agent: rootSession.agent ?? 'unknown',
+		agent: rootSession.agent ?? UNKNOWN_LABEL,
 		t0: trigger.startedAt,
 		t1,
 		nodes,

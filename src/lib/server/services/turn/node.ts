@@ -3,11 +3,13 @@
  * calls, markers and actions it owns.
  */
 import type { Marker, Node, NodeFlag, NodeStatus, TimeFlag } from '../../../model/types';
+import { isFailedToolStatus } from '../../../model/tool-kind';
 import { MESSAGE_TYPE } from '../../schema';
+import { UNKNOWN_LABEL } from '../../queries/dashboard-shared';
 import { buildActions } from './actions';
 import { buildSteps, linkTools } from './steps';
 import { buildToolCalls } from './tool-calls';
-import { clampEnd, itemsIn, sumUsage, type BuiltNode, type SessionData } from './shared';
+import { clampEnd, itemsIn, messagesIn, sumUsage, type BuiltNode, type SessionData } from './shared';
 
 export function buildSessionNode(
 	sd: SessionData,
@@ -19,7 +21,7 @@ export function buildSessionNode(
 	turnWindow?: { start: number; end: number }
 ): BuiltNode {
 	const session = sd.session;
-	const messages = restrict ? sd.messages.filter((m) => restrict.has(m.id)) : sd.messages;
+	const messages = messagesIn(sd.messages, restrict);
 	const toolItems = itemsIn(sd.toolItems, restrict);
 	const actionItems = itemsIn(sd.actionItems, restrict);
 
@@ -93,7 +95,7 @@ export function buildSessionNode(
 	const node: Node = {
 		sessionId: session.id,
 		parentSessionId: session.parentId,
-		agent: session.agent ?? subagentType ?? 'unknown',
+		agent: session.agent ?? subagentType ?? UNKNOWN_LABEL,
 		kind: session.depth === 0 ? 'orchestrator' : 'subagent',
 		modelId: session.modelId,
 		providerId: session.providerId,
@@ -107,7 +109,7 @@ export function buildSessionNode(
 		usage,
 		stepCount: steps.length,
 		toolCallCount: allCalls.length,
-		errorCount: allCalls.filter((call) => call.status === 'error').length,
+		errorCount: allCalls.filter((call) => isFailedToolStatus(call.status)).length,
 		compactionCount: compaction.length,
 		openStep: steps.some((step) => step.open)
 	};

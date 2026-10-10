@@ -8,6 +8,7 @@
  * values are bound parameters — no string interpolation.
  */
 import { getDb } from '../db';
+import { DELEGATION_TOOL } from '../../model/tool-kind';
 import {
 	contentColumns,
 	contentTextItems,
@@ -26,6 +27,7 @@ import {
 	type SessionSummaryRecord
 } from '../schema';
 import { usageFromCounts } from '../../model/token';
+import { UNKNOWN_LABEL } from './dashboard-shared';
 import type { DirectorySummary, SessionSummary } from '../../model/types';
 
 /** A subtree row: its depth relative to the requested root. */
@@ -182,7 +184,7 @@ export function toSessionSummary(record: SessionSummaryRecord): SessionSummary {
 	return {
 		id: record.id,
 		title: record.title,
-		agent: record.agent ?? 'unknown',
+		agent: record.agent ?? UNKNOWN_LABEL,
 		directory: record.directory,
 		createdAt: record.createdAt,
 		updatedAt: record.updatedAt,
@@ -220,7 +222,7 @@ export function getSessionSubtree(rootId: string): SessionSubtreeRecord[] {
 }
 
 /** `data.content[].name` of the delegation tool (V2's `subagent`, formerly `task`). */
-const SUBAGENT_TOOL_NAME = 'subagent';
+const SUBAGENT_TOOL_NAME = DELEGATION_TOOL;
 
 /**
  * The `subagent`-item predicate of a delegation read: a `tool` content item
@@ -262,7 +264,7 @@ function toDelegationRecord(item: ContentRecord): DelegationRecord {
 		parentSessionId: null,
 		childSessionId: item.metadataSessionId,
 		subagentType: item.agent,
-		status: item.status ?? 'unknown',
+		status: item.status ?? UNKNOWN_LABEL,
 		error: item.errorMessage ?? item.errorType,
 		startedAt: item.timeRan ?? item.timeCreated,
 		endedAt: item.timeCompleted,

@@ -6,7 +6,7 @@
  */
 import type { Action, ActionKind } from '../../../model/types';
 import { CONTENT_TYPE, MESSAGE_TYPE, type ContentRecord, type MessageRecord } from '../../schema';
-import { itemsIn, type SessionData } from './shared';
+import { itemsIn, messagesIn, type SessionData } from './shared';
 
 /** Map one `text`/`reasoning` content item to a timeline {@link Action}. */
 function mapContentItemAction(
@@ -38,13 +38,12 @@ export function buildActions(
 	const actions: Action[] = [];
 	const messageById = new Map(sd.messages.map((message) => [message.id, message]));
 	for (const item of itemsIn(sd.actionItems, restrict)) {
-		const kind = item.type as ActionKind;
-		if (kind !== CONTENT_TYPE.text && kind !== CONTENT_TYPE.reasoning) continue;
-		actions.push(mapContentItemAction(item, kind, messageById.get(item.messageId)));
+		if (item.type !== CONTENT_TYPE.text && item.type !== CONTENT_TYPE.reasoning) continue;
+		actions.push(mapContentItemAction(item, item.type as ActionKind, messageById.get(item.messageId)));
 	}
 	// A `user` message has no `content[]`; synthesise its prompt as a `text`
 	// action so it stays visible in the timeline (spec §3.7/G-7 blocker).
-	const messages = restrict ? sd.messages.filter((message) => restrict.has(message.id)) : sd.messages;
+	const messages = messagesIn(sd.messages, restrict);
 	for (const message of messages) {
 		if (message.role !== MESSAGE_TYPE.user) continue;
 		actions.push({

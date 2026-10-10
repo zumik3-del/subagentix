@@ -53,6 +53,11 @@ const BASIC_TOOL_SET: ReadonlySet<string> = new Set(BASIC_TOOL_NAMES);
 /** Tool origin: `basic` = built-in allowlist, `mcp` = everything else. */
 export type ToolKind = 'basic' | 'mcp';
 
+/** The delegation tool name (V2 `subagent`, formerly V1 `task`). */
+export const DELEGATION_TOOL = 'subagent';
+/** The Code Mode entry-point tool name. */
+export const CODE_MODE_TOOL = 'execute';
+
 /** Exact (case-sensitive) membership in {@link BASIC_TOOL_NAMES}. */
 export function isBasicTool(name: string): boolean {
 	return BASIC_TOOL_SET.has(name);

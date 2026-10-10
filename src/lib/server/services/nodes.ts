@@ -24,8 +24,8 @@ import type { SessionSubtreeRecord } from '../queries/sessions';
 import { MESSAGE_TYPE } from '../schema';
 import { buildEdge } from './turn';
 import { buildSessionNode } from './turn/node';
-import { applyScopeFlags, computeTurnOfSession, selectEdgeRecords, selectTurnSessions } from './turn/scope';
-import type { SessionData } from './turn/shared';
+import { applyScopeFlags, computeTurnOfSession, selectEdgeRecords, selectTurnSessions, topLevelAncestor } from './turn/scope';
+import { buildTurnMessageIds, buildTurnWindow, type SessionData } from './turn/shared';
 
 /**
  * The turn index that owns `nodeId`, or `null` when no turn does. Mirrors the
@@ -40,15 +40,8 @@ function turnIndexForNode(
 	turnOfSession: Map<string, number>
 ): number | null {
 	if (nodeId === rootSessionId) return 0;
-	const depthById = new Map(subtree.map((session) => [session.id, session.depth]));
-	const parentById = new Map(subtree.map((session) => [session.id, session.parentId]));
-	let current = nodeId;
-	while ((depthById.get(current) ?? 0) > 1) {
-		const parent = parentById.get(current);
-		if (!parent) return null;
-		current = parent;
-	}
-	return turnOfSession.get(current) ?? null;
+	const ancestor = topLevelAncestor(subtree, nodeId);
+	return turnOfSession.get(ancestor) ?? null;
 }
 
 /**
@@ -98,14 +91,7 @@ export function buildNodeDetail(
 	// The root's item reads are scoped to this turn's messages in SQL, so another
 	// turn's items never reach JS (task #386); subagent turns own the full session.
 	// Turn membership is the `seq` window (decision D-2).
-	const turnMessageIds = rootMessages
-		.filter(
-			(message) =>
-				message.role === MESSAGE_TYPE.assistant &&
-				message.seq > trigger.seq &&
-				(nextTrigger === null || message.seq < nextTrigger.seq)
-		)
-		.map((message) => message.id);
+	const turnMessageIds = buildTurnMessageIds(rootMessages, trigger, nextTrigger);
 	const scope = isRoot ? turnMessageIds : undefined;
 
 	const sessionData: SessionData = {
@@ -133,9 +119,7 @@ export function buildNodeDetail(
 		spawnEdges.length,
 		spawnEdges.find((edge) => edge.subagentType)?.subagentType ?? null,
 		now,
-		isRoot
-			? { start: trigger.startedAt, end: nextTrigger?.startedAt ?? Number.MAX_SAFE_INTEGER }
-			: undefined
+		isRoot ? buildTurnWindow(trigger, nextTrigger) : undefined
 	);
 
 	// The node's own edges, computed through the same scope selector as the full
