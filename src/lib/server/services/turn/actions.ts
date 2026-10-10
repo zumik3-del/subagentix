@@ -61,7 +61,7 @@ export function buildActions(sd: SessionData, restrict: Set<string> | null): Act
 			id: item.id,
 			nodeId: sd.session.id,
 			kind: 'compaction',
-			at: item.timeCreated ?? 0,
+			at: item.timeCreated ?? item.timeRan ?? item.timeCompleted ?? sd.session.createdAt ?? 0,
 			endedAt: null,
 			label: 'compaction',
 			summary: '',
