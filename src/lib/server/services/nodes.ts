@@ -132,7 +132,10 @@ export function buildNodeDetail(
 		isRoot ? trigger.startedAt : null,
 		spawnEdges.length,
 		spawnEdges.find((edge) => edge.subagentType)?.subagentType ?? null,
-		now
+		now,
+		isRoot
+			? { start: trigger.startedAt, end: nextTrigger?.startedAt ?? Number.MAX_SAFE_INTEGER }
+			: undefined
 	);
 
 	// The node's own edges, computed through the same scope selector as the full
