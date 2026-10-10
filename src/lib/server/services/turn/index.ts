@@ -124,15 +124,22 @@ export function buildTurnModel(
 	let t1 = trigger.startedAt;
 
 	for (const data of sessionDataList) {
-		const restrict = data.session.id === rootSessionId ? turnMessageIds : null;
-		const startOverride = data.session.id === rootSessionId ? trigger.startedAt : null;
+		const isRoot = data.session.id === rootSessionId;
+		const restrict = isRoot ? turnMessageIds : null;
+		const startOverride = isRoot ? trigger.startedAt : null;
+		// Turn window for root: [trigger.startedAt, nextTrigger.startedAt).
+		// Subagent nodes are turn-scoped by construction — no turn window needed.
+		const turnWindow = isRoot
+			? { start: trigger.startedAt, end: nextTrigger?.startedAt ?? Number.MAX_SAFE_INTEGER }
+			: undefined;
 		const built = buildSessionNode(
 			data,
 			restrict,
 			startOverride,
 			spawnCounts.get(data.session.id) ?? 0,
 			subagentTypeByChild.get(data.session.id) ?? null,
-			now
+			now,
+			turnWindow
 		);
 		nodes.push(built.node);
 		steps.push(...built.steps);

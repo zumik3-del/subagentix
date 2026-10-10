@@ -30,7 +30,11 @@ function mapContentItemAction(
 }
 
 /** Map a session's content items, user prompts and compaction mirrors to actions. */
-export function buildActions(sd: SessionData, restrict: Set<string> | null): Action[] {
+export function buildActions(
+	sd: SessionData,
+	restrict: Set<string> | null,
+	turnWindow?: { start: number; end: number }
+): Action[] {
 	const actions: Action[] = [];
 	const messageById = new Map(sd.messages.map((message) => [message.id, message]));
 	for (const item of itemsIn(sd.actionItems, restrict)) {
@@ -55,13 +59,17 @@ export function buildActions(sd: SessionData, restrict: Set<string> | null): Act
 		});
 	}
 	// Compaction mirrors the marker list: already time-filtered for the root,
-	// never message-restricted.
+	// never message-restricted. When `turnWindow` is given (root session), keep
+	// only compactions that landed inside this turn's span; otherwise emit all
+	// (subagent sessions are turn-scoped by construction).
 	for (const item of sd.compactions) {
+		const at = item.timeCreated ?? item.timeRan ?? item.timeCompleted ?? sd.session.createdAt ?? 0;
+		if (turnWindow && (at < turnWindow.start || at >= turnWindow.end)) continue;
 		actions.push({
 			id: item.id,
 			nodeId: sd.session.id,
 			kind: 'compaction',
-			at: item.timeCreated ?? item.timeRan ?? item.timeCompleted ?? sd.session.createdAt ?? 0,
+			at,
 			endedAt: null,
 			label: 'compaction',
 			summary: '',
