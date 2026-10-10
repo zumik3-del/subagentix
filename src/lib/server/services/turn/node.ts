@@ -15,7 +15,8 @@ export function buildSessionNode(
 	startOverride: number | null,
 	spawnCount: number,
 	subagentType: string | null,
-	now: number
+	now: number,
+	turnWindow?: { start: number; end: number }
 ): BuiltNode {
 	const session = sd.session;
 	const messages = restrict ? sd.messages.filter((m) => restrict.has(m.id)) : sd.messages;
@@ -64,7 +65,7 @@ export function buildSessionNode(
 		: sd.compactions;
 
 	const steps = buildSteps(sd, restrict, compactionTimes, now);
-	const actions = buildActions(sd, restrict);
+	const actions = buildActions(sd, restrict, turnWindow);
 	const callMessage = new Map<string, string>();
 	const allCalls = buildToolCalls(sd, restrict, now);
 	for (const item of toolItems) callMessage.set(item.id, item.messageId);
